@@ -83,17 +83,26 @@ class ApiClient {
     }
   }
 
-  async syncPush(collection: string, payload: { item?: any; items?: any[]; action?: string }): Promise<any> {
+  private async handleResponse<T = any>(res: Response): Promise<T> {
+    let data: any = {};
     try {
-      const res = await fetch(`${this.baseUrl}/sync/push`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collection, ...payload })
-      });
-      return await res.json();
+      data = await res.json();
     } catch {
-      return null;
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Request failed with HTTP ${res.status}`);
+    }
+    return data.data !== undefined ? data.data : data;
+  }
+
+  async syncPush(collection: string, payload: { item?: any; items?: any[]; action?: string }): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/sync/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection, ...payload })
+    });
+    return this.handleResponse(res);
   }
 
   // --- Auth & Customer Portal ---

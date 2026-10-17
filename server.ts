@@ -8,6 +8,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import Pusher from 'pusher';
 import { apiRouter } from './server/routes/apiRouter';
+import { dbManager } from './server/mysqlDatabase';
 
 function cleanEnv(val?: string | null): string {
   if (!val) return '';
@@ -87,7 +88,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use('/api', apiRouter);
 
   // API Health & Status Check
@@ -107,11 +109,15 @@ async function startServer() {
     });
   });
 
-  // DB Status Check
+  // DB Status Check (Live MySQL Pool)
   app.get(['/api/db', '/api/db.php'], (_req, res) => {
+    const status = dbManager.getStatus();
     res.json({
-      status: 'STANDBY',
-      message: 'The ERP is operating in high-performance local persistence mode with full export/import/restore capabilities.'
+      status: status.connected ? 'ONLINE' : 'OFFLINE',
+      ...status,
+      message: status.connected
+        ? `Connected to MySQL database "${status.database}" on ${status.host}:${status.port}`
+        : `MySQL database is not reachable on ${status.host}:${status.port}.`
     });
   });
 

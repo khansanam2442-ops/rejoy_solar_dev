@@ -3090,7 +3090,9 @@ class StorageService {
             }
           });
           this.isHydrated = true;
-          window.dispatchEvent(new Event('solarpulse_storage_updated'));
+          setTimeout(() => {
+            window.dispatchEvent(new Event('solarpulse_storage_updated'));
+          }, 0);
         }
       }
     } catch (e) {
@@ -3113,11 +3115,24 @@ class StorageService {
       fetch('/api/sync/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collection, item: singleItem, items: data })
-      }).catch(e => {
-        console.warn(`[Storage] Failed to sync ${collection} to backend API:`, e);
-      });
-      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+        body: JSON.stringify({ collection, item: singleItem, items: singleItem ? undefined : data })
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, err.error || res.statusText);
+            this.hydrateFromBackend();
+            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error } }));
+          }
+        })
+        .catch((e) => {
+          console.error(`[MySQL Network Error] Failed to sync ${collection}:`, e);
+          this.hydrateFromBackend();
+          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: e.message } }));
+        });
+      setTimeout(() => {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }, 0);
     }
   }
 
@@ -3127,9 +3142,19 @@ class StorageService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ collection, item: { id }, action: 'delete' })
-      }).catch(e => {
-        console.warn(`[Storage] Failed to sync delete for ${collection}:`, e);
-      });
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            console.error(`[MySQL Storage Error] Failed to sync delete for ${collection}:`, err.error || res.statusText);
+            this.hydrateFromBackend();
+            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error } }));
+          }
+        })
+        .catch((e) => {
+          console.error(`[MySQL Network Error] Failed to sync delete for ${collection}:`, e);
+          this.hydrateFromBackend();
+        });
     }
   }
 
@@ -3506,7 +3531,7 @@ class StorageService {
     });
 
     if (mutated) {
-      this.set(STORAGE_KEYS.PROJECTS, sanitized);
+      this.memStore.set(STORAGE_KEYS.PROJECTS, sanitized);
     }
 
     return sanitized;

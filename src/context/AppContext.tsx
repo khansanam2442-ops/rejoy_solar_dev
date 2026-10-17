@@ -413,9 +413,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSettings(storageService.getSettings());
 
     const handleStorageUpdate = () => {
-      setNotifications(storageService.getNotifications());
-      setSettings(storageService.getSettings());
-      setRefreshTrigger(prev => prev + 1);
+      setTimeout(() => {
+        setNotifications(storageService.getNotifications());
+        setSettings(storageService.getSettings());
+        setRefreshTrigger(prev => prev + 1);
+      }, 0);
     };
 
     window.addEventListener('solarpulse_storage_updated', handleStorageUpdate);

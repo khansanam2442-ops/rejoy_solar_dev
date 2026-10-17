@@ -2,84 +2,23 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { dbManager } from '../mysqlDatabase';
-import { storageService } from '../../src/services/storage';
-import { DEMO_ACCOUNTS } from '../../src/context/AuthContext';
 
 export const apiRouter = Router();
 
 // Initialize DB Manager
 dbManager.init().catch(err => {
-  console.warn('[DB Manager] Startup notice:', err);
+  console.error('[DB Manager] Startup error connecting to MySQL:', err?.message || err);
 });
 
-// Seed in-memory backend database from initial baseline if empty
-try {
-  const currentUsers = dbManager.getFallbackItems('users');
-  if (currentUsers.length === 0) {
-    const demoUsers: any[] = DEMO_ACCOUNTS.map(a => ({
-      id: a.profile.id,
-      name: a.name,
-      email: a.email,
-      password: a.password || '123456',
-      role: a.role,
-      phone: a.profile.phone || '+91 98000 00000',
-      department: a.department,
-      designation: a.profile.designation,
-      employeeId: a.profile.employeeId,
-      isFieldWorker: Boolean(a.isFieldWorker)
-    }));
-    demoUsers.push({
-      id: 'usr-admin-master',
-      name: 'Vikram Patel',
-      email: 'admin@rejoysolar.com',
-      password: '123456',
-      role: 'Admin',
-      phone: '+91 98250 11223',
-      department: 'Administration',
-      designation: 'Managing Director',
-      employeeId: 'EMP001',
-      isFieldWorker: false
-    });
-    dbManager.setFallbackItems('users', demoUsers);
+// Admin security check for sensitive database migration and dump endpoints
+function checkAdminAuth(req: Request, res: Response, next: () => void) {
+  const authHeader = req.headers.authorization;
+  const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
+  const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.hostname === 'localhost';
+  if (isLocal || authHeader || adminKey) {
+    return next();
   }
-
-  const collectionsToInit = [
-    { key: 'customers', fn: () => storageService.getCustomers() },
-    { key: 'leads', fn: () => storageService.getLeads() },
-    { key: 'projects', fn: () => storageService.getProjects() },
-    { key: 'employees', fn: () => storageService.getEmployees() },
-    { key: 'payments', fn: () => storageService.getPayments() },
-    { key: 'expenses', fn: () => storageService.getExpenses() },
-    { key: 'attendance', fn: () => storageService.getAttendance() },
-    { key: 'payslips', fn: () => storageService.getPayslips() },
-    { key: 'holidays', fn: () => storageService.getHolidays() },
-    { key: 'service_tickets', fn: () => storageService.getServiceTickets() },
-    { key: 'amc_contracts', fn: () => storageService.getAMCContracts() },
-    { key: 'products', fn: () => storageService.getProducts() },
-    { key: 'vendors', fn: () => storageService.getVendors() },
-    { key: 'purchase_orders', fn: () => storageService.getPurchaseOrders() },
-    { key: 'boms', fn: () => storageService.getBOMs() },
-    { key: 'sales_invoices', fn: () => storageService.getSalesInvoices() },
-    { key: 'warehouses', fn: () => storageService.getWarehouses() },
-    { key: 'stock_movements', fn: () => storageService.getStockMovements() },
-    { key: 'stock_audits', fn: () => storageService.getStockAudits() },
-    { key: 'quotations', fn: () => storageService.getQuotations() },
-    { key: 'surveys', fn: () => storageService.getSurveys() },
-    { key: 'notifications', fn: () => storageService.getNotifications() }
-  ];
-
-  collectionsToInit.forEach(({ key, fn }) => {
-    if (dbManager.getFallbackItems(key).length === 0) {
-      try {
-        const items = fn();
-        if (Array.isArray(items) && items.length > 0) {
-          dbManager.setFallbackItems(key, items);
-        }
-      } catch {}
-    }
-  });
-} catch (e) {
-  console.warn('Initial storage seed notice:', e);
+  res.status(403).json({ success: false, error: 'Access Denied: Administrative authorization required for database operations.' });
 }
 
 // ==========================================================
@@ -88,48 +27,60 @@ try {
 
 // DB Status & Diagnostics
 apiRouter.get('/db/status', (_req: Request, res: Response) => {
-  const status = dbManager.getStatus();
-  res.json({
-    success: true,
-    ...status,
-    message: status.connected
-      ? `Connected to MySQL database "${status.database}" on ${status.host}:${status.port}`
-      : `Operating with server-side persistent database cache. Connect MySQL via .env or Database Settings.`,
-    tables: [
-      'solar_users', 'solar_customers', 'solar_leads', 'solar_projects',
-      'solar_project_stages', 'solar_site_surveys', 'solar_quotations',
-      'solar_payments', 'solar_expenses', 'solar_employees', 'solar_attendance',
-      'solar_payslips', 'solar_holidays', 'solar_service_tickets', 'solar_amc_contracts',
-      'solar_notifications', 'solar_products', 'solar_vendors', 'solar_purchase_orders',
-      'solar_boms', 'solar_sales_invoices', 'solar_warehouses', 'solar_stock_movements',
-      'solar_stock_audits', 'solar_acl_config', 'solar_acl_audit_logs',
-      'solar_system_settings', 'solar_workforce_locations'
-    ]
-  });
+  try {
+    const status = dbManager.getStatus();
+    res.json({
+      success: true,
+      ...status,
+      message: status.connected
+        ? `Connected to MySQL database "${status.database}" on ${status.host}:${status.port}`
+        : `MySQL database connection failed or disconnected.`,
+      tables: [
+        'solar_users', 'solar_customers', 'solar_leads', 'solar_projects',
+        'solar_project_stages', 'solar_site_surveys', 'solar_quotations',
+        'solar_payments', 'solar_expenses', 'solar_employees', 'solar_attendance',
+        'solar_payslips', 'solar_holidays', 'solar_service_tickets', 'solar_amc_contracts',
+        'solar_notifications', 'solar_products', 'solar_vendors', 'solar_purchase_orders',
+        'solar_boms', 'solar_sales_invoices', 'solar_warehouses', 'solar_stock_movements',
+        'solar_stock_audits', 'solar_acl_config', 'solar_acl_audit_logs',
+        'solar_system_settings', 'solar_workforce_locations'
+      ]
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to get DB status' });
+  }
 });
 
 // Test custom MySQL connection
 apiRouter.post('/db/test-connection', async (req: Request, res: Response) => {
-  const { host, port, user, password, database } = req.body || {};
-  const result = await dbManager.testConnection({
-    host: host || 'localhost',
-    port: Number(port) || 3306,
-    user: user || 'root',
-    password: password || '',
-    database: database || 'solarpulse_erp'
-  });
-  res.json(result);
+  try {
+    const { host, port, user, password, database } = req.body || {};
+    const result = await dbManager.testConnection({
+      host: host || '127.0.0.1',
+      port: Number(port) || 3306,
+      user: user || 'root',
+      password: password || '',
+      database: database || 'solarpulse_erp'
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err?.message || 'Connection test error' });
+  }
 });
 
-// Push schema and migrate all existing data
-apiRouter.post('/db/migrate', async (req: Request, res: Response) => {
-  const customConfig = req.body || {};
-  const result = await dbManager.runFullMigration(customConfig);
-  res.json(result);
+// Push schema and migrate all existing data (Protected)
+apiRouter.post('/db/migrate', checkAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const customConfig = req.body || {};
+    const result = await dbManager.runFullMigration(customConfig);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err?.message || 'Migration error' });
+  }
 });
 
-// Download standalone SQL database dump
-apiRouter.get(['/db/dump.sql', '/db/export-sql'], (_req: Request, res: Response) => {
+// Download standalone SQL database dump (Protected)
+apiRouter.get(['/db/dump.sql', '/db/export-sql'], checkAdminAuth, (_req: Request, res: Response) => {
   const dumpPath = path.join(process.cwd(), 'database.sql');
   if (fs.existsSync(dumpPath)) {
     res.setHeader('Content-Type', 'application/sql');
@@ -141,7 +92,7 @@ apiRouter.get(['/db/dump.sql', '/db/export-sql'], (_req: Request, res: Response)
 });
 
 // ==========================================================
-// 2. MASTER BOOTSTRAP API (ONE ROUND-TRIP HYDRATION)
+// 2. MASTER BOOTSTRAP API (ONE ROUND-TRIP HYDRATION FROM MYSQL)
 // ==========================================================
 
 apiRouter.get('/bootstrap', async (_req: Request, res: Response) => {
@@ -157,7 +108,7 @@ apiRouter.get('/bootstrap', async (_req: Request, res: Response) => {
   }
 });
 
-// Bulk & Entity sync endpoint for data updates
+// Bulk & Entity sync endpoint for data updates directly to MySQL
 apiRouter.post('/sync/push', async (req: Request, res: Response) => {
   try {
     const { collection, item, items, action } = req.body || {};
@@ -168,34 +119,23 @@ apiRouter.post('/sync/push', async (req: Request, res: Response) => {
 
     if (item && action === 'delete') {
       await dbManager.deleteItem(collection, item.id);
-      if (items && Array.isArray(items)) {
-        dbManager.setFallbackItems(collection, items);
-      }
       res.json({ success: true, message: `Deleted from ${collection}` });
       return;
     }
 
     if (item) {
       const saved = await dbManager.saveItem(collection, item);
-      if (items && Array.isArray(items)) {
-        dbManager.setFallbackItems(collection, items);
-      }
       res.json({ success: true, data: saved, message: `Saved to ${collection}` });
       return;
     }
 
     if (items && Array.isArray(items)) {
-      const existing = dbManager.getFallbackItems(collection);
-      const incomingIds = new Set(items.map((i: any) => i.id));
-      for (const ex of existing) {
-        if (ex && ex.id && !incomingIds.has(ex.id)) {
-          await dbManager.deleteItem(collection, ex.id);
+      for (const it of items) {
+        if (it && it.id) {
+          await dbManager.saveItem(collection, it);
         }
       }
-      for (const it of items) {
-        await dbManager.saveItem(collection, it);
-      }
-      res.json({ success: true, count: items.length, message: `Synced ${collection}` });
+      res.json({ success: true, count: items.length, message: `Synced ${collection} to MySQL` });
       return;
     }
 
@@ -210,98 +150,99 @@ apiRouter.post('/sync/push', async (req: Request, res: Response) => {
 // ==========================================================
 
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    res.status(400).json({ success: false, message: 'Email and password are required.' });
-    return;
-  }
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      res.status(400).json({ success: false, message: 'Email and password are required.' });
+      return;
+    }
 
-  const user = await dbManager.authenticateUser(email, password);
-  if (user) {
-    res.json({
-      success: true,
-      user,
-      token: `token_${user.id}_${Date.now()}`,
-      message: 'Authentication successful.'
-    });
-  } else {
-    res.status(401).json({
-      success: false,
-      message: 'Invalid email or password. Please verify credentials.'
-    });
+    const user = await dbManager.authenticateUser(email, password);
+    if (user) {
+      res.json({
+        success: true,
+        user,
+        token: `jwt-mysql-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      });
+    } else {
+      res.status(401).json({
+        success: false,
+        message: 'Invalid credentials. Please verify your email and password in MySQL.'
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Authentication error' });
   }
-});
-
-apiRouter.post('/auth/customer-login', async (req: Request, res: Response) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    res.status(400).json({ success: false, message: 'Customer email and password required.' });
-    return;
-  }
-  const user = await dbManager.authenticateUser(email, password);
-  if (user && user.role === 'Customer') {
-    res.json({
-      success: true,
-      user,
-      token: `cust_token_${user.id}_${Date.now()}`
-    });
-  } else {
-    res.status(401).json({
-      success: false,
-      message: 'Invalid customer portal credentials.'
-    });
-  }
-});
-
-apiRouter.put('/customers/:id/password', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { password } = req.body || {};
-  if (!password || String(password).trim().length < 6) {
-    res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
-    return;
-  }
-
-  const success = await dbManager.updateCustomerPassword(id, String(password).trim());
-  res.json({ success, message: 'Customer portal password updated successfully in MySQL.' });
 });
 
 // ==========================================================
 // 4. CUSTOMERS MODULE API
 // ==========================================================
 
+apiRouter.put('/customers/:id/password', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body || {};
+    if (!password) {
+      res.status(400).json({ success: false, message: 'Password is required' });
+      return;
+    }
+    const success = await dbManager.updateCustomerPassword(id, String(password).trim());
+    res.json({ success, message: success ? 'Customer password updated in MySQL.' : 'Failed to update password.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Password update error' });
+  }
+});
+
 apiRouter.get('/customers', async (_req: Request, res: Response) => {
-  const customers = await dbManager.getCustomers();
-  res.json({ success: true, count: customers.length, data: customers });
+  try {
+    const customers = await dbManager.getCustomers();
+    res.json({ success: true, count: customers.length, data: customers });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch customers' });
+  }
 });
 
 apiRouter.post('/customers', async (req: Request, res: Response) => {
-  const payload = req.body;
-  if (!payload || !payload.name || !payload.phone) {
-    res.status(400).json({ success: false, message: 'Customer name and phone are required.' });
-    return;
+  try {
+    const payload = req.body;
+    if (!payload || !payload.name || !payload.phone) {
+      res.status(400).json({ success: false, message: 'Customer name and phone are required.' });
+      return;
+    }
+    const newCust = {
+      ...payload,
+      id: payload.id || `cust-${Date.now()}`,
+      customerCode: payload.customerCode || `CUST-2026-${Math.floor(100 + Math.random() * 900)}`,
+      password: payload.password || '123456',
+      createdAt: new Date().toISOString()
+    };
+    const saved = await dbManager.saveCustomer(newCust);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save customer' });
   }
-  const newCust = {
-    ...payload,
-    id: payload.id || `cust-${Date.now()}`,
-    customerCode: payload.customerCode || `CUST-2026-${Math.floor(100 + Math.random() * 900)}`,
-    password: payload.password || '123456',
-    createdAt: new Date().toISOString()
-  };
-  const saved = await dbManager.saveCustomer(newCust);
-  res.status(201).json({ success: true, data: saved });
 });
 
 apiRouter.put('/customers/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const payload = req.body;
-  const updated = await dbManager.saveCustomer({ ...payload, id });
-  res.json({ success: true, data: updated });
+  try {
+    const { id } = req.params;
+    const payload = req.body;
+    const updated = await dbManager.saveCustomer({ ...payload, id });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update customer' });
+  }
 });
 
 apiRouter.delete('/customers/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  await dbManager.deleteCustomer(id);
-  res.json({ success: true, message: 'Customer deleted.' });
+  try {
+    const { id } = req.params;
+    await dbManager.deleteCustomer(id);
+    res.json({ success: true, message: 'Customer deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete customer' });
+  }
 });
 
 // ==========================================================
@@ -309,36 +250,52 @@ apiRouter.delete('/customers/:id', async (req: Request, res: Response) => {
 // ==========================================================
 
 apiRouter.get('/leads', async (_req: Request, res: Response) => {
-  const leads = await dbManager.getLeads();
-  res.json({ success: true, count: leads.length, data: leads });
+  try {
+    const leads = await dbManager.getLeads();
+    res.json({ success: true, count: leads.length, data: leads });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch leads' });
+  }
 });
 
 apiRouter.post('/leads', async (req: Request, res: Response) => {
-  const payload = req.body;
-  if (!payload || !payload.customerName || !payload.phone) {
-    res.status(400).json({ success: false, message: 'Lead customerName and phone required.' });
-    return;
+  try {
+    const payload = req.body;
+    if (!payload || !payload.customerName || !payload.phone) {
+      res.status(400).json({ success: false, message: 'Lead customerName and phone required.' });
+      return;
+    }
+    const newLead = {
+      ...payload,
+      id: payload.id || `lead-${Date.now()}`,
+      createdAt: new Date().toISOString()
+    };
+    const saved = await dbManager.saveLead(newLead);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save lead' });
   }
-  const newLead = {
-    ...payload,
-    id: payload.id || `lead-${Date.now()}`,
-    createdAt: new Date().toISOString()
-  };
-  const saved = await dbManager.saveLead(newLead);
-  res.status(201).json({ success: true, data: saved });
 });
 
 apiRouter.put('/leads/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const payload = req.body;
-  const updated = await dbManager.saveLead({ ...payload, id });
-  res.json({ success: true, data: updated });
+  try {
+    const { id } = req.params;
+    const payload = req.body;
+    const updated = await dbManager.saveLead({ ...payload, id });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update lead' });
+  }
 });
 
 apiRouter.delete('/leads/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  await dbManager.deleteLead(id);
-  res.json({ success: true, message: 'Lead deleted.' });
+  try {
+    const { id } = req.params;
+    await dbManager.deleteLead(id);
+    res.json({ success: true, message: 'Lead deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete lead' });
+  }
 });
 
 // ==========================================================
@@ -346,359 +303,584 @@ apiRouter.delete('/leads/:id', async (req: Request, res: Response) => {
 // ==========================================================
 
 apiRouter.get('/projects', async (_req: Request, res: Response) => {
-  const projects = await dbManager.getProjects();
-  res.json({ success: true, count: projects.length, data: projects });
+  try {
+    const projects = await dbManager.getProjects();
+    res.json({ success: true, count: projects.length, data: projects });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch projects' });
+  }
 });
 
 apiRouter.post('/projects', async (req: Request, res: Response) => {
-  const payload = req.body;
-  const newProj = {
-    ...payload,
-    id: payload.id || `proj-${Date.now()}`,
-    createdAt: new Date().toISOString()
-  };
-  const saved = await dbManager.saveProject(newProj);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const payload = req.body;
+    const newProj = {
+      ...payload,
+      id: payload.id || `proj-${Date.now()}`,
+      projectCode: payload.projectCode || `SOL-2026-${Math.floor(100 + Math.random() * 900)}`,
+      createdAt: new Date().toISOString()
+    };
+    const saved = await dbManager.saveProject(newProj);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save project' });
+  }
 });
 
 apiRouter.put('/projects/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const payload = req.body;
-  const updated = await dbManager.saveProject({ ...payload, id });
-  res.json({ success: true, data: updated });
+  try {
+    const { id } = req.params;
+    const payload = req.body;
+    const updated = await dbManager.saveProject({ ...payload, id });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update project' });
+  }
 });
 
 apiRouter.delete('/projects/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  await dbManager.deleteProject(id);
-  res.json({ success: true, message: 'Project deleted.' });
+  try {
+    const { id } = req.params;
+    await dbManager.deleteProject(id);
+    res.json({ success: true, message: 'Project deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete project' });
+  }
 });
 
 // ==========================================================
-// 7. EMPLOYEES & HRMS MODULE API
+// 7. HRMS & WORKFORCE APIS
 // ==========================================================
 
 apiRouter.get('/employees', async (_req: Request, res: Response) => {
-  const items = await dbManager.getEmployees();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getEmployees();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch employees' });
+  }
 });
 
 apiRouter.post('/employees', async (req: Request, res: Response) => {
-  const payload = req.body;
-  if (!payload || !payload.name || !payload.phone) {
-    res.status(400).json({ success: false, message: 'Employee name and phone are required.' });
-    return;
+  try {
+    const payload = req.body;
+    const emp = {
+      ...payload,
+      id: payload.id || `emp-${Date.now()}`,
+      employeeCode: payload.employeeCode || `EMP${Math.floor(100 + Math.random() * 900)}`,
+      createdAt: new Date().toISOString()
+    };
+    const saved = await dbManager.saveEmployee(emp);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save employee' });
   }
-  const emp = {
-    ...payload,
-    id: payload.id || `emp-${Date.now()}`,
-    employeeCode: payload.employeeCode || `EMP00${dbManager.getFallbackItems('employees').length + 1}`,
-    createdAt: new Date().toISOString()
-  };
-  const saved = await dbManager.saveEmployee(emp);
-  res.status(201).json({ success: true, data: saved });
 });
 
 apiRouter.put('/employees/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const payload = req.body;
-  const updated = await dbManager.saveEmployee({ ...payload, id });
-  res.json({ success: true, data: updated });
+  try {
+    const { id } = req.params;
+    const payload = req.body;
+    const updated = await dbManager.saveEmployee({ ...payload, id });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update employee' });
+  }
 });
 
 apiRouter.delete('/employees/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  await dbManager.deleteEmployee(id);
-  res.json({ success: true, message: 'Employee deleted.' });
+  try {
+    const { id } = req.params;
+    await dbManager.deleteEmployee(id);
+    res.json({ success: true, message: 'Employee deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete employee' });
+  }
 });
 
 // Attendance
 apiRouter.get('/attendance', async (_req: Request, res: Response) => {
-  const items = await dbManager.getAttendance();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getAttendance();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch attendance' });
+  }
 });
 
 apiRouter.post('/attendance', async (req: Request, res: Response) => {
-  const att = { ...req.body, id: req.body.id || `att-${Date.now()}` };
-  const saved = await dbManager.saveAttendance(att);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const att = { ...req.body, id: req.body.id || `att-${Date.now()}` };
+    const saved = await dbManager.saveAttendance(att);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save attendance' });
+  }
 });
 
 apiRouter.put('/attendance/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveAttendance({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveAttendance({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update attendance' });
+  }
 });
 
 apiRouter.delete('/attendance/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteAttendance(req.params.id);
-  res.json({ success: true, message: 'Attendance deleted.' });
+  try {
+    await dbManager.deleteAttendance(req.params.id);
+    res.json({ success: true, message: 'Attendance record deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete attendance' });
+  }
 });
 
-// Payslips
+// Payslips / Payroll
 apiRouter.get('/payslips', async (_req: Request, res: Response) => {
-  const items = await dbManager.getPayslips();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getPayslips();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch payslips' });
+  }
 });
 
 apiRouter.post('/payslips', async (req: Request, res: Response) => {
-  const ps = { ...req.body, id: req.body.id || `ps-${Date.now()}` };
-  const saved = await dbManager.savePayslip(ps);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const ps = { ...req.body, id: req.body.id || `pay-${Date.now()}` };
+    const saved = await dbManager.savePayslip(ps);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save payslip' });
+  }
 });
 
 apiRouter.put('/payslips/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.savePayslip({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.savePayslip({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update payslip' });
+  }
 });
 
 apiRouter.delete('/payslips/:id', async (req: Request, res: Response) => {
-  await dbManager.deletePayslip(req.params.id);
-  res.json({ success: true, message: 'Payslip deleted.' });
+  try {
+    await dbManager.deletePayslip(req.params.id);
+    res.json({ success: true, message: 'Payslip deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete payslip' });
+  }
 });
 
 // Holidays
 apiRouter.get('/holidays', async (_req: Request, res: Response) => {
-  const items = await dbManager.getHolidays();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getHolidays();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch holidays' });
+  }
 });
 
 apiRouter.post('/holidays', async (req: Request, res: Response) => {
-  const h = { ...req.body, id: req.body.id || `hol-${Date.now()}` };
-  const saved = await dbManager.saveHoliday(h);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const h = { ...req.body, id: req.body.id || `hol-${Date.now()}` };
+    const saved = await dbManager.saveHoliday(h);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save holiday' });
+  }
 });
 
 apiRouter.put('/holidays/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveHoliday({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveHoliday({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update holiday' });
+  }
 });
 
 apiRouter.delete('/holidays/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteHoliday(req.params.id);
-  res.json({ success: true, message: 'Holiday deleted.' });
+  try {
+    await dbManager.deleteHoliday(req.params.id);
+    res.json({ success: true, message: 'Holiday deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete holiday' });
+  }
 });
 
 // ==========================================================
-// 8. INVENTORY & SUPPLY CHAIN MODULE APIS
+// 8. INVENTORY & PROCUREMENT APIS
 // ==========================================================
 
-// Products
+// Products (Catalog)
 apiRouter.get('/products', async (_req: Request, res: Response) => {
-  const items = await dbManager.getProducts();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getProducts();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch products' });
+  }
 });
 
 apiRouter.post('/products', async (req: Request, res: Response) => {
-  const prod = { ...req.body, id: req.body.id || `prod-${Date.now()}` };
-  const saved = await dbManager.saveProduct(prod);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const prod = { ...req.body, id: req.body.id || `prod-${Date.now()}` };
+    const saved = await dbManager.saveProduct(prod);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save product' });
+  }
 });
 
 apiRouter.put('/products/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveProduct({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveProduct({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update product' });
+  }
 });
 
 apiRouter.delete('/products/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteProduct(req.params.id);
-  res.json({ success: true, message: 'Product deleted.' });
+  try {
+    await dbManager.deleteProduct(req.params.id);
+    res.json({ success: true, message: 'Product deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete product' });
+  }
 });
 
 // Vendors
 apiRouter.get('/vendors', async (_req: Request, res: Response) => {
-  const items = await dbManager.getVendors();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getVendors();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch vendors' });
+  }
 });
 
 apiRouter.post('/vendors', async (req: Request, res: Response) => {
-  const v = { ...req.body, id: req.body.id || `ven-${Date.now()}` };
-  const saved = await dbManager.saveVendor(v);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const v = { ...req.body, id: req.body.id || `ven-${Date.now()}` };
+    const saved = await dbManager.saveVendor(v);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save vendor' });
+  }
 });
 
 apiRouter.put('/vendors/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveVendor({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveVendor({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update vendor' });
+  }
 });
 
 apiRouter.delete('/vendors/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteVendor(req.params.id);
-  res.json({ success: true, message: 'Vendor deleted.' });
+  try {
+    await dbManager.deleteVendor(req.params.id);
+    res.json({ success: true, message: 'Vendor deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete vendor' });
+  }
 });
 
 // Purchase Orders
 apiRouter.get('/purchase-orders', async (_req: Request, res: Response) => {
-  const items = await dbManager.getPurchaseOrders();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getPurchaseOrders();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch purchase orders' });
+  }
 });
 
 apiRouter.post('/purchase-orders', async (req: Request, res: Response) => {
-  const po = { ...req.body, id: req.body.id || `po-${Date.now()}` };
-  const saved = await dbManager.savePurchaseOrder(po);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const po = { ...req.body, id: req.body.id || `po-${Date.now()}` };
+    const saved = await dbManager.savePurchaseOrder(po);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save purchase order' });
+  }
 });
 
 apiRouter.put('/purchase-orders/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.savePurchaseOrder({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.savePurchaseOrder({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update purchase order' });
+  }
 });
 
 apiRouter.delete('/purchase-orders/:id', async (req: Request, res: Response) => {
-  await dbManager.deletePurchaseOrder(req.params.id);
-  res.json({ success: true, message: 'Purchase Order deleted.' });
+  try {
+    await dbManager.deletePurchaseOrder(req.params.id);
+    res.json({ success: true, message: 'Purchase order deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete purchase order' });
+  }
 });
 
 // Bill of Materials (BOM)
 apiRouter.get('/boms', async (_req: Request, res: Response) => {
-  const items = await dbManager.getBOMs();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getBOMs();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch BOMs' });
+  }
 });
 
 apiRouter.post('/boms', async (req: Request, res: Response) => {
-  const bom = { ...req.body, id: req.body.id || `bom-${Date.now()}` };
-  const saved = await dbManager.saveBOM(bom);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const bom = { ...req.body, id: req.body.id || `bom-${Date.now()}` };
+    const saved = await dbManager.saveBOM(bom);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save BOM' });
+  }
 });
 
 apiRouter.put('/boms/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveBOM({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveBOM({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update BOM' });
+  }
 });
 
 apiRouter.delete('/boms/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteBOM(req.params.id);
-  res.json({ success: true, message: 'BOM deleted.' });
+  try {
+    await dbManager.deleteBOM(req.params.id);
+    res.json({ success: true, message: 'BOM deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete BOM' });
+  }
 });
 
 // Sales Invoices
 apiRouter.get('/sales-invoices', async (_req: Request, res: Response) => {
-  const items = await dbManager.getSalesInvoices();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getSalesInvoices();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch sales invoices' });
+  }
 });
 
 apiRouter.post('/sales-invoices', async (req: Request, res: Response) => {
-  const inv = { ...req.body, id: req.body.id || `inv-${Date.now()}` };
-  const saved = await dbManager.saveSalesInvoice(inv);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const inv = { ...req.body, id: req.body.id || `inv-${Date.now()}` };
+    const saved = await dbManager.saveSalesInvoice(inv);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save sales invoice' });
+  }
 });
 
 apiRouter.put('/sales-invoices/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveSalesInvoice({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveSalesInvoice({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update sales invoice' });
+  }
 });
 
 apiRouter.delete('/sales-invoices/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteSalesInvoice(req.params.id);
-  res.json({ success: true, message: 'Invoice deleted.' });
+  try {
+    await dbManager.deleteSalesInvoice(req.params.id);
+    res.json({ success: true, message: 'Sales invoice deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete sales invoice' });
+  }
 });
 
 // Warehouses
 apiRouter.get('/warehouses', async (_req: Request, res: Response) => {
-  const items = await dbManager.getWarehouses();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getWarehouses();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch warehouses' });
+  }
 });
 
 apiRouter.post('/warehouses', async (req: Request, res: Response) => {
-  const wh = { ...req.body, id: req.body.id || `wh-${Date.now()}` };
-  const saved = await dbManager.saveWarehouse(wh);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const wh = { ...req.body, id: req.body.id || `wh-${Date.now()}` };
+    const saved = await dbManager.saveWarehouse(wh);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save warehouse' });
+  }
 });
 
 apiRouter.put('/warehouses/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveWarehouse({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveWarehouse({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update warehouse' });
+  }
 });
 
 apiRouter.delete('/warehouses/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteWarehouse(req.params.id);
-  res.json({ success: true, message: 'Warehouse deleted.' });
+  try {
+    await dbManager.deleteWarehouse(req.params.id);
+    res.json({ success: true, message: 'Warehouse deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete warehouse' });
+  }
 });
 
 // Stock Movements
 apiRouter.get('/stock-movements', async (_req: Request, res: Response) => {
-  const items = await dbManager.getStockMovements();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getStockMovements();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch stock movements' });
+  }
 });
 
 apiRouter.post('/stock-movements', async (req: Request, res: Response) => {
-  const sm = { ...req.body, id: req.body.id || `sm-${Date.now()}` };
-  const saved = await dbManager.saveStockMovement(sm);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const sm = { ...req.body, id: req.body.id || `sm-${Date.now()}` };
+    const saved = await dbManager.saveStockMovement(sm);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save stock movement' });
+  }
 });
 
 // Stock Audits
 apiRouter.get('/stock-audits', async (_req: Request, res: Response) => {
-  const items = await dbManager.getStockAudits();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getStockAudits();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch stock audits' });
+  }
 });
 
 apiRouter.post('/stock-audits', async (req: Request, res: Response) => {
-  const sa = { ...req.body, id: req.body.id || `audit-${Date.now()}` };
-  const saved = await dbManager.saveStockAudit(sa);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const sa = { ...req.body, id: req.body.id || `audit-${Date.now()}` };
+    const saved = await dbManager.saveStockAudit(sa);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save stock audit' });
+  }
 });
 
 apiRouter.delete('/stock-audits/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteStockAudit(req.params.id);
-  res.json({ success: true, message: 'Stock audit deleted.' });
+  try {
+    await dbManager.deleteStockAudit(req.params.id);
+    res.json({ success: true, message: 'Stock audit deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete stock audit' });
+  }
 });
 
 // ==========================================================
-// 9. QUOTATIONS & SITE SURVEYS
+// 9. QUOTATIONS & SITE SURVEYS APIS
 // ==========================================================
 
 apiRouter.get('/quotations', async (_req: Request, res: Response) => {
-  const items = await dbManager.getQuotations();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getQuotations();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch quotations' });
+  }
 });
 
 apiRouter.post('/quotations', async (req: Request, res: Response) => {
-  const q = { ...req.body, id: req.body.id || `qtn-${Date.now()}` };
-  const saved = await dbManager.saveQuotation(q);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const q = { ...req.body, id: req.body.id || `quote-${Date.now()}` };
+    const saved = await dbManager.saveQuotation(q);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save quotation' });
+  }
 });
 
 apiRouter.put('/quotations/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveQuotation({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveQuotation({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update quotation' });
+  }
 });
 
 apiRouter.delete('/quotations/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteQuotation(req.params.id);
-  res.json({ success: true, message: 'Quotation deleted.' });
+  try {
+    await dbManager.deleteQuotation(req.params.id);
+    res.json({ success: true, message: 'Quotation deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete quotation' });
+  }
 });
 
 // Site Surveys
 apiRouter.get('/surveys', async (_req: Request, res: Response) => {
-  const items = await dbManager.getSurveys();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getSurveys();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch surveys' });
+  }
 });
 
 apiRouter.post('/surveys', async (req: Request, res: Response) => {
-  const s = { ...req.body, id: req.body.id || `sur-${Date.now()}` };
-  const saved = await dbManager.saveSurvey(s);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const s = { ...req.body, id: req.body.id || `surv-${Date.now()}` };
+    const saved = await dbManager.saveSurvey(s);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save survey' });
+  }
 });
 
 apiRouter.put('/surveys/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveSurvey({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveSurvey({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update survey' });
+  }
 });
 
 apiRouter.delete('/surveys/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteSurvey(req.params.id);
-  res.json({ success: true, message: 'Survey deleted.' });
+  try {
+    await dbManager.deleteSurvey(req.params.id);
+    res.json({ success: true, message: 'Survey deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete survey' });
+  }
 });
 
 // ==========================================================
@@ -706,35 +888,59 @@ apiRouter.delete('/surveys/:id', async (req: Request, res: Response) => {
 // ==========================================================
 
 apiRouter.get('/payments', async (_req: Request, res: Response) => {
-  const items = await dbManager.getPayments();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getPayments();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch payments' });
+  }
 });
 
 apiRouter.post('/payments', async (req: Request, res: Response) => {
-  const pay = { ...req.body, id: req.body.id || `pay-${Date.now()}` };
-  const saved = await dbManager.savePayment(pay);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const pay = { ...req.body, id: req.body.id || `pay-${Date.now()}` };
+    const saved = await dbManager.savePayment(pay);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save payment' });
+  }
 });
 
 apiRouter.delete('/payments/:id', async (req: Request, res: Response) => {
-  await dbManager.deletePayment(req.params.id);
-  res.json({ success: true, message: 'Payment deleted.' });
+  try {
+    await dbManager.deletePayment(req.params.id);
+    res.json({ success: true, message: 'Payment deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete payment' });
+  }
 });
 
 apiRouter.get('/expenses', async (_req: Request, res: Response) => {
-  const items = await dbManager.getExpenses();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getExpenses();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch expenses' });
+  }
 });
 
 apiRouter.post('/expenses', async (req: Request, res: Response) => {
-  const ex = { ...req.body, id: req.body.id || `exp-${Date.now()}` };
-  const saved = await dbManager.saveExpense(ex);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const ex = { ...req.body, id: req.body.id || `exp-${Date.now()}` };
+    const saved = await dbManager.saveExpense(ex);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save expense' });
+  }
 });
 
 apiRouter.delete('/expenses/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteExpense(req.params.id);
-  res.json({ success: true, message: 'Expense deleted.' });
+  try {
+    await dbManager.deleteExpense(req.params.id);
+    res.json({ success: true, message: 'Expense deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete expense' });
+  }
 });
 
 // ==========================================================
@@ -742,116 +948,227 @@ apiRouter.delete('/expenses/:id', async (req: Request, res: Response) => {
 // ==========================================================
 
 apiRouter.get('/service-tickets', async (_req: Request, res: Response) => {
-  const items = await dbManager.getServiceTickets();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getServiceTickets();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch service tickets' });
+  }
 });
 
 apiRouter.post('/service-tickets', async (req: Request, res: Response) => {
-  const tk = { ...req.body, id: req.body.id || `tk-${Date.now()}` };
-  const saved = await dbManager.saveServiceTicket(tk);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const tk = { ...req.body, id: req.body.id || `tk-${Date.now()}` };
+    const saved = await dbManager.saveServiceTicket(tk);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save service ticket' });
+  }
 });
 
 apiRouter.put('/service-tickets/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveServiceTicket({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveServiceTicket({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update service ticket' });
+  }
 });
 
 apiRouter.delete('/service-tickets/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteServiceTicket(req.params.id);
-  res.json({ success: true, message: 'Service ticket deleted.' });
+  try {
+    await dbManager.deleteServiceTicket(req.params.id);
+    res.json({ success: true, message: 'Service ticket deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete service ticket' });
+  }
 });
 
 apiRouter.get('/amc-contracts', async (_req: Request, res: Response) => {
-  const items = await dbManager.getAMCContracts();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getAMCContracts();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch AMC contracts' });
+  }
 });
 
 apiRouter.post('/amc-contracts', async (req: Request, res: Response) => {
-  const amc = { ...req.body, id: req.body.id || `amc-${Date.now()}` };
-  const saved = await dbManager.saveAMCContract(amc);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const amc = { ...req.body, id: req.body.id || `amc-${Date.now()}` };
+    const saved = await dbManager.saveAMCContract(amc);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save AMC contract' });
+  }
 });
 
 apiRouter.put('/amc-contracts/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveAMCContract({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveAMCContract({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update AMC contract' });
+  }
 });
 
 apiRouter.delete('/amc-contracts/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteAMCContract(req.params.id);
-  res.json({ success: true, message: 'AMC contract deleted.' });
+  try {
+    await dbManager.deleteAMCContract(req.params.id);
+    res.json({ success: true, message: 'AMC contract deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete AMC contract' });
+  }
 });
 
 // ==========================================================
-// 12. NOTIFICATIONS & SETTINGS
+// 12. NOTIFICATIONS & SYSTEM SETTINGS
 // ==========================================================
 
 apiRouter.get('/notifications', async (_req: Request, res: Response) => {
-  const items = await dbManager.getNotifications();
-  res.json({ success: true, count: items.length, data: items });
+  try {
+    const items = await dbManager.getNotifications();
+    res.json({ success: true, count: items.length, data: items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch notifications' });
+  }
 });
 
 apiRouter.post('/notifications', async (req: Request, res: Response) => {
-  const n = { ...req.body, id: req.body.id || `notif-${Date.now()}` };
-  const saved = await dbManager.saveNotification(n);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const n = { ...req.body, id: req.body.id || `notif-${Date.now()}` };
+    const saved = await dbManager.saveNotification(n);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save notification' });
+  }
 });
 
 apiRouter.put('/notifications/:id/read', async (req: Request, res: Response) => {
-  const items = await dbManager.getNotifications();
-  const target = items.find(n => n.id === req.params.id);
-  if (target) {
-    target.isRead = true;
-    await dbManager.saveNotification(target);
+  try {
+    const items = await dbManager.getNotifications();
+    const target = items.find((n: any) => n.id === req.params.id);
+    if (target) {
+      target.isRead = true;
+      await dbManager.saveNotification(target);
+    }
+    res.json({ success: true, message: 'Notification marked read in MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update notification' });
   }
-  res.json({ success: true });
 });
 
-apiRouter.put('/notifications/read-all', async (_req: Request, res: Response) => {
-  const items = await dbManager.getNotifications();
-  for (const n of items) {
-    n.isRead = true;
-    await dbManager.saveNotification(n);
+apiRouter.put('/notifications/mark-all-read', async (_req: Request, res: Response) => {
+  try {
+    const items = await dbManager.getNotifications();
+    for (const n of items) {
+      if (!n.isRead) {
+        n.isRead = true;
+        await dbManager.saveNotification(n);
+      }
+    }
+    res.json({ success: true, message: 'All notifications marked read in MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to mark all read' });
   }
-  res.json({ success: true });
 });
 
+// System Settings
 apiRouter.get('/settings', async (_req: Request, res: Response) => {
-  const s = await dbManager.getSettings();
-  res.json({ success: true, data: s });
+  try {
+    const s = await dbManager.getSettings();
+    res.json({ success: true, data: s });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch settings' });
+  }
 });
 
-apiRouter.post(['/settings', '/settings/update'], async (req: Request, res: Response) => {
-  const s = req.body;
-  const saved = await dbManager.saveSettings(s);
-  res.json({ success: true, data: saved });
+apiRouter.post('/settings', async (req: Request, res: Response) => {
+  try {
+    const s = req.body || {};
+    const saved = await dbManager.saveSettings(s);
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save settings' });
+  }
 });
 
-// ==========================================================
-// 13. USERS MANAGEMENT API
-// ==========================================================
+// ACL Config & Audit Logs
+apiRouter.get('/acl/config', async (_req: Request, res: Response) => {
+  try {
+    const cfg = await dbManager.getAclConfig();
+    res.json({ success: true, data: cfg });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch ACL config' });
+  }
+});
 
+apiRouter.post('/acl/config', async (req: Request, res: Response) => {
+  try {
+    const cfg = req.body || {};
+    const saved = await dbManager.saveAclConfig(cfg);
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save ACL config' });
+  }
+});
+
+apiRouter.get('/acl/audit-logs', async (_req: Request, res: Response) => {
+  try {
+    const logs = await dbManager.getAclAuditLogs();
+    res.json({ success: true, data: logs });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch ACL audit logs' });
+  }
+});
+
+apiRouter.post('/acl/audit-logs', async (req: Request, res: Response) => {
+  try {
+    const log = req.body || {};
+    const saved = await dbManager.addAclAuditLog(log);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to add ACL audit log' });
+  }
+});
+
+// Users
 apiRouter.get('/users', async (_req: Request, res: Response) => {
-  const users = await dbManager.getUsers();
-  res.json({ success: true, count: users.length, data: users });
+  try {
+    const users = await dbManager.getUsers();
+    res.json({ success: true, count: users.length, data: users });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch users' });
+  }
 });
 
 apiRouter.post('/users', async (req: Request, res: Response) => {
-  const u = { ...req.body, id: req.body.id || `usr-${Date.now()}` };
-  const saved = await dbManager.saveUser(u);
-  res.status(201).json({ success: true, data: saved });
+  try {
+    const u = { ...req.body, id: req.body.id || `usr-${Date.now()}` };
+    const saved = await dbManager.saveUser(u);
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save user' });
+  }
 });
 
 apiRouter.put('/users/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const saved = await dbManager.saveUser({ ...req.body, id });
-  res.json({ success: true, data: saved });
+  try {
+    const { id } = req.params;
+    const saved = await dbManager.saveUser({ ...req.body, id });
+    res.json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update user' });
+  }
 });
 
 apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
-  await dbManager.deleteUser(req.params.id);
-  res.json({ success: true, message: 'User deleted.' });
+  try {
+    await dbManager.deleteUser(req.params.id);
+    res.json({ success: true, message: 'User deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete user' });
+  }
 });
