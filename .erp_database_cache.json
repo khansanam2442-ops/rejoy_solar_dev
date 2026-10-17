@@ -11,8 +11,7 @@
     "tallyServerUrl": "",
     "tallyCompany": "Rejoy Solar 2026-27",
     "tallyStatus": "NOT CONFIGURED",
-    "whatsAppStatus": "SANDBOX_READY",
-    "auditTimestamp": 1792228057251
+    "whatsAppStatus": "SANDBOX_READY"
   },
   "users": [
     {
@@ -7265,84 +7264,21 @@
   ],
   "holidays": [
     {
+      "id": "hol-1",
+      "name": "Republic Day",
+      "holidayDate": "Mon Jan 26 2026 00:00:00 GM",
+      "date": "Mon Jan 26 2026 00:00:00 GM",
+      "type": "NATIONAL",
+      "description": "Celebration of the Constitution of India coming into effect. Mandatory national paid holiday.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
       "id": "hol-2",
       "name": "Holi (Dhulandi)",
       "holidayDate": "",
       "date": "",
       "type": "FESTIVAL",
       "description": "Festival of colors and arrival of spring. Closed for all corporate offices and installation sites.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-5",
-      "name": "Dr. B.R. Ambedkar Jayanti",
-      "holidayDate": "",
-      "date": "",
-      "type": "NATIONAL",
-      "description": "Birth anniversary of Dr. Bhimrao Ramji Ambedkar, father of the Indian Constitution.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-14",
-      "name": "Dussehra (Vijayadashami)",
-      "holidayDate": "",
-      "date": "",
-      "type": "FESTIVAL",
-      "description": "Triumph of light over darkness. Closed for all offices and manufacturing yards.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-18",
-      "name": "Bhai Dooj",
-      "holidayDate": "",
-      "date": "",
-      "type": "FESTIVAL",
-      "description": "Celebration of brotherly bond after Diwali. Optional holiday.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-19",
-      "name": "Guru Nanak Jayanti",
-      "holidayDate": "",
-      "date": "",
-      "type": "FESTIVAL",
-      "description": "Gurpurab celebrating the birth of Guru Nanak Dev Ji. Optional floating leave.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-4",
-      "name": "Good Friday",
-      "holidayDate": "Fri Apr 03 2026 00:00:00 GM",
-      "date": "Fri Apr 03 2026 00:00:00 GM",
-      "type": "FESTIVAL",
-      "description": "Christian holy day commemorating the crucifixion of Jesus Christ.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-10",
-      "name": "Raksha Bandhan",
-      "holidayDate": "Fri Aug 28 2026 00:00:00 GM",
-      "date": "Fri Aug 28 2026 00:00:00 GM",
-      "type": "FESTIVAL",
-      "description": "Celebration of bond between brothers and sisters. Optional holiday.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-20",
-      "name": "Christmas Day",
-      "holidayDate": "Fri Dec 25 2026 00:00:00 GM",
-      "date": "Fri Dec 25 2026 00:00:00 GM",
-      "type": "FESTIVAL",
-      "description": "Christmas celebration and year-end shutdown period begins.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-8",
-      "name": "World Environment & Solar Day",
-      "holidayDate": "Fri Jun 05 2026 00:00:00 GM",
-      "date": "Fri Jun 05 2026 00:00:00 GM",
-      "type": "COMPANY",
-      "description": "SolarPulse special corporate day honoring green solar energy innovation, clean tech, and team sustainability.",
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
@@ -7355,6 +7291,24 @@
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
+      "id": "hol-4",
+      "name": "Good Friday",
+      "holidayDate": "Fri Apr 03 2026 00:00:00 GM",
+      "date": "Fri Apr 03 2026 00:00:00 GM",
+      "type": "FESTIVAL",
+      "description": "Christian holy day commemorating the crucifixion of Jesus Christ.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-5",
+      "name": "Dr. B.R. Ambedkar Jayanti",
+      "holidayDate": "",
+      "date": "",
+      "type": "NATIONAL",
+      "description": "Birth anniversary of Dr. Bhimrao Ramji Ambedkar, father of the Indian Constitution.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
       "id": "hol-6",
       "name": "Gujarat Gaurav Din / Labour Day",
       "holidayDate": "Fri May 01 2026 00:00:00 GM",
@@ -7364,12 +7318,39 @@
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
-      "id": "hol-13",
-      "name": "Mahatma Gandhi Jayanti",
-      "holidayDate": "Fri Oct 02 2026 00:00:00 GM",
-      "date": "Fri Oct 02 2026 00:00:00 GM",
+      "id": "hol-7",
+      "name": "Bakrid (Eid-ul-Adha)",
+      "holidayDate": "Wed May 27 2026 00:00:00 GM",
+      "date": "Wed May 27 2026 00:00:00 GM",
+      "type": "FESTIVAL",
+      "description": "Feast of the Sacrifice. Floating optional holiday for eligible workforce.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-8",
+      "name": "World Environment & Solar Day",
+      "holidayDate": "Fri Jun 05 2026 00:00:00 GM",
+      "date": "Fri Jun 05 2026 00:00:00 GM",
+      "type": "COMPANY",
+      "description": "SolarPulse special corporate day honoring green solar energy innovation, clean tech, and team sustainability.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-9",
+      "name": "Independence Day",
+      "holidayDate": "Sat Aug 15 2026 00:00:00 GM",
+      "date": "Sat Aug 15 2026 00:00:00 GM",
       "type": "NATIONAL",
-      "description": "Birth anniversary of Mahatma Gandhi. Mandatory national public holiday.",
+      "description": "India Independence Day flag hoisting ceremony followed by holiday.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-10",
+      "name": "Raksha Bandhan",
+      "holidayDate": "Fri Aug 28 2026 00:00:00 GM",
+      "date": "Fri Aug 28 2026 00:00:00 GM",
+      "type": "FESTIVAL",
+      "description": "Celebration of bond between brothers and sisters. Optional holiday.",
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
@@ -7382,24 +7363,6 @@
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
-      "id": "hol-1",
-      "name": "Republic Day",
-      "holidayDate": "Mon Jan 26 2026 00:00:00 GM",
-      "date": "Mon Jan 26 2026 00:00:00 GM",
-      "type": "NATIONAL",
-      "description": "Celebration of the Constitution of India coming into effect. Mandatory national paid holiday.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
-      "id": "hol-17",
-      "name": "Gujarati New Year (Bestu Varas)",
-      "holidayDate": "Mon Nov 09 2026 00:00:00 GM",
-      "date": "Mon Nov 09 2026 00:00:00 GM",
-      "type": "REGIONAL",
-      "description": "Vikram Samvat 2083 New Year celebrations and chopda pujan across Gujarat branches.",
-      "createdAt": "2026-10-17T08:21:40.000Z"
-    },
-    {
       "id": "hol-12",
       "name": "Ganesh Chaturthi",
       "holidayDate": "Mon Sep 14 2026 00:00:00 GM",
@@ -7409,12 +7372,21 @@
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
-      "id": "hol-9",
-      "name": "Independence Day",
-      "holidayDate": "Sat Aug 15 2026 00:00:00 GM",
-      "date": "Sat Aug 15 2026 00:00:00 GM",
+      "id": "hol-13",
+      "name": "Mahatma Gandhi Jayanti",
+      "holidayDate": "Fri Oct 02 2026 00:00:00 GM",
+      "date": "Fri Oct 02 2026 00:00:00 GM",
       "type": "NATIONAL",
-      "description": "India Independence Day flag hoisting ceremony followed by holiday.",
+      "description": "Birth anniversary of Mahatma Gandhi. Mandatory national public holiday.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-14",
+      "name": "Dussehra (Vijayadashami)",
+      "holidayDate": "",
+      "date": "",
+      "type": "FESTIVAL",
+      "description": "Triumph of light over darkness. Closed for all offices and manufacturing yards.",
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
@@ -7436,12 +7408,39 @@
       "createdAt": "2026-10-17T08:21:40.000Z"
     },
     {
-      "id": "hol-7",
-      "name": "Bakrid (Eid-ul-Adha)",
-      "holidayDate": "Wed May 27 2026 00:00:00 GM",
-      "date": "Wed May 27 2026 00:00:00 GM",
+      "id": "hol-17",
+      "name": "Gujarati New Year (Bestu Varas)",
+      "holidayDate": "Mon Nov 09 2026 00:00:00 GM",
+      "date": "Mon Nov 09 2026 00:00:00 GM",
+      "type": "REGIONAL",
+      "description": "Vikram Samvat 2083 New Year celebrations and chopda pujan across Gujarat branches.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-18",
+      "name": "Bhai Dooj",
+      "holidayDate": "",
+      "date": "",
       "type": "FESTIVAL",
-      "description": "Feast of the Sacrifice. Floating optional holiday for eligible workforce.",
+      "description": "Celebration of brotherly bond after Diwali. Optional holiday.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-19",
+      "name": "Guru Nanak Jayanti",
+      "holidayDate": "",
+      "date": "",
+      "type": "FESTIVAL",
+      "description": "Gurpurab celebrating the birth of Guru Nanak Dev Ji. Optional floating leave.",
+      "createdAt": "2026-10-17T08:21:40.000Z"
+    },
+    {
+      "id": "hol-20",
+      "name": "Christmas Day",
+      "holidayDate": "Fri Dec 25 2026 00:00:00 GM",
+      "date": "Fri Dec 25 2026 00:00:00 GM",
+      "type": "FESTIVAL",
+      "description": "Christmas celebration and year-end shutdown period begins.",
       "createdAt": "2026-10-17T08:21:40.000Z"
     }
   ],
@@ -9063,21 +9062,7 @@
     }
   ],
   "notifications": [],
-  "acl_audit_logs": [
-    {
-      "id": "test-acl-log-1792228057251",
-      "actorId": "usr-admin-1",
-      "actorName": "Vikram Patel",
-      "actorRole": "Admin",
-      "action": "PERMISSION_UPDATE",
-      "targetRole": "Project Manager",
-      "permissionId": "projects.create",
-      "previousState": "false",
-      "newState": "true",
-      "details": "Audit verification log entry",
-      "timestamp": "2026-10-17 09:07:37"
-    }
-  ],
+  "acl_audit_logs": [],
   "acl_config": [
     {
       "Admin": {
@@ -9664,8 +9649,7 @@
         "settings.view": false,
         "settings.manage": false,
         "settings.acl_manage": false
-      },
-      "auditMarker": 1792228057251
+      }
     }
   ]
 }

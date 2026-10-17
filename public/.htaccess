@@ -1,0 +1,32 @@
+# Apache / LiteSpeed SPA Rewrite Configuration for Rejoy Solar ERP
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Do not rewrite API endpoints (pass to backend or PHP handlers)
+  RewriteRule ^api/ - [L]
+
+  # 2. If the request matches a physical file or directory that exists, serve directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. Do not rewrite missing static asset extensions to index.html (return clean 404)
+  RewriteCond %{REQUEST_URI} \.(css|js|map|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$ [NC]
+  RewriteRule ^ - [R=404,L]
+
+  # 4. SPA History Fallback: Rewrite all other routes to index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Security and MIME type headers
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Compression
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css application/javascript application/json application/xml image/svg+xml
+</IfModule>

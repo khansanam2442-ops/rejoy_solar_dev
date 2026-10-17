@@ -86,7 +86,7 @@ getPusherServer();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.APP_PORT || (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '3000')) || 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -885,18 +885,42 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
+  // Explicit 404 handler for unknown API routes (registered after all API routes, before static/SPA)
+  // Ensures any unmatched /api or /api/* requests return a genuine JSON error response, never index.html
+  app.all(['/api', '/api/*'], (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: 'API endpoint not found',
+      path: req.originalUrl,
+      method: req.method
+    });
+  });
+
+  const currentDirPath = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+  const isProduction = process.env.NODE_ENV === 'production' || currentDirPath.includes('dist');
+
+  // Vite middleware for development vs static & SPA fallback for production
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa'
+      appType: 'custom'
     });
     app.use(vite.middlewares);
-    // Explicit SPA fallback for development routes like /projects, /hrms, /finance
-    app.use('*', async (req, res, next) => {
-      if (req.method !== 'GET' || req.originalUrl.startsWith('/api')) {
+
+    // Development SPA history fallback for all frontend routes (e.g. /customers, /projects, /hrms)
+    app.get('*', async (req, res, next) => {
+      // Pass through internal Vite/asset URLs
+      if (req.originalUrl.startsWith('/@') || req.originalUrl.startsWith('/node_modules')) {
         return next();
       }
+
+      // If the request targets a missing asset with an extension, return a clean 404 instead of index.html
+      const ext = path.extname(req.path);
+      if (ext && ext !== '.html') {
+        res.status(404).type('text/plain').send('Not Found');
+        return;
+      }
+
       try {
         const url = req.originalUrl;
         const indexHtmlPath = path.resolve(process.cwd(), 'index.html');
@@ -908,11 +932,47 @@ async function startServer() {
         next(e);
       }
     });
+
+    // 404 for unhandled non-GET requests
+    app.use((_req, res) => {
+      res.status(404).type('text/plain').send('Not Found');
+    });
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    // Determine the production dist path (resolving both project root and bundled locations)
+    const distPath = fs.existsSync(path.resolve(process.cwd(), 'dist', 'index.html'))
+      ? path.resolve(process.cwd(), 'dist')
+      : (fs.existsSync(path.resolve(currentDirPath, 'index.html'))
+          ? currentDirPath
+          : path.resolve(currentDirPath, '..', 'dist'));
+
+    // Serve static assets from dist/
+    app.use(express.static(distPath, { index: false }));
+
+    // Explicit 404 for missing assets in /assets/ or with non-html extensions
+    app.all('/assets/*', (_req, res) => {
+      res.status(404).type('text/plain').send('Not Found');
+    });
+
+    // Production SPA history fallback for all frontend routes on direct navigation & refresh
+    app.get('*', (req, res) => {
+      // If the request has a static asset extension (e.g. .css, .js, .png, .map), return clean 404
+      const ext = path.extname(req.path);
+      if (ext && ext !== '.html') {
+        res.status(404).type('text/plain').send('Not Found');
+        return;
+      }
+
+      const indexHtmlFile = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexHtmlFile)) {
+        res.sendFile(indexHtmlFile);
+      } else {
+        res.status(404).type('text/plain').send('Production build not found. Please run npm run build.');
+      }
+    });
+
+    // 404 for unhandled non-GET requests
+    app.use((_req, res) => {
+      res.status(404).type('text/plain').send('Not Found');
     });
   }
 
