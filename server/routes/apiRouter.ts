@@ -168,7 +168,7 @@ apiRouter.post('/sync/push', async (req: Request, res: Response) => {
 // 3. AUTHENTICATION & ADMIN REGISTRATION APIS (MYSQL BACKED)
 // ==========================================================
 
-apiRouter.get('/auth/registration-status', async (_req: Request, res: Response) => {
+apiRouter.get(['/auth/registration-status', '/auth/registration-status/'], async (_req: Request, res: Response) => {
   try {
     const status = await dbManager.getAdminRegistrationStatus();
     res.json({ success: true, ...status });
@@ -177,7 +177,7 @@ apiRouter.get('/auth/registration-status', async (_req: Request, res: Response) 
   }
 });
 
-apiRouter.post('/auth/register', async (req: Request, res: Response) => {
+apiRouter.post(['/auth/register', '/auth/register/'], async (req: Request, res: Response) => {
   try {
     const { name, email, password, confirmPassword, phone, department, designation } = req.body || {};
 
@@ -199,7 +199,11 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
     // Check if caller has administrative authorization header
     const authHeader = req.headers.authorization;
     const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
-    const isAuthorizedByAdmin = Boolean(authHeader || adminKey);
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader;
+    const isAuthorizedByAdmin = Boolean(
+      (token && token !== 'null' && token !== 'undefined' && token.length > 5) ||
+      (adminKey && String(adminKey) !== 'null' && String(adminKey) !== 'undefined' && String(adminKey).length > 2)
+    );
 
     const user = await dbManager.registerAdmin(
       {
@@ -230,7 +234,7 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/auth/login', async (req: Request, res: Response) => {
+apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) {

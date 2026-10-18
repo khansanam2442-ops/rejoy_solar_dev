@@ -92,6 +92,12 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use('/api', apiRouter);
 
+  // Fallback mount for reverse proxies that strip the /api prefix before forwarding
+  app.use('/auth', (req, res, next) => {
+    req.url = '/auth' + (req.url === '/' ? '' : req.url);
+    apiRouter(req, res, next);
+  });
+
   // API Health & Status Check
   app.get(['/api/health', '/api/status', '/api/status.php'], (_req, res) => {
     res.json({

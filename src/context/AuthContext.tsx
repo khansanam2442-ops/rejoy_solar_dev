@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile, UserRole } from '../types/solar';
 import { storageService } from '../services/storage';
 import { liveLocationService } from '../services/liveLocationService';
+import { apiClient } from '../services/apiClient';
 
 export interface RoleDefinition {
   role: UserRole;
@@ -246,13 +247,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cleanPass = pass.trim();
 
       // Authenticate directly with the authoritative MySQL backend
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`${apiClient.getBaseUrl()}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail, password: cleanPass })
       });
 
-      const data = await res.json().catch(() => ({}));
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          res.status === 404
+            ? `Authentication API endpoint not found (HTTP 404). Please ensure the backend server or reverse proxy is configured for ${apiClient.getBaseUrl()}/auth/login.`
+            : `Authentication server returned HTTP ${res.status} (${res.statusText || 'Non-JSON response'}).`
+        );
+      }
 
       if (!res.ok || !data.success || !data.user) {
         throw new Error(data.message || 'Invalid email or password. Please verify your credentials in MySQL.');
@@ -308,10 +318,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cleanPass = pass.trim();
       const cleanName = name.trim();
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      // If an existing administrator is already authenticated, send credentials for privilege escalation authorization
+      const activeSession = currentUser?.role === 'Admin' ? localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) : null;
+      if (activeSession) {
+        try {
+          const parsed = JSON.parse(activeSession);
+          if (parsed && parsed.email) {
+            headers['Authorization'] = `Bearer admin-session-${parsed.email}`;
+            headers['x-admin-token'] = parsed.id || parsed.email;
+          }
+        } catch {}
+      }
+
       // Register directly via backend MySQL API
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(`${apiClient.getBaseUrl()}/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           name: cleanName,
           email: cleanEmail,
@@ -323,10 +346,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         })
       });
 
-      const data = await res.json().catch(() => ({}));
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          res.status === 404
+            ? `Admin Registration API endpoint not found (HTTP 404). Please verify that the backend /api routes or reverse-proxy are active.`
+            : `Registration server returned HTTP ${res.status} (${res.statusText || 'Non-JSON response'}).`
+        );
+      }
 
       if (!res.ok || !data.success || !data.user) {
-        throw new Error(data.message || 'Registration failed.');
+        throw new Error(data.message || `Registration failed (HTTP ${res.status}).`);
       }
 
       const u = data.user;

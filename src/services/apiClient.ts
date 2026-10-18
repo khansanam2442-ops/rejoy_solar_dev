@@ -17,7 +17,13 @@ export interface DbStatusResponse {
 }
 
 class ApiClient {
-  private baseUrl: string = '/api';
+  private baseUrl: string = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
+    ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
+    : '/api';
+
+  public getBaseUrl(): string {
+    return this.baseUrl;
+  }
 
   // --- Database Management & Migration ---
 
@@ -80,23 +86,35 @@ class ApiClient {
     }
   }
 
-  async registerAdmin(data: {
-    name: string;
-    email: string;
-    password: string;
-    confirmPassword?: string;
-    phone?: string;
-    department?: string;
-    designation?: string;
-  }): Promise<any> {
+  async registerAdmin(
+    data: {
+      name: string;
+      email: string;
+      password: string;
+      confirmPassword?: string;
+      phone?: string;
+      department?: string;
+      designation?: string;
+    },
+    adminAuthToken?: string
+  ): Promise<any> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (adminAuthToken) {
+      headers['Authorization'] = adminAuthToken.startsWith('Bearer ') ? adminAuthToken : `Bearer ${adminAuthToken}`;
+    }
     const res = await fetch(`${this.baseUrl}/auth/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(data)
     });
-    const json = await res.json();
+    let json: any = {};
+    try {
+      json = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText || 'Non-JSON response'}). Please ensure the API backend is running.`);
+    }
     if (!res.ok || !json.success) {
-      throw new Error(json.message || 'Registration failed');
+      throw new Error(json.message || json.error || `Registration failed (HTTP ${res.status})`);
     }
     return json;
   }

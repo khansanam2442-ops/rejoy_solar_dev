@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth, DEMO_ACCOUNTS, DemoAccount } from '../../context/AuthContext';
+import { apiClient } from '../../services/apiClient';
 import {
   Sun,
   Lock,
@@ -56,7 +57,7 @@ export const LoginView: React.FC = () => {
   const [resetStatus, setResetStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/registration-status')
+    fetch(`${apiClient.getBaseUrl()}/auth/registration-status`)
       .then(r => r.json())
       .then(d => {
         if (d && d.success) {

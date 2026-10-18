@@ -3,19 +3,30 @@
   RewriteEngine On
   RewriteBase /
 
-  # 1. Do not rewrite API endpoints (pass to backend or PHP handlers)
-  RewriteRule ^api/ - [L]
+  # 1. Reverse Proxy /api requests to local Node.js server (if running on port 3000 or custom)
+  <IfModule mod_proxy.c>
+    RewriteCond %{REQUEST_URI} ^/api/ [NC]
+    RewriteCond %{HTTP_HOST} !^$
+    RewriteRule ^api/(.*)$ http://127.0.0.1:3000/api/$1 [P,L]
+  </IfModule>
 
-  # 2. If the request matches a physical file or directory that exists, serve directly
+  # 2. Native PHP API Gateway for Hostinger Shared Hosting (Zero Node.js Dependency)
+  # Routes all /api/* calls to api/index.php if not proxied
+  RewriteCond %{REQUEST_URI} ^/api/ [NC,OR]
+  RewriteCond %{REQUEST_URI} ^/api$ [NC]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^api/?(.*)$ api/index.php [QSA,L]
+
+  # 3. If the request matches a physical file or directory that exists, serve directly
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
-  # 3. Do not rewrite missing static asset extensions to index.html (return clean 404)
+  # 4. Do not rewrite missing static asset extensions to index.html (return clean 404)
   RewriteCond %{REQUEST_URI} \.(css|js|map|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$ [NC]
   RewriteRule ^ - [R=404,L]
 
-  # 4. SPA History Fallback: Rewrite all other routes to index.html
+  # 5. SPA History Fallback: Rewrite all other routes to index.html
   RewriteRule ^ index.html [L]
 </IfModule>
 
@@ -25,6 +36,12 @@
   Header always set X-Frame-Options "SAMEORIGIN"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
+
+# Protect sensitive files from web access
+<FilesMatch "^\.env|\.git|\.cache">
+  Order allow,deny
+  Deny from all
+</FilesMatch>
 
 # Compression
 <IfModule mod_deflate.c>
