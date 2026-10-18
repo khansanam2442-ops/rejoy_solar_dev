@@ -30,8 +30,8 @@ class ApiClient {
       return {
         success: false,
         connected: false,
-        host: 'localhost',
-        database: 'solarpulse_erp',
+        host: '127.0.0.1',
+        database: 'u238683373_rejoy_solar',
         port: 3306,
         mode: 'STANDBY_PERSISTENCE_MODE',
         dumpAvailable: true,
@@ -69,6 +69,49 @@ class ApiClient {
 
   getSqlDumpDownloadUrl(): string {
     return `${this.baseUrl}/db/dump.sql`;
+  }
+
+  async getRegistrationStatus(): Promise<{ success: boolean; allowPublicRegistration: boolean; adminCount: number }> {
+    try {
+      const res = await fetch(`${this.baseUrl}/auth/registration-status`);
+      return await res.json();
+    } catch {
+      return { success: false, allowPublicRegistration: true, adminCount: 0 };
+    }
+  }
+
+  async registerAdmin(data: {
+    name: string;
+    email: string;
+    password: string;
+    confirmPassword?: string;
+    phone?: string;
+    department?: string;
+    designation?: string;
+  }): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.message || 'Registration failed');
+    }
+    return json;
+  }
+
+  async wipeDatabase(confirmation: string): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/db/wipe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation })
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.message || json.error || 'Database wipe failed');
+    }
+    return json;
   }
 
   // --- Master Bootstrap Data ---

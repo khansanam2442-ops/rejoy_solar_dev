@@ -4,6 +4,7 @@ dotenv.config();
 import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 
 export interface DbConfig {
   host: string;
@@ -18,9 +19,9 @@ export function getDbConfigFromEnv(): DbConfig {
   return {
     host,
     port: Number(process.env.DB_PORT) || 3306,
-    user: (process.env.DB_USER || 'root').trim(),
-    password: process.env.DB_PASS || process.env.DB_PASSWORD || '',
-    database: (process.env.DB_NAME || 'solarpulse_erp').trim()
+    user: (process.env.DB_USER || 'u238683373_rejoy_solar').trim(),
+    password: process.env.DB_PASS || process.env.DB_PASSWORD || ';Fl:$tn/9C&d',
+    database: (process.env.DB_NAME || 'u238683373_rejoy_solar').trim()
   };
 }
 
@@ -30,13 +31,10 @@ class MySqlDatabaseManager {
   private collections: Map<string, any[]> = new Map();
   private settingsStore: Record<string, any> = {};
   private config: DbConfig;
-  private cacheFilePath: string;
 
   constructor() {
     this.config = getDbConfigFromEnv();
-    this.cacheFilePath = path.join(process.cwd(), '.erp_database_cache.json');
     this.initDefaultCollections();
-    this.loadFromDisk();
   }
 
   private initDefaultCollections() {
@@ -52,44 +50,6 @@ class MySqlDatabaseManager {
         this.collections.set(c, []);
       }
     });
-  }
-
-  private loadFromDisk() {
-    try {
-      if (fs.existsSync(this.cacheFilePath)) {
-        const raw = fs.readFileSync(this.cacheFilePath, 'utf-8');
-        if (raw.trim()) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
-            for (const key of Object.keys(parsed)) {
-              if (key === 'settings' && typeof parsed[key] === 'object') {
-                this.settingsStore = parsed[key];
-              } else if (Array.isArray(parsed[key])) {
-                this.collections.set(key, parsed[key]);
-              }
-            }
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn('[DB Cache] Notice reading disk cache:', err?.message || err);
-    }
-  }
-
-  public persistToDisk(): boolean {
-    try {
-      const data: Record<string, any> = { settings: this.settingsStore };
-      this.collections.forEach((val, key) => {
-        data[key] = val;
-      });
-      const tempPath = `${this.cacheFilePath}.tmp.${process.pid}.${Date.now()}`;
-      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-      fs.renameSync(tempPath, this.cacheFilePath);
-      return true;
-    } catch (err: any) {
-      console.warn('[DB Cache] Warning persisting to disk:', err?.message || err);
-      return false;
-    }
   }
 
   public async init(): Promise<{ connected: boolean; error?: string }> {
@@ -191,6 +151,7 @@ class MySqlDatabaseManager {
         await this.pool.query(sql);
         console.log('[MySQL] Schema and production baseline verified in MySQL database.');
       }
+      await this.ensureHashedPasswords();
     } catch (err: any) {
       console.error('[MySQL] Schema execution notice:', err?.message || err);
       throw err;
@@ -288,7 +249,6 @@ class MySqlDatabaseManager {
 
   public setFallbackItems(collection: string, items: any[]): void {
     this.collections.set(collection, items);
-    this.persistToDisk();
   }
 
   public async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
@@ -447,11 +407,15 @@ class MySqlDatabaseManager {
 
   public async updateCustomerPassword(customerId: string, newPass: string): Promise<boolean> {
     this.assertDbConnected();
-    await this.pool!.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [newPass, customerId]);
+    const clean = newPass.trim();
+    const hashed = (clean.startsWith('$2a$') || clean.startsWith('$2b$') || clean.startsWith('$2y$'))
+      ? clean
+      : await bcrypt.hash(clean, 10);
+    await this.pool!.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [hashed, customerId]);
     const items = this.getFallbackItems('customers');
     const target = items.find(c => c.id === customerId);
     if (target) {
-      target.password = newPass;
+      target.password = hashed;
       this.setFallbackItems('customers', items);
     }
     return true;
@@ -1293,8 +1257,8 @@ class MySqlDatabaseManager {
     const itemsJson = typeof rawItems === 'string' ? rawItems : JSON.stringify(rawItems);
     const subtotal = Number(item.subtotal ?? existing?.subtotal) || 0;
     const gstAmount = Number(item.gstAmount ?? item.taxAmount ?? item.gst_amount ?? item.tax_amount ?? existing?.gst_amount ?? existing?.tax_amount) || 0;
-    const grandTotal = Number(item.grandTotal ?? item.grand_total ?? item.totalAmount ?? item.total_amount ?? existing?.grand_total ?? existing?.total_amount) || (subtotal + gstAmount);
-    const totalAmount = Number(item.totalAmount ?? item.total_amount ?? item.grandTotal ?? item.grand_total ?? existing?.total_amount ?? existing?.grand_total) || grandTotal;
+    const grandTotal = Number(item.grandTotal ?? item.grand_total ?? item.totalAmount ?? item.total_amount ?? existing?.total_amount) || (subtotal + gstAmount);
+    const totalAmount = grandTotal;
     const taxAmount = gstAmount;
     const orderDate = poDate;
     const status = item.status ?? existing?.status ?? 'ISSUED';
@@ -1308,16 +1272,14 @@ class MySqlDatabaseManager {
         \`id\`, \`po_number\`, \`vendor_id\`, \`vendor_name\`, \`po_date\`,
         \`expected_delivery_date\`, \`project_id\`, \`items_json\`, \`subtotal\`,
         \`gst_amount\`, \`total_amount\`, \`status\`, \`payment_status\`,
-        \`receipts_json\`, \`notes\`, \`grand_total\`, \`project_title\`, \`tax_amount\`, \`order_date\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`receipts_json\`, \`notes\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`vendor_name\` = VALUES(\`vendor_name\`), \`expected_delivery_date\` = VALUES(\`expected_delivery_date\`),
         \`subtotal\` = VALUES(\`subtotal\`), \`gst_amount\` = VALUES(\`gst_amount\`),
-        \`total_amount\` = VALUES(\`total_amount\`), \`grand_total\` = VALUES(\`grand_total\`),
-        \`tax_amount\` = VALUES(\`tax_amount\`), \`status\` = VALUES(\`status\`),
+        \`total_amount\` = VALUES(\`total_amount\`), \`status\` = VALUES(\`status\`),
         \`payment_status\` = VALUES(\`payment_status\`), \`items_json\` = VALUES(\`items_json\`),
-        \`receipts_json\` = VALUES(\`receipts_json\`), \`notes\` = VALUES(\`notes\`),
-        \`project_title\` = VALUES(\`project_title\`), \`order_date\` = VALUES(\`order_date\`)
+        \`receipts_json\` = VALUES(\`receipts_json\`), \`notes\` = VALUES(\`notes\`)
     `;
     await this.pool!.query(sql, [
       item.id,
@@ -1334,11 +1296,7 @@ class MySqlDatabaseManager {
       status,
       paymentStatus,
       receiptsJson,
-      notes,
-      grandTotal,
-      projectTitle,
-      taxAmount,
-      orderDate
+      notes
     ]);
 
     const items = this.getFallbackItems('purchase_orders');
@@ -1502,18 +1460,15 @@ class MySqlDatabaseManager {
         \`id\`, \`invoice_number\`, \`project_id\`, \`customer_id\`, \`customer_name\`,
         \`invoice_date\`, \`due_date\`, \`items_json\`, \`subtotal\`, \`gst_amount\`,
         \`total_amount\`, \`payment_status\`, \`paid_amount\`, \`balance_amount\`,
-        \`eway_bill_number\`, \`eway_bill_details_json\`, \`warehouse_id\`, \`notes\`,
-        \`grand_total\`, \`tax_amount\`, \`amount_paid\`, \`balance_due\`, \`status\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`eway_bill_number\`, \`eway_bill_details_json\`, \`warehouse_id\`, \`notes\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`customer_name\` = VALUES(\`customer_name\`), \`due_date\` = VALUES(\`due_date\`),
         \`subtotal\` = VALUES(\`subtotal\`), \`gst_amount\` = VALUES(\`gst_amount\`),
-        \`total_amount\` = VALUES(\`total_amount\`), \`grand_total\` = VALUES(\`grand_total\`),
-        \`tax_amount\` = VALUES(\`tax_amount\`), \`payment_status\` = VALUES(\`payment_status\`),
-        \`status\` = VALUES(\`status\`), \`paid_amount\` = VALUES(\`paid_amount\`),
-        \`amount_paid\` = VALUES(\`amount_paid\`), \`balance_amount\` = VALUES(\`balance_amount\`),
-        \`balance_due\` = VALUES(\`balance_due\`), \`eway_bill_number\` = VALUES(\`eway_bill_number\`),
-        \`items_json\` = VALUES(\`items_json\`), \`notes\` = VALUES(\`notes\`)
+        \`total_amount\` = VALUES(\`total_amount\`), \`payment_status\` = VALUES(\`payment_status\`),
+        \`paid_amount\` = VALUES(\`paid_amount\`), \`balance_amount\` = VALUES(\`balance_amount\`),
+        \`eway_bill_number\` = VALUES(\`eway_bill_number\`), \`items_json\` = VALUES(\`items_json\`),
+        \`notes\` = VALUES(\`notes\`)
     `;
     await this.pool!.query(sql, [
       item.id,
@@ -1533,12 +1488,7 @@ class MySqlDatabaseManager {
       ewayBillNumber,
       ewayBillDetailsJson,
       warehouseId,
-      notes,
-      grandTotal,
-      taxAmount,
-      amountPaid,
-      balanceDue,
-      status
+      notes
     ]);
 
     const items = this.getFallbackItems('sales_invoices');
@@ -2256,9 +2206,8 @@ class MySqlDatabaseManager {
         \`id\`, \`ticket_id\`, \`customer_id\`, \`customer_name\`, \`project_id\`,
         \`project_title\`, \`issue\`, \`category\`, \`priority\`,
         \`assigned_technician_id\`, \`assigned_technician_name\`, \`status\`,
-        \`scheduled_date\`, \`resolved_date\`, \`notes\`, \`photos_json\`,
-        \`title\`, \`ticket_number\`, \`description\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`scheduled_date\`, \`resolved_date\`, \`notes\`, \`photos_json\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`customer_name\` = VALUES(\`customer_name\`), \`project_title\` = VALUES(\`project_title\`),
         \`issue\` = VALUES(\`issue\`), \`category\` = VALUES(\`category\`),
@@ -2266,9 +2215,7 @@ class MySqlDatabaseManager {
         \`assigned_technician_id\` = VALUES(\`assigned_technician_id\`),
         \`assigned_technician_name\` = VALUES(\`assigned_technician_name\`),
         \`scheduled_date\` = VALUES(\`scheduled_date\`), \`resolved_date\` = VALUES(\`resolved_date\`),
-        \`notes\` = VALUES(\`notes\`), \`photos_json\` = VALUES(\`photos_json\`),
-        \`title\` = VALUES(\`title\`), \`ticket_number\` = VALUES(\`ticket_number\`),
-        \`description\` = VALUES(\`description\`)
+        \`notes\` = VALUES(\`notes\`), \`photos_json\` = VALUES(\`photos_json\`)
     `;
     await this.pool!.query(sql, [
       item.id,
@@ -2286,10 +2233,7 @@ class MySqlDatabaseManager {
       scheduledDate,
       resolvedDate,
       notes,
-      photosJson,
-      title,
-      ticketNumber,
-      description
+      photosJson
     ]);
 
     const items = this.getFallbackItems('service_tickets');
@@ -2365,16 +2309,14 @@ class MySqlDatabaseManager {
       INSERT INTO \`solar_amc_contracts\` (
         \`id\`, \`amc_code\`, \`customer_id\`, \`customer_name\`, \`project_id\`,
         \`project_title\`, \`plan_name\`, \`start_date\`, \`end_date\`,
-        \`renewal_date\`, \`annual_amount\`, \`visits_completed\`, \`total_visits\`, \`status\`,
-        \`contract_value\`, \`contract_number\`, \`visits_per_year\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`renewal_date\`, \`annual_amount\`, \`visits_completed\`, \`total_visits\`, \`status\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`customer_name\` = VALUES(\`customer_name\`), \`project_title\` = VALUES(\`project_title\`),
         \`plan_name\` = VALUES(\`plan_name\`), \`start_date\` = VALUES(\`start_date\`), \`end_date\` = VALUES(\`end_date\`),
         \`renewal_date\` = VALUES(\`renewal_date\`), \`annual_amount\` = VALUES(\`annual_amount\`),
-        \`contract_value\` = VALUES(\`contract_value\`), \`contract_number\` = VALUES(\`contract_number\`),
         \`visits_completed\` = VALUES(\`visits_completed\`), \`total_visits\` = VALUES(\`total_visits\`),
-        \`visits_per_year\` = VALUES(\`visits_per_year\`), \`status\` = VALUES(\`status\`)
+        \`status\` = VALUES(\`status\`)
     `;
     await this.pool!.query(sql, [
       item.id,
@@ -2390,10 +2332,7 @@ class MySqlDatabaseManager {
       annualAmount,
       visitsCompleted,
       totalVisits,
-      status,
-      contractValue,
-      contractNumber,
-      visitsPerYear
+      status
     ]);
 
     const items = this.getFallbackItems('amc_contracts');
@@ -2515,7 +2454,10 @@ class MySqlDatabaseManager {
     const existing = await this.getExistingRow('solar_users', item.id);
     const name = item.name ?? existing?.name ?? 'Solar User';
     const email = item.email ?? existing?.email ?? `${item.id}@rejoysolar.com`;
-    const password = item.password ?? existing?.password ?? '123456';
+    let password = item.password ?? existing?.password ?? '123456';
+    if (password && !password.startsWith('$2a$') && !password.startsWith('$2b$') && !password.startsWith('$2y$')) {
+      password = await bcrypt.hash(password, 10);
+    }
     const role = item.role ?? existing?.role ?? 'Super Admin';
     const phone = item.phone ?? existing?.phone ?? '';
     const department = item.department ?? existing?.department ?? 'Operations';
@@ -2748,8 +2690,175 @@ class MySqlDatabaseManager {
   }
 
   // ==========================================================
-  // USERS & AUTH (MYSQL AUTHENTICATION)
+  // USERS & AUTH (MYSQL AUTHENTICATION & BCRYPT ENCRYPTION)
   // ==========================================================
+  public async ensureHashedPasswords(): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    try {
+      const [users]: any = await this.pool.query('SELECT id, password FROM `solar_users`');
+      if (Array.isArray(users)) {
+        for (const u of users) {
+          if (u.password && !u.password.startsWith('$2a$') && !u.password.startsWith('$2b$') && !u.password.startsWith('$2y$')) {
+            const hashed = await bcrypt.hash(u.password, 10);
+            await this.pool.query('UPDATE `solar_users` SET `password` = ? WHERE `id` = ?', [hashed, u.id]);
+          }
+        }
+      }
+      const [custs]: any = await this.pool.query('SELECT id, password FROM `solar_customers`');
+      if (Array.isArray(custs)) {
+        for (const c of custs) {
+          if (c.password && !c.password.startsWith('$2a$') && !c.password.startsWith('$2b$') && !c.password.startsWith('$2y$')) {
+            const hashed = await bcrypt.hash(c.password, 10);
+            await this.pool.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [hashed, c.id]);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[MySQL] Password hash check notice:', e?.message || e);
+    }
+  }
+
+  public async getAdminRegistrationStatus(): Promise<{ allowPublicRegistration: boolean; adminCount: number }> {
+    this.assertDbConnected();
+    const [admins]: any = await this.pool!.query(
+      "SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'"
+    );
+    const adminList = Array.isArray(admins) ? admins : [];
+    const nonDemoAdmins = adminList.filter(
+      a => !a.email.toLowerCase().includes('admin@rejoysolar.com') && !a.id.startsWith('demo-')
+    );
+    // Public initial admin registration is allowed if no custom admin exists
+    const allowPublicRegistration = nonDemoAdmins.length === 0;
+    return {
+      allowPublicRegistration,
+      adminCount: adminList.length
+    };
+  }
+
+  public async registerAdmin(
+    data: {
+      name: string;
+      email: string;
+      password: string;
+      phone?: string;
+      department?: string;
+      designation?: string;
+    },
+    isAuthorizedByAdmin: boolean = false
+  ): Promise<any> {
+    this.assertDbConnected();
+    const cleanEmail = String(data.email || '').trim().toLowerCase();
+    const cleanName = String(data.name || '').trim();
+    const cleanPass = String(data.password || '').trim();
+
+    if (!cleanName) {
+      throw new Error('Full name is required for administrator registration.');
+    }
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('A valid email address is required.');
+    }
+    if (!cleanPass || cleanPass.length < 6) {
+      throw new Error('Password must be at least 6 characters in length.');
+    }
+
+    const status = await this.getAdminRegistrationStatus();
+    if (!status.allowPublicRegistration && !isAuthorizedByAdmin) {
+      throw new Error(
+        'Public administrator registration is closed. Additional administrators must be created by an existing authorized Administrator.'
+      );
+    }
+
+    // Check duplicate email in users and customers
+    const [existingUsers]: any = await this.pool!.query(
+      'SELECT id, email FROM `solar_users` WHERE LOWER(email) = ?',
+      [cleanEmail]
+    );
+    if (Array.isArray(existingUsers) && existingUsers.length > 0) {
+      throw new Error('An account with this email address already exists in MySQL.');
+    }
+
+    const [existingCustomers]: any = await this.pool!.query(
+      'SELECT id, email FROM `solar_customers` WHERE LOWER(email) = ?',
+      [cleanEmail]
+    );
+    if (Array.isArray(existingCustomers) && existingCustomers.length > 0) {
+      throw new Error('This email is already registered as an ERP customer.');
+    }
+
+    // Hash password with bcrypt before storing into MySQL
+    const hashedPassword = await bcrypt.hash(cleanPass, 10);
+    const userId = `usr-admin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const empCode = `EMP-ADM-${Math.floor(100 + Math.random() * 900)}`;
+
+    const userObj = {
+      id: userId,
+      name: cleanName,
+      email: cleanEmail,
+      password: hashedPassword,
+      role: 'Admin',
+      phone: (data.phone || '+91 98250 11223').trim(),
+      department: (data.department || 'Administration').trim(),
+      designation: (data.designation || 'Lead Administrator').trim(),
+      employee_id: empCode,
+      is_field_worker: 0,
+      status: 'ACTIVE'
+    };
+
+    await this.pool!.query(
+      'INSERT INTO `solar_users` (`id`, `name`, `email`, `password`, `role`, `phone`, `department`, `designation`, `employee_id`, `is_field_worker`, `status`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        userObj.id,
+        userObj.name,
+        userObj.email,
+        userObj.password,
+        userObj.role,
+        userObj.phone,
+        userObj.department,
+        userObj.designation,
+        userObj.employee_id,
+        userObj.is_field_worker,
+        userObj.status
+      ]
+    );
+
+    try {
+      await this.pool!.query(
+        'INSERT INTO `solar_employees` (`id`, `employee_code`, `name`, `email`, `phone`, `department`, `designation`, `system_role`, `assigned_role`, `login_enabled`, `account_status`, `status`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
+        [
+          userObj.id,
+          empCode,
+          userObj.name,
+          userObj.email,
+          userObj.phone,
+          userObj.department,
+          userObj.designation,
+          'Admin',
+          'Admin',
+          'ACTIVE',
+          'ACTIVE'
+        ]
+      );
+    } catch {}
+
+    const sanitized = {
+      id: userObj.id,
+      name: userObj.name,
+      email: userObj.email,
+      role: userObj.role,
+      phone: userObj.phone,
+      department: userObj.department,
+      designation: userObj.designation,
+      employeeId: userObj.employee_id,
+      isFieldWorker: false
+    };
+
+    const items = this.getFallbackItems('users');
+    items.unshift(sanitized);
+    this.setFallbackItems('users', items);
+
+    return sanitized;
+  }
+
   public async authenticateUser(email: string, pass: string): Promise<any | null> {
     this.assertDbConnected();
     const cleanEmail = email.trim().toLowerCase();
@@ -2758,7 +2867,20 @@ class MySqlDatabaseManager {
     const [users]: any = await this.pool!.query('SELECT * FROM `solar_users` WHERE LOWER(email) = ?', [cleanEmail]);
     if (Array.isArray(users) && users.length > 0) {
       const u = users[0];
-      if (u.password === cleanPass || cleanPass === '123456') {
+      let isMatch = false;
+
+      if (u.password && (u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$'))) {
+        isMatch = await bcrypt.compare(cleanPass, u.password);
+      } else if (u.password === cleanPass || cleanPass === '123456') {
+        isMatch = true;
+        // Automatically upgrade legacy plaintext to bcrypt in MySQL
+        try {
+          const hashed = await bcrypt.hash(cleanPass, 10);
+          await this.pool!.query('UPDATE `solar_users` SET `password` = ? WHERE `id` = ?', [hashed, u.id]);
+        } catch {}
+      }
+
+      if (isMatch) {
         return {
           id: u.id,
           name: u.name,
@@ -2776,7 +2898,19 @@ class MySqlDatabaseManager {
     const [customers]: any = await this.pool!.query('SELECT * FROM `solar_customers` WHERE LOWER(email) = ?', [cleanEmail]);
     if (Array.isArray(customers) && customers.length > 0) {
       const c = customers[0];
-      if (c.password === cleanPass || cleanPass === '123456') {
+      let isMatch = false;
+
+      if (c.password && (c.password.startsWith('$2a$') || c.password.startsWith('$2b$') || c.password.startsWith('$2y$'))) {
+        isMatch = await bcrypt.compare(cleanPass, c.password);
+      } else if (c.password === cleanPass || cleanPass === '123456') {
+        isMatch = true;
+        try {
+          const hashed = await bcrypt.hash(cleanPass, 10);
+          await this.pool!.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [hashed, c.id]);
+        } catch {}
+      }
+
+      if (isMatch) {
         return {
           id: `usr-${c.id}`,
           customerId: c.id,
@@ -2792,6 +2926,137 @@ class MySqlDatabaseManager {
     }
 
     return null;
+  }
+
+  public async backupAndWipeData(confirmation: string): Promise<{
+    success: boolean;
+    backupFile: string;
+    affectedTables: string[];
+    affectedBrowserKeys: string[];
+    preservedTables: string[];
+    recordsWiped: number;
+    message: string;
+  }> {
+    this.assertDbConnected();
+    if (confirmation !== 'CONFIRM_WIPE_ERP_DATA') {
+      throw new Error('Explicit confirmation code "CONFIRM_WIPE_ERP_DATA" is required to proceed.');
+    }
+
+    const businessTables = [
+      'solar_quotations',
+      'solar_site_surveys',
+      'solar_project_stages',
+      'solar_payments',
+      'solar_expenses',
+      'solar_service_tickets',
+      'solar_amc_contracts',
+      'solar_projects',
+      'solar_leads',
+      'solar_customers',
+      'solar_purchase_orders',
+      'solar_boms',
+      'solar_sales_invoices',
+      'solar_stock_movements',
+      'solar_stock_audits',
+      'solar_products',
+      'solar_vendors',
+      'solar_warehouses',
+      'solar_attendance',
+      'solar_payslips',
+      'solar_holidays',
+      'solar_workforce_locations',
+      'solar_acl_audit_logs',
+      'solar_notifications'
+    ];
+
+    const preservedTables = [
+      'solar_users',
+      'solar_system_settings',
+      'solar_acl_config'
+    ];
+
+    const affectedBrowserKeys = [
+      'solar_erp_leads_v2', 'solar_erp_customers_v2', 'solar_erp_projects_v2', 'solar_erp_payments_v2',
+      'solar_erp_expenses_v2', 'solar_erp_employees_v2', 'solar_erp_attendance_v2', 'solar_erp_payslips_v2',
+      'solar_erp_holidays_v2', 'solar_erp_service_tickets_v2', 'solar_erp_amc_contracts_v2', 'solar_erp_notifications_v2',
+      'solar_erp_surveys_v2', 'solar_erp_quotations_v2', 'solar_erp_products_v2', 'solar_erp_vendors_v2',
+      'solar_erp_purchase_orders_v2', 'solar_erp_boms_v2', 'solar_erp_sales_invoices_v2', 'solar_erp_stock_movements_v2',
+      'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2'
+    ];
+
+    // 1. Create SQL Backup
+    const backupDir = path.join(process.cwd(), 'backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupFileName = `rejoy_erp_backup_${timestamp}.sql`;
+    const backupFilePath = path.join(backupDir, backupFileName);
+
+    let backupSql = `-- Rejoy Solar ERP Database Backup\n-- Created: ${new Date().toISOString()}\n-- Database: ${this.config.database}\n\nSET FOREIGN_KEY_CHECKS = 0;\n\n`;
+
+    const allTables = [...businessTables, ...preservedTables];
+    for (const table of allTables) {
+      try {
+        const [rows]: any = await this.pool!.query(`SELECT * FROM \`${table}\``);
+        if (Array.isArray(rows) && rows.length > 0) {
+          backupSql += `-- Data for ${table} (${rows.length} rows)\n`;
+          for (const row of rows) {
+            const cols = Object.keys(row).map(c => `\`${c}\``).join(', ');
+            const vals = Object.values(row).map(v => {
+              if (v === null || v === undefined) return 'NULL';
+              if (typeof v === 'number' || typeof v === 'boolean') return v;
+              if (v instanceof Date) return `'${v.toISOString().slice(0, 19).replace('T', ' ')}'`;
+              return `'${String(v).replace(/'/g, "\\'")}'`;
+            }).join(', ');
+            backupSql += `INSERT INTO \`${table}\` (${cols}) VALUES (${vals});\n`;
+          }
+          backupSql += '\n';
+        }
+      } catch (err: any) {
+        backupSql += `-- Notice table ${table}: ${err.message}\n`;
+      }
+    }
+    backupSql += `SET FOREIGN_KEY_CHECKS = 1;\n`;
+    fs.writeFileSync(backupFilePath, backupSql, 'utf-8');
+
+    // 2. Clear business data in MySQL
+    let totalRowsWiped = 0;
+    await this.pool!.query('SET FOREIGN_KEY_CHECKS = 0');
+    for (const tbl of businessTables) {
+      try {
+        const [cntRes]: any = await this.pool!.query(`SELECT COUNT(*) as cnt FROM \`${tbl}\``);
+        const count = cntRes && cntRes[0] ? Number(cntRes[0].cnt) : 0;
+        totalRowsWiped += count;
+        await this.pool!.query(`DELETE FROM \`${tbl}\``);
+      } catch (e: any) {
+        console.warn(`[Wipe] Notice on table ${tbl}:`, e?.message);
+      }
+    }
+    await this.pool!.query('SET FOREIGN_KEY_CHECKS = 1');
+
+    // 3. Clear in-memory collections (except preserved ones)
+    for (const [key] of this.collections.entries()) {
+      if (key !== 'users' && key !== 'acl_config' && key !== 'settings') {
+        this.collections.set(key, []);
+      }
+    }
+
+    // 4. Remove local JSON cache if exists
+    const cacheFile = path.join(process.cwd(), '.erp_database_cache.json');
+    if (fs.existsSync(cacheFile)) {
+      try { fs.unlinkSync(cacheFile); } catch {}
+    }
+
+    return {
+      success: true,
+      backupFile: `/backups/${backupFileName}`,
+      affectedTables: businessTables,
+      affectedBrowserKeys,
+      preservedTables,
+      recordsWiped: totalRowsWiped,
+      message: `Successfully created backup (${backupFileName}) and cleared ${totalRowsWiped} records across ${businessTables.length} tables. Schema and administrative accounts preserved.`
+    };
   }
 
   // ==========================================================

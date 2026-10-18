@@ -245,64 +245,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cleanEmail = email.trim().toLowerCase();
       const cleanPass = pass.trim();
 
-      const employees = storageService.getEmployees();
-      const linkedEmp = employees.find(
-        e => e.email && e.email.trim().toLowerCase() === cleanEmail
-      );
-      const demoAccount = DEMO_ACCOUNTS.find(d => d.email.toLowerCase() === cleanEmail);
+      // Authenticate directly with the authoritative MySQL backend
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password: cleanPass })
+      });
 
-      const customers = storageService.getCustomers();
-      const linkedCustomer = customers.find(
-        c => c.email && c.email.trim().toLowerCase() === cleanEmail
-      );
+      const data = await res.json().catch(() => ({}));
 
-      // Check account activation
-      if (linkedEmp) {
-        if (linkedEmp.loginEnabled === false) {
-          throw new Error('ERP login is not enabled for this employee account. Please contact an administrator.');
-        }
-        if (linkedEmp.accountStatus === 'DISABLED' || linkedEmp.status === 'INACTIVE') {
-          throw new Error('This user account has been disabled by an administrator.');
-        }
+      if (!res.ok || !data.success || !data.user) {
+        throw new Error(data.message || 'Invalid email or password. Please verify your credentials in MySQL.');
       }
 
-      if (linkedCustomer && linkedCustomer.status === 'CANCELLED') {
-        throw new Error('This customer account is inactive. Please contact an administrator.');
-      }
-
-      // Check bootstrapped owner/admin accounts
-      const isBootstrappedAdmin =
-        cleanEmail === 'admin@rejoysolar.com' ||
-        cleanEmail === 'dasest404@gmail.com' ||
-        cleanEmail === 'kunaldas2442@gmail.com';
-
-      // Validate account existence
-      if (!linkedEmp && !demoAccount && !isBootstrappedAdmin && !linkedCustomer && !cleanEmail.includes('customer')) {
-        throw new Error('Account not found with this email address. Please contact an administrator.');
-      }
-
-      // Check password match (supports customer-specific password, employee default, or standard fallback)
-      const expectedCustomerPassword = linkedCustomer?.password;
-      const isCustomerPassMatch = Boolean(expectedCustomerPassword && cleanPass === expectedCustomerPassword);
-      const isStandardPassMatch = cleanPass === DEMO_DEFAULT_PASSWORD || cleanPass === 'Password@123';
-
-      if (!isCustomerPassMatch && !isStandardPassMatch) {
-        throw new Error('Invalid email or password. Please verify your credentials.');
-      }
-
-      // Construct profile for authenticated user
-      const defaultRole: UserRole = isBootstrappedAdmin
-        ? 'Admin'
-        : linkedCustomer
-          ? 'Customer'
-          : linkedEmp?.systemRole ||
-            linkedEmp?.assignedRole ||
-            demoAccount?.role ||
-            (cleanEmail.includes('customer') ? 'Customer' : 'Admin');
-
+      const u = data.user;
       const isFw = Boolean(
-        linkedEmp?.isFieldWorker ??
-        demoAccount?.isFieldWorker ??
+        u.isFieldWorker ??
         [
           'Site Survey Engineer',
           'Site Inspector',
@@ -311,21 +269,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'Installation Team',
           'Electrical Team',
           'Technician'
-        ].includes(defaultRole)
+        ].includes(u.role)
       );
 
       const authenticatedProfile: UserProfile = {
-        id: linkedCustomer?.id || linkedEmp?.id || demoAccount?.profile.id || ('usr-emp-' + cleanEmail.replace(/[^a-z0-9]/g, '-')),
-        employeeId: linkedCustomer ? `CUST-${linkedCustomer.id}` : (linkedEmp?.employeeCode || linkedEmp?.id || (isBootstrappedAdmin ? 'EMP001' : 'EMP999')),
-        name: isBootstrappedAdmin
-          ? 'Vikram Patel (Lead Admin)'
-          : linkedCustomer?.name || linkedEmp?.name || demoAccount?.name || email.split('@')[0] || 'Solar Team Member',
-        email: cleanEmail,
-        role: defaultRole,
-        phone: linkedCustomer?.phone || linkedEmp?.phone || '+91 98250 11223',
-        department: linkedCustomer ? 'Client Portal' : (isBootstrappedAdmin ? 'Administration' : (linkedEmp?.department || demoAccount?.department || 'Administration')),
-        designation: linkedCustomer ? 'Client Portal Account' : (isBootstrappedAdmin ? 'Managing Director' : (linkedEmp?.designation || demoAccount?.profile.designation || (defaultRole as string))),
-        isFieldWorker: linkedCustomer ? false : isFw,
+        id: u.id,
+        employeeId: u.employeeId || (u.customerId ? `CUST-${u.customerId}` : `EMP-${u.id}`),
+        name: u.name || 'Solar Team Member',
+        email: u.email,
+        role: u.role as UserRole,
+        phone: u.phone || '+91 98250 11223',
+        department: u.department || (u.role === 'Customer' ? 'Client Portal' : 'Administration'),
+        designation: u.designation || u.role,
+        isFieldWorker: isFw,
         assignedProjects: []
       };
 
@@ -348,28 +304,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ): Promise<void> => {
     setLoading(true);
     try {
-      const isFw = [
-        'Site Survey Engineer',
-        'Site Inspector',
-        'Civil Team',
-        'Structure Team',
-        'Installation Team',
-        'Electrical Team',
-        'Technician'
-      ].includes(role);
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanPass = pass.trim();
+      const cleanName = name.trim();
 
+      // Register directly via backend MySQL API
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: cleanName,
+          email: cleanEmail,
+          password: cleanPass,
+          confirmPassword: cleanPass,
+          phone,
+          department,
+          designation
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success || !data.user) {
+        throw new Error(data.message || 'Registration failed.');
+      }
+
+      const u = data.user;
       const newProfile: UserProfile = {
-        id: 'usr-local-' + Date.now(),
-        employeeId: 'EMP' + Math.floor(100 + Math.random() * 900),
-        name: name.trim() || email.split('@')[0],
-        email: email.trim().toLowerCase(),
-        role,
-        phone,
-        department: department || 'Administration',
-        designation: designation || role,
-        isFieldWorker: isFw,
+        id: u.id,
+        employeeId: u.employeeId || `EMP-ADM-${Date.now().toString().slice(-4)}`,
+        name: u.name,
+        email: u.email,
+        role: (u.role || role) as UserRole,
+        phone: u.phone || phone,
+        department: u.department || department || 'Administration',
+        designation: u.designation || designation || 'Lead Administrator',
+        isFieldWorker: false,
         assignedProjects: []
       };
+
       saveUserProfile(newProfile);
     } catch (err: any) {
       throw new Error(err?.message || 'Registration failed.');

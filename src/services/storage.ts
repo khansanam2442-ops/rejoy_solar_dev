@@ -3072,6 +3072,26 @@ class StorageService {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      try {
+        const obsoleteKeys = [
+          'solar_erp_leads', 'solar_erp_customers', 'solar_erp_projects', 'solar_erp_payments',
+          'solar_erp_expenses', 'solar_erp_employees', 'solar_erp_attendance', 'solar_erp_payslips',
+          'solar_erp_holidays', 'solar_erp_service_tickets', 'solar_erp_amc_contracts', 'solar_erp_notifications',
+          'solar_erp_surveys', 'solar_erp_quotations', 'solar_erp_products', 'solar_erp_vendors',
+          'solar_erp_purchase_orders', 'solar_erp_boms', 'solar_erp_sales_invoices', 'solar_erp_stock_movements',
+          'solar_erp_warehouses', 'solar_erp_stock_audits', 'solar_erp_acl_audit_logs', 'solar_erp_settings',
+          'solar_erp_leads_v2', 'solar_erp_customers_v2', 'solar_erp_projects_v2', 'solar_erp_payments_v2',
+          'solar_erp_expenses_v2', 'solar_erp_employees_v2', 'solar_erp_attendance_v2', 'solar_erp_payslips_v2',
+          'solar_erp_holidays_v2', 'solar_erp_service_tickets_v2', 'solar_erp_amc_contracts_v2', 'solar_erp_notifications_v2',
+          'solar_erp_surveys_v2', 'solar_erp_quotations_v2', 'solar_erp_products_v2', 'solar_erp_vendors_v2',
+          'solar_erp_purchase_orders_v2', 'solar_erp_boms_v2', 'solar_erp_sales_invoices_v2', 'solar_erp_stock_movements_v2',
+          'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2', 'solar_erp_settings_v2'
+        ];
+        obsoleteKeys.forEach(k => {
+          localStorage.removeItem(k);
+          sessionStorage.removeItem(k);
+        });
+      } catch {}
       this.hydrateFromBackend();
     }
   }

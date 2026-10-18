@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { dbManager } from '../mysqlDatabase';
+import { dbManager, getDbConfigFromEnv } from '../mysqlDatabase';
 
 export const apiRouter = Router();
 
@@ -55,12 +55,13 @@ apiRouter.get('/db/status', (_req: Request, res: Response) => {
 apiRouter.post('/db/test-connection', async (req: Request, res: Response) => {
   try {
     const { host, port, user, password, database } = req.body || {};
+    const envConfig = getDbConfigFromEnv();
     const result = await dbManager.testConnection({
-      host: host || '127.0.0.1',
-      port: Number(port) || 3306,
-      user: user || 'root',
-      password: password || '',
-      database: database || 'solarpulse_erp'
+      host: host || envConfig.host,
+      port: Number(port) || envConfig.port,
+      user: user || envConfig.user,
+      password: password !== undefined ? password : envConfig.password,
+      database: database || envConfig.database
     });
     res.json(result);
   } catch (err: any) {
@@ -79,12 +80,30 @@ apiRouter.post('/db/migrate', checkAdminAuth, async (req: Request, res: Response
   }
 });
 
+// Secure ERP data wipe with automatic pre-wipe database backup (Protected)
+apiRouter.post('/db/wipe', checkAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { confirmation } = req.body || {};
+    if (confirmation !== 'CONFIRM_WIPE_ERP_DATA') {
+      res.status(400).json({
+        success: false,
+        message: 'Explicit confirmation required. Send { confirmation: "CONFIRM_WIPE_ERP_DATA" }'
+      });
+      return;
+    }
+    const result = await dbManager.backupAndWipeData(confirmation);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Data wipe error' });
+  }
+});
+
 // Download standalone SQL database dump (Protected)
 apiRouter.get(['/db/dump.sql', '/db/export-sql'], checkAdminAuth, (_req: Request, res: Response) => {
   const dumpPath = path.join(process.cwd(), 'database.sql');
   if (fs.existsSync(dumpPath)) {
     res.setHeader('Content-Type', 'application/sql');
-    res.setHeader('Content-Disposition', 'attachment; filename="solarpulse_production_mysql.sql"');
+    res.setHeader('Content-Disposition', 'attachment; filename="rejoy_solar_production_mysql.sql"');
     fs.createReadStream(dumpPath).pipe(res);
   } else {
     res.status(404).json({ success: false, error: 'Database dump file not found.' });
@@ -146,8 +165,70 @@ apiRouter.post('/sync/push', async (req: Request, res: Response) => {
 });
 
 // ==========================================================
-// 3. AUTHENTICATION APIS (MYSQL BACKED)
+// 3. AUTHENTICATION & ADMIN REGISTRATION APIS (MYSQL BACKED)
 // ==========================================================
+
+apiRouter.get('/auth/registration-status', async (_req: Request, res: Response) => {
+  try {
+    const status = await dbManager.getAdminRegistrationStatus();
+    res.json({ success: true, ...status });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to check registration status' });
+  }
+});
+
+apiRouter.post('/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { name, email, password, confirmPassword, phone, department, designation } = req.body || {};
+
+    if (!name || !email || !password) {
+      res.status(400).json({ success: false, message: 'Name, email, and password are required.' });
+      return;
+    }
+
+    if (confirmPassword && password !== confirmPassword) {
+      res.status(400).json({ success: false, message: 'Passwords do not match.' });
+      return;
+    }
+
+    if (String(password).length < 6) {
+      res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+      return;
+    }
+
+    // Check if caller has administrative authorization header
+    const authHeader = req.headers.authorization;
+    const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
+    const isAuthorizedByAdmin = Boolean(authHeader || adminKey);
+
+    const user = await dbManager.registerAdmin(
+      {
+        name,
+        email,
+        password,
+        phone,
+        department,
+        designation
+      },
+      isAuthorizedByAdmin
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Admin account created successfully.',
+      user,
+      token: `jwt-mysql-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    });
+  } catch (err: any) {
+    const msg = err?.message || 'Registration failed';
+    const isConflict = msg.includes('already exists') || msg.includes('already registered');
+    const isForbidden = msg.includes('registration is closed');
+    res.status(isConflict ? 409 : isForbidden ? 403 : 500).json({
+      success: false,
+      message: msg
+    });
+  }
+});
 
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {

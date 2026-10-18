@@ -431,7 +431,7 @@ async function runAudit() {
       grandTotal: 2105300
     });
     const po1 = await sqlQuery('SELECT * FROM `solar_purchase_orders` WHERE `id` = ?', [id]);
-    const createdOk = po1.length === 1 && Number(po1[0].grand_total) === 2105300;
+    const createdOk = po1.length === 1 && Number(po1[0].total_amount) === 2105300;
 
     await dbManager.savePurchaseOrder({ id, status: 'RECEIVED', stockUpdated: true });
     const po2 = await sqlQuery('SELECT * FROM `solar_purchase_orders` WHERE `id` = ?', [id]);
@@ -509,11 +509,11 @@ async function runAudit() {
       status: 'PARTIALLY_PAID'
     });
     const in1 = await sqlQuery('SELECT * FROM `solar_sales_invoices` WHERE `id` = ?', [id]);
-    const createdOk = in1.length === 1 && Number(in1[0].grand_total) === 1180000;
+    const createdOk = in1.length === 1 && Number(in1[0].total_amount) === 1180000;
 
     await dbManager.saveSalesInvoice({ id, status: 'PAID', amountPaid: 1180000, balanceDue: 0 });
     const in2 = await sqlQuery('SELECT * FROM `solar_sales_invoices` WHERE `id` = ?', [id]);
-    const updatedOk = in2.length === 1 && in2[0].status === 'PAID';
+    const updatedOk = in2.length === 1 && in2[0].payment_status === 'PAID';
 
     await dbManager.deleteSalesInvoice(id);
     const in3 = await sqlQuery('SELECT * FROM `solar_sales_invoices` WHERE `id` = ?', [id]);
@@ -812,7 +812,7 @@ async function runAudit() {
       status: 'OPEN'
     });
     const st1 = await sqlQuery('SELECT * FROM `solar_service_tickets` WHERE `id` = ?', [id]);
-    const createdOk = st1.length === 1 && st1[0].title === 'Audit Inverter Fault Alert';
+    const createdOk = st1.length === 1 && (st1[0].issue === 'Audit Inverter Fault Alert' || st1[0].title === 'Audit Inverter Fault Alert');
 
     await dbManager.saveServiceTicket({ id, status: 'RESOLVED', notes: 'Replaced DC fuse' });
     const st2 = await sqlQuery('SELECT * FROM `solar_service_tickets` WHERE `id` = ?', [id]);
@@ -850,7 +850,7 @@ async function runAudit() {
       status: 'ACTIVE'
     });
     const am1 = await sqlQuery('SELECT * FROM `solar_amc_contracts` WHERE `id` = ?', [id]);
-    const createdOk = am1.length === 1 && Number(am1[0].contract_value) === 120000;
+    const createdOk = am1.length === 1 && (Number(am1[0].annual_amount) === 120000 || Number(am1[0].contract_value) === 120000);
 
     await dbManager.saveAMCContract({ id, visitsCompleted: 1, notes: 'Q1 preventative maintenance completed' });
     const am2 = await sqlQuery('SELECT * FROM `solar_amc_contracts` WHERE `id` = ?', [id]);
@@ -1065,7 +1065,8 @@ async function runAudit() {
     Status: r.status,
     'Created SQL Verified': r.createdRowVerified ? 'YES' : 'NO',
     'Updated SQL Verified': r.updatedRowVerified ? 'YES' : 'NO',
-    'Deleted SQL Verified': r.deletedRowVerified ? 'YES' : 'NO'
+    'Deleted SQL Verified': r.deletedRowVerified ? 'YES' : 'NO',
+    Details: r.details
   })));
 
   const allPassed = results.every(r => r.status === 'PASS') && failureThrown && restartPersistencePassed;

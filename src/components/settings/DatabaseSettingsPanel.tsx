@@ -28,11 +28,11 @@ export const DatabaseSettingsPanel: React.FC = () => {
   // Custom connection testing state
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [dbConfig, setDbConfig] = useState({
-    host: 'localhost',
+    host: '127.0.0.1',
     port: 3306,
-    user: 'root',
+    user: 'u238683373_rejoy_solar',
     password: '',
-    database: 'solarpulse_erp'
+    database: 'u238683373_rejoy_solar'
   });
 
   const loadStatus = async () => {
@@ -215,11 +215,11 @@ export const DatabaseSettingsPanel: React.FC = () => {
             </div>
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 text-xs">
               <span className="text-slate-500 font-medium">Target Database</span>
-              <span className="font-mono font-bold text-slate-800">{status?.database || 'solarpulse_erp'}</span>
+              <span className="font-mono font-bold text-slate-800">{status?.database || 'u238683373_rejoy_solar'}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-slate-500 font-medium">Host : Port</span>
-              <span className="font-mono font-bold text-slate-800">{status?.host || 'localhost'}:{status?.port || 3306}</span>
+              <span className="font-mono font-bold text-slate-800">{status?.host || '127.0.0.1'}:{status?.port || 3306}</span>
             </div>
           </div>
 
@@ -275,7 +275,7 @@ export const DatabaseSettingsPanel: React.FC = () => {
 
           <ol className="text-xs text-slate-600 space-y-2.5 pt-1 list-decimal list-inside">
             <li>
-              <span className="font-semibold text-slate-800">Create MySQL DB:</span> In cPanel or phpMyAdmin create <code className="bg-slate-100 px-1 py-0.5 rounded text-[11px]">solarpulse_erp</code>.
+              <span className="font-semibold text-slate-800">Create MySQL DB:</span> In cPanel or phpMyAdmin create <code className="bg-slate-100 px-1 py-0.5 rounded text-[11px]">u238683373_rejoy_solar</code>.
             </li>
             <li>
               <span className="font-semibold text-slate-800">Import Dump:</span> Click <em>Import</em> in phpMyAdmin and choose <code className="bg-slate-100 px-1 py-0.5 rounded text-[11px]">database.sql</code>.
