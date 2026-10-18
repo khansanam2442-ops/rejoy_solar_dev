@@ -86,7 +86,7 @@ getPusherServer();
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.APP_PORT || (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '3000')) || 3000;
+  const PORT = 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
