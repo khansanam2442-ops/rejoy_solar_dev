@@ -1,51 +1,70 @@
 <?php
 /**
- * Hostinger Apache/LiteSpeed PHP API Router & Gateway for SolarPulse ERP
- * Provides zero-dependency native PHP execution against MySQL database
- * u238683373_rejoy_solar for Hostinger Shared Hosting environments.
+ * Hostinger Apache/LiteSpeed Native PHP API Gateway for Rejoy Solar ERP
+ * Handles all production /api/* requests with direct MySQL database persistence,
+ * bcrypt password hashing, privilege escalation checks, and strict JSON error responses.
  */
 
-// 1. Strict JSON Response & CORS Headers
+// 1. Prevent raw PHP error dumps from corrupting JSON payloads
+ini_set('display_errors', '0');
+error_reporting(E_ALL);
+
+// 2. Strict JSON Response & CORS Headers
 header('Content-Type: application/json; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, x-admin-token, x-admin-key');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-// 2. Parse Environment Variables from .env file
+// 3. Global Exception Handler (Guarantees strict JSON, never HTML 500)
+set_exception_handler(function ($e) {
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Internal server error while processing API request.',
+        'details' => $e->getMessage()
+    ]);
+    exit;
+});
+
+// 4. Parse Environment Variables from .env file
 function loadEnvConfig() {
     $searchPaths = [
+        isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . '/.env' : null,
         dirname(__DIR__, 2) . '/.env',
         dirname(__DIR__) . '/.env',
-        __DIR__ . '/.env',
-        isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . '/.env' : null
+        __DIR__ . '/.env'
     ];
 
     $env = [];
     foreach ($searchPaths as $path) {
         if ($path && file_exists($path) && is_readable($path)) {
             $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            foreach ($lines as $line) {
-                $trimmed = trim($line);
-                if (empty($trimmed) || strpos($trimmed, '#') === 0) continue;
-                $parts = explode('=', $trimmed, 2);
-                if (count($parts) === 2) {
-                    $key = trim($parts[0]);
-                    $val = trim($parts[1]);
-                    // Strip enclosing quotes
-                    if ((str_starts_with($val, '"') && str_ends_with($val, '"')) ||
-                        (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
-                        $val = substr($val, 1, -1);
+            if ($lines !== false) {
+                foreach ($lines as $line) {
+                    $trimmed = trim($line);
+                    if (empty($trimmed) || $trimmed[0] === '#') continue;
+                    $pos = strpos($trimmed, '=');
+                    if ($pos !== false) {
+                        $key = trim(substr($trimmed, 0, $pos));
+                        $val = trim(substr($trimmed, $pos + 1));
+                        $len = strlen($val);
+                        if ($len >= 2) {
+                            if (($val[0] === '"' && $val[$len - 1] === '"') ||
+                                ($val[0] === "'" && $val[$len - 1] === "'")) {
+                                $val = substr($val, 1, -1);
+                            }
+                        }
+                        $env[$key] = $val;
                     }
-                    $env[$key] = $val;
                 }
+                break;
             }
-            break;
         }
     }
 
@@ -60,62 +79,86 @@ function loadEnvConfig() {
 
 $dbConfig = loadEnvConfig();
 
-// 3. Database Connection Helper
+// 5. Database Connection with TCP/Socket Fallback and Strict Timeout
 function getDbConnection($config) {
-    try {
-        $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['name']};charset=utf8mb4";
-        $pdo = new PDO($dsn, $config['user'], $config['pass'], [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false
-        ]);
-        return $pdo;
-    } catch (PDOException $e) {
-        http_response_code(500);
-        echo json_encode([
-            'success' => false,
-            'error' => 'Database connection failed: ' . $e->getMessage(),
-            'database' => $config['name']
-        ]);
-        exit;
+    $hosts = [$config['host']];
+    if ($config['host'] === '127.0.0.1') {
+        $hosts[] = 'localhost';
+    } elseif ($config['host'] === 'localhost') {
+        $hosts[] = '127.0.0.1';
     }
+
+    $lastError = '';
+    foreach ($hosts as $host) {
+        try {
+            $dsn = "mysql:host={$host};port={$config['port']};dbname={$config['name']};charset=utf8mb4";
+            $pdo = new PDO($dsn, $config['user'], $config['pass'], [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::ATTR_TIMEOUT => 4
+            ]);
+            return $pdo;
+        } catch (PDOException $e) {
+            $lastError = $e->getMessage();
+        }
+    }
+
+    http_response_code(503);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Database connection failed. Please verify MySQL service and credentials in .env.',
+        'database' => $config['name']
+    ]);
+    exit;
 }
 
-// 4. Resolve Request Method and Path
-$method = $_SERVER['REQUEST_METHOD'];
+// 6. Normalize Path & Method
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
-$parsedUrl = parse_url($requestUri, PHP_URL_PATH);
+$parsedPath = parse_url($requestUri, PHP_URL_PATH) ?: '/';
+if (!empty($_SERVER['PATH_INFO'])) {
+    $parsedPath = $_SERVER['PATH_INFO'];
+}
 
-// Normalize path: strip query parameters, trailing slash, and leading base
-$path = rtrim($parsedUrl, '/');
-if (empty($path)) $path = '/';
+$cleanPath = rtrim($parsedPath, '/');
+if (empty($cleanPath)) $cleanPath = '/';
 
-// Support path both with and without /api prefix
-$cleanPath = $path;
-if (str_starts_with($cleanPath, '/api')) {
+// Strip /api prefix if present
+if (substr($cleanPath, 0, 4) === '/api') {
     $cleanPath = substr($cleanPath, 4);
     if (empty($cleanPath)) $cleanPath = '/';
 }
+$cleanPath = rtrim($cleanPath, '/');
+if (empty($cleanPath)) $cleanPath = '/';
 
 $rawInput = file_get_contents('php://input');
 $body = json_decode($rawInput, true) ?: [];
 
-// 5. Route Handling
+// 7. Route Handling
 
-// Health / Status Check
+// Health & Availability Check
 if ($method === 'GET' && in_array($cleanPath, ['/health', '/status', '/status.php', '/'])) {
+    $dbConnected = false;
+    $dbVersion = 'Unknown';
+    try {
+        $pdo = getDbConnection($dbConfig);
+        $stmt = $pdo->query('SELECT VERSION() as v');
+        $row = $stmt->fetch();
+        $dbConnected = true;
+        $dbVersion = $row['v'] ?? 'Connected';
+    } catch (Exception $e) {}
+
     http_response_code(200);
     echo json_encode([
         'status' => 'ONLINE',
-        'app' => 'SolarPulse EPC ERP & CRM',
+        'app' => 'Rejoy Solar ERP & CRM',
         'version' => '1.0.0',
-        'backend' => 'Hostinger Native PHP/MySQL Router',
+        'backend' => 'Hostinger Native PHP/MySQL Gateway',
+        'database' => $dbConnected ? 'CONNECTED' : 'DISCONNECTED',
+        'db_version' => $dbVersion,
         'server_time' => date('c'),
-        'features' => [
-            'database' => $dbConfig['name'],
-            'spa_routing' => true,
-            'auth' => true
-        ]
+        'routing' => 'Active Gateway (No Proxy Timeout)'
     ]);
     exit;
 }
@@ -134,7 +177,7 @@ if (in_array($cleanPath, ['/db/test-connection', '/db/test', '/db.php'])) {
     exit;
 }
 
-// Database Status Check
+// Database Status & Table Inventory
 if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
     $pdo = getDbConnection($dbConfig);
     $tables = [];
@@ -155,12 +198,12 @@ if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
     exit;
 }
 
-// Admin Registration Status Check
+// Administrator Registration Status
 if ($method === 'GET' && $cleanPath === '/auth/registration-status') {
     $pdo = getDbConnection($dbConfig);
     $stmt = $pdo->query("SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'");
     $admins = $stmt->fetchAll();
-    
+
     $nonDemoCount = 0;
     foreach ($admins as $a) {
         $email = strtolower($a['email'] ?? '');
@@ -189,7 +232,7 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
     $department = trim($body['department'] ?? 'Administration');
     $designation = trim($body['designation'] ?? 'Lead Administrator');
 
-    // Input Validation
+    // 1. Input Validation
     if (empty($name) || empty($email) || empty($password)) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => 'Name, email, and password are required.']);
@@ -216,7 +259,7 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
 
     $pdo = getDbConnection($dbConfig);
 
-    // Check existing admins to verify if public setup is allowed
+    // 2. Privilege Escalation Guard: Check if public setup is permitted
     $stmt = $pdo->query("SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'");
     $admins = $stmt->fetchAll();
     $nonDemoCount = 0;
@@ -228,7 +271,6 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
         }
     }
 
-    // Check for authorization headers
     $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     $adminToken = $_SERVER['HTTP_X_ADMIN_TOKEN'] ?? $_SERVER['HTTP_X_ADMIN_KEY'] ?? '';
     $isAuthorized = (!empty($authHeader) && strlen($authHeader) > 10) || (!empty($adminToken) && strlen($adminToken) > 5);
@@ -242,7 +284,7 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
         exit;
     }
 
-    // Check duplicate email in solar_users
+    // 3. Duplicate Email Check in solar_users
     $stmt = $pdo->prepare('SELECT id FROM `solar_users` WHERE LOWER(email) = ? LIMIT 1');
     $stmt->execute([$email]);
     if ($stmt->fetch()) {
@@ -251,7 +293,7 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
         exit;
     }
 
-    // Check duplicate email in solar_customers
+    // 4. Duplicate Email Check in solar_customers
     $stmt = $pdo->prepare('SELECT id FROM `solar_customers` WHERE LOWER(email) = ? LIMIT 1');
     $stmt->execute([$email]);
     if ($stmt->fetch()) {
@@ -260,48 +302,62 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
         exit;
     }
 
-    // Hash password with bcrypt
+    // 5. Secure bcrypt Password Hashing
     $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
     $userId = 'usr-admin-' . round(microtime(true) * 1000) . '-' . substr(bin2hex(random_bytes(3)), 0, 5);
     $empCode = 'EMP-ADM-' . rand(100, 999);
 
-    // Insert into solar_users
-    $stmt = $pdo->prepare("
-        INSERT INTO `solar_users` (
-            `id`, `name`, `email`, `password`, `role`, `phone`, `department`,
-            `designation`, `employee_id`, `is_field_worker`, `status`
-        ) VALUES (?, ?, ?, ?, 'Admin', ?, ?, ?, ?, 0, 'ACTIVE')
-    ");
-    $stmt->execute([
-        $userId,
-        $name,
-        $email,
-        $hashedPassword,
-        $phone,
-        $department,
-        $designation,
-        $empCode
-    ]);
-
-    // Insert into solar_employees for workforce directory
+    // 6. Transactional Database Insertion
+    $pdo->beginTransaction();
     try {
-        $stmtEmp = $pdo->prepare("
-            INSERT INTO `solar_employees` (
-                `id`, `employee_code`, `name`, `email`, `phone`, `department`,
-                `designation`, `system_role`, `assigned_role`, `login_enabled`, `account_status`, `status`
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Admin', 'Admin', 1, 'ACTIVE', 'ACTIVE')
+        $stmt = $pdo->prepare("
+            INSERT INTO `solar_users` (
+                `id`, `name`, `email`, `password`, `role`, `phone`, `department`,
+                `designation`, `employee_id`, `is_field_worker`, `status`
+            ) VALUES (?, ?, ?, ?, 'Admin', ?, ?, ?, ?, 0, 'ACTIVE')
         ");
-        $stmtEmp->execute([
+        $stmt->execute([
             $userId,
-            $empCode,
             $name,
             $email,
+            $hashedPassword,
             $phone,
             $department,
-            $designation
+            $designation,
+            $empCode
         ]);
+
+        try {
+            $stmtEmp = $pdo->prepare("
+                INSERT INTO `solar_employees` (
+                    `id`, `employee_code`, `name`, `email`, `phone`, `department`,
+                    `designation`, `system_role`, `assigned_role`, `login_enabled`, `account_status`, `status`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Admin', 'Admin', 1, 'ACTIVE', 'ACTIVE')
+            ");
+            $stmtEmp->execute([
+                $userId,
+                $empCode,
+                $name,
+                $email,
+                $phone,
+                $department,
+                $designation
+            ]);
+        } catch (Exception $e) {
+            // Non-fatal if employee directory row is already present
+        }
+
+        $pdo->commit();
     } catch (Exception $e) {
-        // Non-fatal if employee directory row fails
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Failed to save administrator record into MySQL: ' . $e->getMessage()
+        ]);
+        exit;
     }
 
     http_response_code(201);
@@ -324,7 +380,7 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
     exit;
 }
 
-// POST /api/auth/login - Administrator & Team Login
+// POST /api/auth/login - User Authentication
 if ($method === 'POST' && $cleanPath === '/auth/login') {
     $email = strtolower(trim($body['email'] ?? ''));
     $password = trim($body['password'] ?? '');
@@ -383,13 +439,58 @@ if ($method === 'POST' && $cleanPath === '/auth/login') {
     exit;
 }
 
+// GET /api/bootstrap - Master State Hydration
+if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $data = [];
+    $tableMap = [
+        'customers' => 'solar_customers',
+        'leads' => 'solar_leads',
+        'projects' => 'solar_projects',
+        'employees' => 'solar_employees',
+        'attendance' => 'solar_attendance',
+        'payslips' => 'solar_payslips',
+        'holidays' => 'solar_holidays',
+        'products' => 'solar_products',
+        'vendors' => 'solar_vendors',
+        'purchase_orders' => 'solar_purchase_orders',
+        'boms' => 'solar_boms',
+        'sales_invoices' => 'solar_sales_invoices',
+        'warehouses' => 'solar_warehouses',
+        'stock_movements' => 'solar_stock_movements',
+        'stock_audits' => 'solar_stock_audits',
+        'quotations' => 'solar_quotations',
+        'surveys' => 'solar_site_surveys',
+        'payments' => 'solar_payments',
+        'expenses' => 'solar_expenses',
+        'service_tickets' => 'solar_service_tickets',
+        'amc_contracts' => 'solar_amc_contracts',
+        'notifications' => 'solar_notifications',
+        'users' => 'solar_users',
+        'settings' => 'solar_system_settings',
+        'acl_config' => 'solar_acl_config',
+        'acl_audit_logs' => 'solar_acl_audit_logs'
+    ];
+    foreach ($tableMap as $col => $tbl) {
+        try {
+            $stmt = $pdo->query("SELECT * FROM `$tbl`");
+            $rows = $stmt->fetchAll();
+            $data[$col] = $rows;
+        } catch (Exception $e) {
+            $data[$col] = [];
+        }
+    }
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $data]);
+    exit;
+}
+
 // Default 404 for unhandled API routes (Always returns JSON, NEVER index.html)
 http_response_code(404);
 echo json_encode([
     'success' => false,
     'error' => 'API endpoint not found',
-    'path' => $path,
-    'cleanPath' => $cleanPath,
+    'path' => $parsedPath,
     'method' => $method
 ]);
 exit;
