@@ -636,6 +636,313 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/login', '/auth/login/']))
     exit;
 }
 
+// Helper: Save Customer into MySQL
+function saveCustomerToDb($pdo, $item) {
+    if (empty($item['id'])) {
+        $item['id'] = 'cust-' . round(microtime(true) * 1000);
+    }
+    $customerCode = $item['customerCode'] ?? $item['customer_code'] ?? ('CUST-' . rand(100, 999));
+    $name = trim($item['name'] ?? '');
+    $companyName = trim($item['companyName'] ?? $item['company_name'] ?? $name);
+    $customerType = $item['customerType'] ?? $item['customer_type'] ?? 'Commercial';
+    $phone = trim($item['phone'] ?? '');
+    $email = strtolower(trim($item['email'] ?? ''));
+    $password = $item['password'] ?? '123456';
+    $siteAddress = $item['siteAddress'] ?? $item['site_address'] ?? '';
+    $city = $item['city'] ?? 'Ahmedabad';
+    $state = $item['state'] ?? 'Gujarat';
+    $pincode = $item['pincode'] ?? '380001';
+    $gstNumber = $item['gstNumber'] ?? $item['gst_number'] ?? '';
+    $electricityConsumerNo = $item['electricityConsumerNo'] ?? $item['electricity_consumer_no'] ?? '';
+    $sanctionedLoadKw = floatval($item['sanctionedLoadKw'] ?? $item['sanctioned_load_kw'] ?? 0);
+    $status = $item['status'] ?? 'ACTIVE';
+    $activeProjectId = $item['activeProjectId'] ?? $item['active_project_id'] ?? null;
+
+    $stmt = $pdo->prepare("
+        INSERT INTO `solar_customers` (
+            `id`, `customer_code`, `name`, `company_name`, `customer_type`,
+            `phone`, `email`, `password`, `site_address`, `city`, `state`,
+            `pincode`, `gst_number`, `electricity_consumer_no`, `sanctioned_load_kw`,
+            `status`, `active_project_id`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            `name` = VALUES(`name`),
+            `company_name` = VALUES(`company_name`),
+            `customer_type` = VALUES(`customer_type`),
+            `phone` = VALUES(`phone`),
+            `email` = VALUES(`email`),
+            `site_address` = VALUES(`site_address`),
+            `city` = VALUES(`city`),
+            `state` = VALUES(`state`),
+            `pincode` = VALUES(`pincode`),
+            `gst_number` = VALUES(`gst_number`),
+            `electricity_consumer_no` = VALUES(`electricity_consumer_no`),
+            `sanctioned_load_kw` = VALUES(`sanctioned_load_kw`),
+            `status` = VALUES(`status`),
+            `active_project_id` = VALUES(`active_project_id`)
+    ");
+    $stmt->execute([
+        $item['id'], $customerCode, $name, $companyName, $customerType,
+        $phone, $email, $password, $siteAddress, $city, $state,
+        $pincode, $gstNumber, $electricityConsumerNo, $sanctionedLoadKw,
+        $status, $activeProjectId
+    ]);
+
+    return [
+        'id' => $item['id'],
+        'customerCode' => $customerCode,
+        'name' => $name,
+        'companyName' => $companyName,
+        'customerType' => $customerType,
+        'phone' => $phone,
+        'email' => $email,
+        'siteAddress' => $siteAddress,
+        'city' => $city,
+        'state' => $state,
+        'pincode' => $pincode,
+        'gstNumber' => $gstNumber,
+        'electricityConsumerNo' => $electricityConsumerNo,
+        'sanctionedLoadKw' => $sanctionedLoadKw,
+        'status' => $status,
+        'activeProjectId' => $activeProjectId,
+        'createdAt' => date('c'),
+        'updatedAt' => date('c')
+    ];
+}
+
+// Helper: Save Project into MySQL
+function saveProjectToDb($pdo, $item) {
+    if (empty($item['id'])) {
+        $item['id'] = 'proj-' . round(microtime(true) * 1000);
+    }
+    $projectCode = $item['projectCode'] ?? $item['project_code'] ?? ('SOL-' . date('Y') . '-' . rand(100, 999));
+    $customerId = $item['customerId'] ?? $item['customer_id'] ?? '';
+    $customerName = $item['customerName'] ?? $item['customer_name'] ?? '';
+    $title = $item['title'] ?? 'Solar Project';
+    $capacityKw = floatval($item['capacityKw'] ?? $item['capacity_kw'] ?? 10);
+    $totalValue = floatval($item['totalValue'] ?? $item['total_value'] ?? 500000);
+    $status = $item['status'] ?? 'SURVEY';
+    $currentStageKey = $item['currentStageKey'] ?? $item['current_stage_key'] ?? 'site_survey';
+    $completionPercentage = intval($item['completionPercentage'] ?? $item['completion_percentage'] ?? 0);
+    $progressPercentage = intval($item['progressPercentage'] ?? $item['progress_percentage'] ?? 0);
+    $location = $item['location'] ?? 'Ahmedabad';
+    $assignedUsersJson = is_string($item['assignedUsers'] ?? '') ? $item['assignedUsers'] : json_encode($item['assignedUsers'] ?? []);
+    $siteAddress = $item['siteAddress'] ?? $item['site_address'] ?? '';
+    $city = $item['city'] ?? 'Ahmedabad';
+    $startDate = !empty($item['startDate']) ? date('Y-m-d', strtotime($item['startDate'])) : date('Y-m-d');
+    $expectedCompletionDate = !empty($item['expectedCompletionDate']) ? date('Y-m-d', strtotime($item['expectedCompletionDate'])) : date('Y-m-d', strtotime('+45 days'));
+    $stagesJson = is_string($item['stages'] ?? '') ? $item['stages'] : json_encode($item['stages'] ?? []);
+    $notes = $item['notes'] ?? '';
+
+    $stmt = $pdo->prepare("
+        INSERT INTO `solar_projects` (
+            `id`, `project_code`, `customer_id`, `customer_name`, `title`,
+            `capacity_kw`, `total_value`, `status`, `current_stage_key`,
+            `completion_percentage`, `progress_percentage`, `location`,
+            `assigned_users_json`, `site_address`, `city`, `start_date`,
+            `expected_completion_date`, `stages_json`, `notes`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            `customer_name` = VALUES(`customer_name`),
+            `title` = VALUES(`title`),
+            `capacity_kw` = VALUES(`capacity_kw`),
+            `total_value` = VALUES(`total_value`),
+            `status` = VALUES(`status`),
+            `current_stage_key` = VALUES(`current_stage_key`),
+            `completion_percentage` = VALUES(`completion_percentage`),
+            `progress_percentage` = VALUES(`progress_percentage`),
+            `location` = VALUES(`location`),
+            `assigned_users_json` = VALUES(`assigned_users_json`),
+            `site_address` = VALUES(`site_address`),
+            `city` = VALUES(`city`),
+            `start_date` = VALUES(`start_date`),
+            `expected_completion_date` = VALUES(`expected_completion_date`),
+            `stages_json` = VALUES(`stages_json`),
+            `notes` = VALUES(`notes`)
+    ");
+    $stmt->execute([
+        $item['id'], $projectCode, $customerId, $customerName, $title,
+        $capacityKw, $totalValue, $status, $currentStageKey,
+        $completionPercentage, $progressPercentage, $location,
+        $assignedUsersJson, $siteAddress, $city, $startDate,
+        $expectedCompletionDate, $stagesJson, $notes
+    ]);
+
+    return [
+        'id' => $item['id'],
+        'projectCode' => $projectCode,
+        'customerId' => $customerId,
+        'customerName' => $customerName,
+        'title' => $title,
+        'capacityKw' => $capacityKw,
+        'totalValue' => $totalValue,
+        'status' => $status,
+        'currentStageKey' => $currentStageKey,
+        'completionPercentage' => $completionPercentage,
+        'progressPercentage' => $progressPercentage,
+        'location' => $location,
+        'assignedUsers' => is_string($item['assignedUsers'] ?? '') ? json_decode($item['assignedUsers'], true) : ($item['assignedUsers'] ?? []),
+        'siteAddress' => $siteAddress,
+        'city' => $city,
+        'startDate' => $startDate,
+        'expectedCompletionDate' => $expectedCompletionDate,
+        'stages' => is_string($item['stages'] ?? '') ? json_decode($item['stages'], true) : ($item['stages'] ?? []),
+        'notes' => $notes,
+        'createdAt' => date('c'),
+        'updatedAt' => date('c')
+    ];
+}
+
+// POST /api/sync/push - Real-Time MySQL Synchronization
+if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $collection = $body['collection'] ?? '';
+    $item = $body['item'] ?? null;
+    $items = $body['items'] ?? null;
+    $action = $body['action'] ?? 'save';
+
+    if (empty($collection)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Collection name is required.']);
+        exit;
+    }
+
+    if ($action === 'delete' && $item && !empty($item['id'])) {
+        $table = 'solar_' . $collection;
+        try {
+            $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
+            $stmt->execute([$item['id']]);
+        } catch (Exception $e) {}
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => "Deleted from $collection"]);
+        exit;
+    }
+
+    if ($item) {
+        $saved = $item;
+        if ($collection === 'customers') {
+            $saved = saveCustomerToDb($pdo, $item);
+        } elseif ($collection === 'projects') {
+            $saved = saveProjectToDb($pdo, $item);
+        }
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved, 'message' => "Saved to $collection"]);
+        exit;
+    }
+
+    if ($items && is_array($items)) {
+        foreach ($items as $it) {
+            if ($collection === 'customers') {
+                saveCustomerToDb($pdo, $it);
+            } elseif ($collection === 'projects') {
+                saveProjectToDb($pdo, $it);
+            }
+        }
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($items), 'message' => "Synced $collection to MySQL"]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => "Sync processed"]);
+    exit;
+}
+
+// Customers API: /customers
+if ($cleanPath === '/customers' || $cleanPath === '/customers/') {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'GET') {
+        $stmt = $pdo->query('SELECT * FROM `solar_customers` ORDER BY `created_at` DESC');
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($rows), 'data' => $rows]);
+        exit;
+    }
+
+    if ($method === 'POST') {
+        if (empty($body['name']) || empty($body['phone'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => 'Customer name and phone are required.']);
+            exit;
+        }
+        $saved = saveCustomerToDb($pdo, $body);
+        http_response_code(201);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+}
+
+// Match /customers/:id
+if (preg_match('#^/customers/([^/]+)$#', $cleanPath, $matches)) {
+    $customerId = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'PUT') {
+        $body['id'] = $customerId;
+        $saved = saveCustomerToDb($pdo, $body);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+
+    if ($method === 'DELETE') {
+        $stmt = $pdo->prepare('DELETE FROM `solar_customers` WHERE `id` = ?');
+        $stmt->execute([$customerId]);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Customer deleted.']);
+        exit;
+    }
+}
+
+// Projects API: /projects
+if ($cleanPath === '/projects' || $cleanPath === '/projects/') {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'GET') {
+        $stmt = $pdo->query('SELECT * FROM `solar_projects` ORDER BY `created_at` DESC');
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($rows), 'data' => $rows]);
+        exit;
+    }
+
+    if ($method === 'POST') {
+        $saved = saveProjectToDb($pdo, $body);
+        http_response_code(201);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+}
+
+// Match /projects/:id
+if (preg_match('#^/projects/([^/]+)$#', $cleanPath, $matches)) {
+    $projectId = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'PUT') {
+        $body['id'] = $projectId;
+        $saved = saveProjectToDb($pdo, $body);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+
+    if ($method === 'DELETE') {
+        $stmt = $pdo->prepare('DELETE FROM `solar_projects` WHERE `id` = ?');
+        $stmt->execute([$projectId]);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Project deleted.']);
+        exit;
+    }
+}
+
 // GET /api/bootstrap - Master State Hydration
 if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
     $pdo = getDbConnection($dbConfig);

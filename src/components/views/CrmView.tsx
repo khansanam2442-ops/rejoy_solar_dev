@@ -165,8 +165,8 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
     storageService.addLead({
       ...leadForm,
       status: 'NEW',
-      assignedToId: currentUser.id,
-      assignedToName: currentUser.name
+      assignedToId: currentUser?.id || 'emp-1',
+      assignedToName: currentUser?.name || 'Solar Team Member'
     });
 
     setIsNewLeadOpen(false);
@@ -195,9 +195,12 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
     try {
       const result = storageService.convertLeadToCustomerAndProject(
         lead.id,
-        currentUser.name,
-        currentUser.role
+        currentUser?.name || 'Administrator',
+        currentUser?.role || 'Admin'
       );
+      if (!result?.customer?.id || !result?.project?.id) {
+        throw new Error('Failed to convert lead: Missing customer or project identifier.');
+      }
       showToast(`Lead converted! Created Customer & Project ${result.project.projectCode}`, 'success');
       triggerRefresh();
       openCustomerControlCenter(result.customer.id, result.project.id);
@@ -233,9 +236,13 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
     try {
       const result = storageService.createCustomerAndProject(
         customerForm,
-        currentUser.name,
-        currentUser.role
+        currentUser?.name || 'Administrator',
+        currentUser?.role || 'Admin'
       );
+
+      if (!result?.customer?.id || !result?.project?.id) {
+        throw new Error('Failed to create customer: Missing customer or project identifier.');
+      }
 
       setIsNewCustomerOpen(false);
       showToast(`Created Customer "${result.customer.name}" & Project ${result.project.projectCode}. Stage 1 initialized.`, 'success');
