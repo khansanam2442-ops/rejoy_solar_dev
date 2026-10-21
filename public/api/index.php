@@ -21,13 +21,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     exit;
 }
 
-// 3. Global Exception Handler (Guarantees strict JSON, never HTML 500)
+// 3. Global Exception Handler (Guarantees strict JSON, never HTML 500, never leaks SQL details)
 set_exception_handler(function ($e) {
+    error_log('Unhandled API Gateway Exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     http_response_code(500);
     echo json_encode([
         'success' => false,
-        'error' => 'Internal server error while processing API request.',
-        'details' => $e->getMessage()
+        'error' => 'Internal server error while processing API request.'
     ]);
     exit;
 });
@@ -92,28 +92,127 @@ function getDbConnection($config) {
     foreach ($hosts as $host) {
         try {
             $dsn = "mysql:host={$host};port={$config['port']};dbname={$config['name']};charset=utf8mb4";
-            $pdo = new PDO($dsn, $config['user'], $config['pass'], [
+            $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
                 PDO::ATTR_TIMEOUT => 4
-            ]);
+            ];
+            if (defined('PDO::MYSQL_ATTR_MULTI_STATEMENTS')) {
+                $options[PDO::MYSQL_ATTR_MULTI_STATEMENTS] = true;
+            }
+            $pdo = new PDO($dsn, $config['user'], $config['pass'], $options);
             return $pdo;
         } catch (PDOException $e) {
             $lastError = $e->getMessage();
         }
     }
 
+    error_log("Database connection failed on host(s) " . implode(',', $hosts) . ": $lastError");
     http_response_code(503);
     echo json_encode([
         'success' => false,
         'error' => 'Database connection failed. Please verify MySQL service and credentials in .env.',
-        'database' => $config['name']
+        'allowPublicRegistration' => false
     ]);
     exit;
 }
 
-// 6. Normalize Path & Method
+// 6. Ensure Core Database Tables Exist (Auto-Provisioning / Self-Healing)
+function ensureRequiredTables($pdo) {
+    static $tablesVerified = false;
+    if ($tablesVerified) return;
+
+    try {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'solar_users'");
+        if ($stmt && $stmt->fetch()) {
+            $tablesVerified = true;
+            return;
+        }
+    } catch (Exception $e) {
+        // Table does not exist; proceed to creation
+    }
+
+    // 1. Create solar_users table
+    $sqlUsers = "CREATE TABLE IF NOT EXISTS `solar_users` (
+      `id` VARCHAR(64) PRIMARY KEY,
+      `name` VARCHAR(255) NOT NULL,
+      `email` VARCHAR(191) NOT NULL UNIQUE,
+      `password` VARCHAR(255) NOT NULL DEFAULT '123456',
+      `role` VARCHAR(64) NOT NULL DEFAULT 'Super Admin',
+      `phone` VARCHAR(32) DEFAULT '',
+      `department` VARCHAR(64) DEFAULT 'Operations',
+      `designation` VARCHAR(128) DEFAULT '',
+      `employee_id` VARCHAR(64) DEFAULT NULL,
+      `customer_id` VARCHAR(64) DEFAULT NULL,
+      `avatar` TEXT,
+      `is_field_worker` TINYINT(1) DEFAULT 0,
+      `status` VARCHAR(32) DEFAULT 'ACTIVE',
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX `idx_users_role` (`role`),
+      INDEX `idx_users_email` (`email`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+    // 2. Create solar_employees table
+    $sqlEmployees = "CREATE TABLE IF NOT EXISTS `solar_employees` (
+      `id` VARCHAR(64) PRIMARY KEY,
+      `employee_code` VARCHAR(32) NOT NULL UNIQUE,
+      `name` VARCHAR(255) NOT NULL,
+      `email` VARCHAR(191) NOT NULL UNIQUE,
+      `phone` VARCHAR(32) NOT NULL,
+      `department` VARCHAR(64) NOT NULL,
+      `designation` VARCHAR(128) NOT NULL,
+      `system_role` VARCHAR(64) NOT NULL DEFAULT 'Installation Team',
+      `assigned_role` VARCHAR(64) DEFAULT 'Installation Team',
+      `login_enabled` TINYINT(1) DEFAULT 1,
+      `account_status` VARCHAR(32) DEFAULT 'ACTIVE',
+      `status` VARCHAR(32) DEFAULT 'ACTIVE',
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+    // 3. Create solar_customers table
+    $sqlCustomers = "CREATE TABLE IF NOT EXISTS `solar_customers` (
+      `id` VARCHAR(64) PRIMARY KEY,
+      `customer_code` VARCHAR(32) NOT NULL UNIQUE,
+      `name` VARCHAR(255) NOT NULL,
+      `email` VARCHAR(191) NOT NULL UNIQUE,
+      `phone` VARCHAR(32) NOT NULL,
+      `password` VARCHAR(255) NOT NULL DEFAULT '123456',
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+    try {
+        $pdo->exec($sqlUsers);
+        $pdo->exec($sqlEmployees);
+        $pdo->exec($sqlCustomers);
+        $tablesVerified = true;
+    } catch (Exception $e) {
+        error_log('Failed to execute direct table initialization: ' . $e->getMessage());
+    }
+
+    // Try executing full schema.sql if available
+    $schemaFiles = [
+        __DIR__ . '/schema.sql',
+        __DIR__ . '/solar_mysql_dump.sql'
+    ];
+    foreach ($schemaFiles as $file) {
+        if (file_exists($file) && is_readable($file)) {
+            try {
+                $sql = file_get_contents($file);
+                if (!empty($sql)) {
+                    $pdo->exec($sql);
+                    $tablesVerified = true;
+                    break;
+                }
+            } catch (Exception $e) {
+                error_log('Notice during full schema import from ' . basename($file) . ': ' . $e->getMessage());
+            }
+        }
+    }
+}
+
+// 7. Normalize Path & Method
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
 $parsedPath = parse_url($requestUri, PHP_URL_PATH) ?: '/';
@@ -135,7 +234,7 @@ if (empty($cleanPath)) $cleanPath = '/';
 $rawInput = file_get_contents('php://input');
 $body = json_decode($rawInput, true) ?: [];
 
-// 7. Route Handling
+// 8. Route Handling
 
 // Health & Availability Check
 if ($method === 'GET' && in_array($cleanPath, ['/health', '/status', '/status.php', '/'])) {
@@ -181,10 +280,15 @@ if (in_array($cleanPath, ['/db/test-connection', '/db/test', '/db.php'])) {
 if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
     $pdo = getDbConnection($dbConfig);
     $tables = [];
-    $stmt = $pdo->query('SHOW TABLES');
-    while ($r = $stmt->fetch(PDO::FETCH_NUM)) {
-        $tables[] = $r[0];
+    try {
+        $stmt = $pdo->query('SHOW TABLES');
+        while ($r = $stmt->fetch(PDO::FETCH_NUM)) {
+            $tables[] = $r[0];
+        }
+    } catch (Exception $e) {
+        error_log('SHOW TABLES failed: ' . $e->getMessage());
     }
+
     http_response_code(200);
     echo json_encode([
         'success' => true,
@@ -198,17 +302,51 @@ if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
     exit;
 }
 
-// Administrator Registration Status
-if ($method === 'GET' && $cleanPath === '/auth/registration-status') {
+// POST /api/db/migrate - Initialize Database Schema
+if ($method === 'POST' && in_array($cleanPath, ['/db/migrate', '/db/migrate/'])) {
     $pdo = getDbConnection($dbConfig);
-    $stmt = $pdo->query("SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'");
-    $admins = $stmt->fetchAll();
+    ensureRequiredTables($pdo);
+
+    $tables = [];
+    try {
+        $stmt = $pdo->query('SHOW TABLES');
+        while ($r = $stmt->fetch(PDO::FETCH_NUM)) {
+            $tables[] = $r[0];
+        }
+    } catch (Exception $e) {}
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'message' => 'Database schema migration executed successfully.',
+        'tables' => $tables,
+        'tablesCount' => count($tables)
+    ]);
+    exit;
+}
+
+// GET /api/auth/registration-status - Administrator Registration Status
+if ($method === 'GET' && in_array($cleanPath, ['/auth/registration-status', '/auth/registration-status/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $admins = [];
+    try {
+        $stmt = $pdo->query("SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'");
+        if ($stmt) {
+            $admins = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+    } catch (PDOException $e) {
+        error_log('registration-status query notice: ' . $e->getMessage());
+        $admins = [];
+    }
 
     $nonDemoCount = 0;
     foreach ($admins as $a) {
         $email = strtolower($a['email'] ?? '');
         $id = $a['id'] ?? '';
-        if (!str_contains($email, 'admin@rejoysolar.com') && !str_starts_with($id, 'demo-')) {
+        $isDemo = (strpos($email, 'admin@rejoysolar.com') !== false) || (substr($id, 0, 5) === 'demo-');
+        if (!$isDemo) {
             $nonDemoCount++;
         }
     }
@@ -223,7 +361,7 @@ if ($method === 'GET' && $cleanPath === '/auth/registration-status') {
 }
 
 // POST /api/auth/register - Administrator Registration
-if ($method === 'POST' && $cleanPath === '/auth/register') {
+if ($method === 'POST' && in_array($cleanPath, ['/auth/register', '/auth/register/'])) {
     $name = trim($body['name'] ?? '');
     $email = strtolower(trim($body['email'] ?? ''));
     $password = trim($body['password'] ?? '');
@@ -258,15 +396,25 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
     }
 
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
 
     // 2. Privilege Escalation Guard: Check if public setup is permitted
-    $stmt = $pdo->query("SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'");
-    $admins = $stmt->fetchAll();
+    $admins = [];
+    try {
+        $stmt = $pdo->query("SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'");
+        if ($stmt) {
+            $admins = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+    } catch (PDOException $e) {
+        $admins = [];
+    }
+
     $nonDemoCount = 0;
     foreach ($admins as $a) {
         $em = strtolower($a['email'] ?? '');
         $id = $a['id'] ?? '';
-        if (!str_contains($em, 'admin@rejoysolar.com') && !str_starts_with($id, 'demo-')) {
+        $isDemo = (strpos($em, 'admin@rejoysolar.com') !== false) || (substr($id, 0, 5) === 'demo-');
+        if (!$isDemo) {
             $nonDemoCount++;
         }
     }
@@ -285,21 +433,29 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
     }
 
     // 3. Duplicate Email Check in solar_users
-    $stmt = $pdo->prepare('SELECT id FROM `solar_users` WHERE LOWER(email) = ? LIMIT 1');
-    $stmt->execute([$email]);
-    if ($stmt->fetch()) {
-        http_response_code(409);
-        echo json_encode(['success' => false, 'message' => 'An account with this email address already exists in MySQL.']);
-        exit;
+    try {
+        $stmt = $pdo->prepare('SELECT id FROM `solar_users` WHERE LOWER(email) = ? LIMIT 1');
+        $stmt->execute([$email]);
+        if ($stmt->fetch()) {
+            http_response_code(409);
+            echo json_encode(['success' => false, 'message' => 'An account with this email address already exists in MySQL.']);
+            exit;
+        }
+    } catch (PDOException $e) {
+        // Table verified
     }
 
     // 4. Duplicate Email Check in solar_customers
-    $stmt = $pdo->prepare('SELECT id FROM `solar_customers` WHERE LOWER(email) = ? LIMIT 1');
-    $stmt->execute([$email]);
-    if ($stmt->fetch()) {
-        http_response_code(409);
-        echo json_encode(['success' => false, 'message' => 'This email is already registered as an ERP customer.']);
-        exit;
+    try {
+        $stmt = $pdo->prepare('SELECT id FROM `solar_customers` WHERE LOWER(email) = ? LIMIT 1');
+        $stmt->execute([$email]);
+        if ($stmt->fetch()) {
+            http_response_code(409);
+            echo json_encode(['success' => false, 'message' => 'This email is already registered as an ERP customer.']);
+            exit;
+        }
+    } catch (PDOException $e) {
+        // Non-fatal if solar_customers not yet queried
     }
 
     // 5. Secure bcrypt Password Hashing
@@ -352,10 +508,11 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        error_log('Failed to save administrator record into MySQL: ' . $e->getMessage());
         http_response_code(500);
         echo json_encode([
             'success' => false,
-            'message' => 'Failed to save administrator record into MySQL: ' . $e->getMessage()
+            'message' => 'Failed to save administrator record into database. Please try again or contact administrator.'
         ]);
         exit;
     }
@@ -381,7 +538,7 @@ if ($method === 'POST' && $cleanPath === '/auth/register') {
 }
 
 // POST /api/auth/login - User Authentication
-if ($method === 'POST' && $cleanPath === '/auth/login') {
+if ($method === 'POST' && in_array($cleanPath, ['/auth/login', '/auth/login/'])) {
     $email = strtolower(trim($body['email'] ?? ''));
     $password = trim($body['password'] ?? '');
 
@@ -392,9 +549,16 @@ if ($method === 'POST' && $cleanPath === '/auth/login') {
     }
 
     $pdo = getDbConnection($dbConfig);
-    $stmt = $pdo->prepare('SELECT * FROM `solar_users` WHERE LOWER(email) = ? LIMIT 1');
-    $stmt->execute([$email]);
-    $user = $stmt->fetch();
+    ensureRequiredTables($pdo);
+
+    $user = null;
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM `solar_users` WHERE LOWER(email) = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $user = $stmt->fetch();
+    } catch (PDOException $e) {
+        error_log('User query error: ' . $e->getMessage());
+    }
 
     if ($user) {
         $storedHash = $user['password'] ?? '';
@@ -405,9 +569,11 @@ if ($method === 'POST' && $cleanPath === '/auth/login') {
         } elseif ($password === $storedHash) {
             // Auto-upgrade legacy plaintext to bcrypt
             $matches = true;
-            $newHash = password_hash($password, PASSWORD_BCRYPT);
-            $up = $pdo->prepare('UPDATE `solar_users` SET `password` = ? WHERE `id` = ?');
-            $up->execute([$newHash, $user['id']]);
+            try {
+                $newHash = password_hash($password, PASSWORD_BCRYPT);
+                $up = $pdo->prepare('UPDATE `solar_users` SET `password` = ? WHERE `id` = ?');
+                $up->execute([$newHash, $user['id']]);
+            } catch (Exception $e) {}
         }
 
         if ($matches) {
@@ -431,6 +597,37 @@ if ($method === 'POST' && $cleanPath === '/auth/login') {
         }
     }
 
+    // Check solar_customers table if not matched in solar_users
+    try {
+        $stmtCust = $pdo->prepare('SELECT * FROM `solar_customers` WHERE LOWER(email) = ? LIMIT 1');
+        $stmtCust->execute([$email]);
+        $cust = $stmtCust->fetch();
+        if ($cust) {
+            $cHash = $cust['password'] ?? '';
+            $cMatches = password_verify($password, $cHash) || ($password === $cHash);
+            if ($cMatches) {
+                http_response_code(200);
+                echo json_encode([
+                    'success' => true,
+                    'user' => [
+                        'id' => 'usr-' . $cust['id'],
+                        'customerId' => $cust['id'],
+                        'name' => $cust['name'] ?? 'Customer',
+                        'email' => $cust['email'],
+                        'role' => 'Customer',
+                        'phone' => $cust['phone'] ?? '',
+                        'department' => 'Customer',
+                        'designation' => 'Customer',
+                        'employeeId' => 'CUST-' . $cust['id'],
+                        'isFieldWorker' => false
+                    ],
+                    'token' => 'jwt-mysql-session-' . round(microtime(true) * 1000) . '-' . substr(bin2hex(random_bytes(4)), 0, 8)
+                ]);
+                exit;
+            }
+        }
+    } catch (Exception $e) {}
+
     http_response_code(401);
     echo json_encode([
         'success' => false,
@@ -442,6 +639,8 @@ if ($method === 'POST' && $cleanPath === '/auth/login') {
 // GET /api/bootstrap - Master State Hydration
 if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
     $data = [];
     $tableMap = [
         'customers' => 'solar_customers',

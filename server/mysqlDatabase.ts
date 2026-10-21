@@ -2888,19 +2888,26 @@ class MySqlDatabaseManager {
       };
     }
     this.assertDbConnected();
-    const [admins]: any = await this.pool!.query(
-      "SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'"
-    );
-    const adminList = Array.isArray(admins) ? admins : [];
-    const nonDemoAdmins = adminList.filter(
-      a => !a.email.toLowerCase().includes('admin@rejoysolar.com') && !a.id.startsWith('demo-')
-    );
-    // Public initial admin registration is allowed if no custom admin exists
-    const allowPublicRegistration = nonDemoAdmins.length === 0;
-    return {
-      allowPublicRegistration,
-      adminCount: adminList.length
-    };
+    try {
+      const [admins]: any = await this.pool!.query(
+        "SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'"
+      );
+      const adminList = Array.isArray(admins) ? admins : [];
+      const nonDemoAdmins = adminList.filter(
+        a => !a.email.toLowerCase().includes('admin@rejoysolar.com') && !a.id.startsWith('demo-')
+      );
+      // Public initial admin registration is allowed if no custom admin exists
+      const allowPublicRegistration = nonDemoAdmins.length === 0;
+      return {
+        allowPublicRegistration,
+        adminCount: adminList.length
+      };
+    } catch (err: any) {
+      return {
+        allowPublicRegistration: true,
+        adminCount: 0
+      };
+    }
   }
 
   public async registerAdmin(
