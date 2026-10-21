@@ -25,9 +25,20 @@ export const CustomerPortalView: React.FC = () => {
   const { currentUser } = useAuth();
 
   const projects = useMemo(() => storageService.getProjects(), [refreshTrigger]);
-  const myProject = projects[0]; // ABC Industries 100 kW
+  const myProject = projects[0] || null;
 
-  const completedStagesCount = myProject.stages.filter(s => s.status === 'COMPLETED').length;
+  const completedStagesCount = myProject ? (myProject.stages || []).filter(s => s && s.status === 'COMPLETED').length : 0;
+
+  if (!myProject) {
+    return (
+      <div className="bg-white rounded-3xl p-12 text-center max-w-xl mx-auto my-12 border border-slate-200/80 shadow-2xs space-y-4">
+        <h3 className="text-lg font-bold text-slate-900">No Active Project Found</h3>
+        <p className="text-sm text-slate-500 max-w-md mx-auto">
+          There are no solar projects associated with your account at this time.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
@@ -126,7 +137,7 @@ export const CustomerPortalView: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
-          {myProject.stages.slice(0, 6).map((stage) => (
+          {(myProject.stages || []).slice(0, 6).map((stage) => (
             <div
               key={stage.id}
               className={`p-3.5 rounded-xl border flex items-start gap-3 ${

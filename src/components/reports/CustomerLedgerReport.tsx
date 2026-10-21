@@ -56,11 +56,11 @@ export const CustomerLedgerReport: React.FC<CustomerLedgerReportProps> = ({
 
   // Build ledger per customer
   const ledgerData: CustomerLedgerEntry[] = useMemo(() => {
-    return customers.map(cust => {
+    return (customers || []).filter(Boolean).map(cust => {
       // Find invoices for this customer
-      const custInvoices = invoices.filter(inv => inv.customerId === cust.id || inv.customerName === cust.name);
+      const custInvoices = (invoices || []).filter(inv => inv && (inv.customerId === cust.id || inv.customerName === cust.name));
       // Find payments for this customer
-      const custPayments = payments.filter(p => p.customerId === cust.id || (cust.activeProjectId && p.projectId === cust.activeProjectId));
+      const custPayments = (payments || []).filter(p => p && (p.customerId === cust.id || (cust.activeProjectId && p.projectId === cust.activeProjectId)));
 
       const txns: {
         date: string;
@@ -145,9 +145,12 @@ export const CustomerLedgerReport: React.FC<CustomerLedgerReportProps> = ({
       // Name filter
       if (filters.name.trim()) {
         const query = filters.name.toLowerCase();
-        const matchesName = item.customer.name.toLowerCase().includes(query);
-        const matchesPhone = item.customer.phone.toLowerCase().includes(query);
-        const matchesCity = item.customer.city.toLowerCase().includes(query);
+        const custName = item.customer?.name?.toLowerCase() || '';
+        const custPhone = item.customer?.phone?.toLowerCase() || '';
+        const custCity = item.customer?.city?.toLowerCase() || '';
+        const matchesName = custName.includes(query);
+        const matchesPhone = custPhone.includes(query);
+        const matchesCity = custCity.includes(query);
         if (!matchesName && !matchesPhone && !matchesCity) return false;
       }
 
@@ -188,11 +191,11 @@ export const CustomerLedgerReport: React.FC<CustomerLedgerReportProps> = ({
       'Account Status'
     ];
     const rows = filteredLedger.map(l => [
-      l.customer.id,
-      l.customer.name,
-      l.customer.phone,
-      l.customer.city,
-      l.customer.sanctionedLoadKw ? `${l.customer.sanctionedLoadKw} kW` : l.customer.customerType,
+      l.customer?.id || '',
+      l.customer?.name || '',
+      l.customer?.phone || '',
+      l.customer?.city || '',
+      l.customer?.sanctionedLoadKw ? `${l.customer.sanctionedLoadKw} kW` : (l.customer?.customerType || 'Commercial'),
       l.totalBilled,
       l.totalReceived,
       l.balance,
@@ -337,13 +340,14 @@ export const CustomerLedgerReport: React.FC<CustomerLedgerReportProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredLedger.map(item => {
-                  const isExpanded = expandedCustomerId === item.customer.id;
+                filteredLedger.map((item, idx) => {
+                  const custId = item.customer?.id || `cust-${idx}`;
+                  const isExpanded = expandedCustomerId === custId;
 
                   return (
-                    <React.Fragment key={item.customer.id}>
+                    <React.Fragment key={custId}>
                       <tr
-                        onClick={() => setExpandedCustomerId(isExpanded ? null : item.customer.id)}
+                        onClick={() => setExpandedCustomerId(isExpanded ? null : custId)}
                         className={`hover:bg-slate-50/70 transition-colors cursor-pointer ${
                           isExpanded ? 'bg-amber-50/30' : ''
                         }`}
@@ -356,17 +360,17 @@ export const CustomerLedgerReport: React.FC<CustomerLedgerReportProps> = ({
                           )}
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-900">
-                          {item.customer.name}
+                          {item.customer?.name || 'Unnamed Customer'}
                           <span className="block text-[10px] text-slate-400 font-normal">
-                            ID: {item.customer.id}
+                            ID: {custId}
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-slate-600">
-                          {item.customer.phone}
-                          <span className="block text-[10px] text-slate-400">{item.customer.city}</span>
+                          {item.customer?.phone || 'N/A'}
+                          <span className="block text-[10px] text-slate-400">{item.customer?.city || ''}</span>
                         </td>
                         <td className="py-3.5 px-4 text-right font-medium text-slate-800">
-                          {item.customer.sanctionedLoadKw ? `${item.customer.sanctionedLoadKw} kW` : item.customer.customerType}
+                          {item.customer?.sanctionedLoadKw ? `${item.customer.sanctionedLoadKw} kW` : (item.customer?.customerType || 'Commercial')}
                         </td>
                         <td className="py-3.5 px-4 text-right font-mono text-slate-700">
                           ₹{item.totalBilled.toLocaleString('en-IN')}

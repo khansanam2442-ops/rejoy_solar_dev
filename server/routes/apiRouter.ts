@@ -130,20 +130,21 @@ apiRouter.get('/bootstrap', async (_req: Request, res: Response) => {
 // Bulk & Entity sync endpoint for data updates directly to MySQL
 apiRouter.post('/sync/push', async (req: Request, res: Response) => {
   try {
-    const { collection, item, items, action } = req.body || {};
+    const { collection, item, items, action, payload } = req.body || {};
+    const effectiveItem = item || payload;
     if (!collection) {
       res.status(400).json({ success: false, message: 'Collection name is required.' });
       return;
     }
 
-    if (item && action === 'delete') {
-      await dbManager.deleteItem(collection, item.id);
+    if (effectiveItem && action === 'delete') {
+      await dbManager.deleteItem(collection, effectiveItem.id);
       res.json({ success: true, message: `Deleted from ${collection}` });
       return;
     }
 
-    if (item) {
-      const saved = await dbManager.saveItem(collection, item);
+    if (effectiveItem) {
+      const saved = await dbManager.saveItem(collection, effectiveItem);
       res.json({ success: true, data: saved, message: `Saved to ${collection}` });
       return;
     }

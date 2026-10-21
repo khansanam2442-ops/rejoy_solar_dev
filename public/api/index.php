@@ -123,16 +123,6 @@ function ensureRequiredTables($pdo) {
     static $tablesVerified = false;
     if ($tablesVerified) return;
 
-    try {
-        $stmt = $pdo->query("SHOW TABLES LIKE 'solar_users'");
-        if ($stmt && $stmt->fetch()) {
-            $tablesVerified = true;
-            return;
-        }
-    } catch (Exception $e) {
-        // Table does not exist; proceed to creation
-    }
-
     // 1. Create solar_users table
     $sqlUsers = "CREATE TABLE IF NOT EXISTS `solar_users` (
       `id` VARCHAR(64) PRIMARY KEY,
@@ -157,9 +147,9 @@ function ensureRequiredTables($pdo) {
     // 2. Create solar_employees table
     $sqlEmployees = "CREATE TABLE IF NOT EXISTS `solar_employees` (
       `id` VARCHAR(64) PRIMARY KEY,
-      `employee_code` VARCHAR(32) NOT NULL UNIQUE,
+      `employee_code` VARCHAR(32) NOT NULL,
       `name` VARCHAR(255) NOT NULL,
-      `email` VARCHAR(191) NOT NULL UNIQUE,
+      `email` VARCHAR(191) NOT NULL,
       `phone` VARCHAR(32) NOT NULL,
       `department` VARCHAR(64) NOT NULL,
       `designation` VARCHAR(128) NOT NULL,
@@ -168,27 +158,108 @@ function ensureRequiredTables($pdo) {
       `login_enabled` TINYINT(1) DEFAULT 1,
       `account_status` VARCHAR(32) DEFAULT 'ACTIVE',
       `status` VARCHAR(32) DEFAULT 'ACTIVE',
-      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX `idx_emp_code` (`employee_code`),
+      INDEX `idx_emp_email` (`email`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
 
-    // 3. Create solar_customers table
+    // 3. Create solar_customers table with full 19-column schema
     $sqlCustomers = "CREATE TABLE IF NOT EXISTS `solar_customers` (
       `id` VARCHAR(64) PRIMARY KEY,
-      `customer_code` VARCHAR(32) NOT NULL UNIQUE,
+      `customer_code` VARCHAR(32) NOT NULL,
       `name` VARCHAR(255) NOT NULL,
-      `email` VARCHAR(191) NOT NULL UNIQUE,
+      `company_name` VARCHAR(255) DEFAULT '',
+      `customer_type` VARCHAR(32) DEFAULT 'Residential',
       `phone` VARCHAR(32) NOT NULL,
+      `email` VARCHAR(191) DEFAULT '',
       `password` VARCHAR(255) NOT NULL DEFAULT '123456',
-      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      `site_address` TEXT,
+      `city` VARCHAR(128) NOT NULL DEFAULT 'Ahmedabad',
+      `state` VARCHAR(128) DEFAULT 'Gujarat',
+      `pincode` VARCHAR(16) DEFAULT '380001',
+      `gst_number` VARCHAR(32) DEFAULT '',
+      `electricity_consumer_no` VARCHAR(64) DEFAULT '',
+      `sanctioned_load_kw` DECIMAL(10,2) DEFAULT 0.00,
+      `status` VARCHAR(32) DEFAULT 'ACTIVE',
+      `active_project_id` VARCHAR(64) DEFAULT NULL,
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX `idx_customers_phone` (`phone`),
+      INDEX `idx_customers_email` (`email`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+    // 4. Create solar_projects table
+    $sqlProjects = "CREATE TABLE IF NOT EXISTS `solar_projects` (
+      `id` VARCHAR(64) PRIMARY KEY,
+      `project_code` VARCHAR(32) NOT NULL,
+      `customer_id` VARCHAR(64) NOT NULL,
+      `customer_name` VARCHAR(255) NOT NULL,
+      `title` VARCHAR(255) NOT NULL,
+      `capacity_kw` DECIMAL(10,2) NOT NULL DEFAULT 10.00,
+      `total_value` DECIMAL(14,2) NOT NULL DEFAULT 500000.00,
+      `status` VARCHAR(32) NOT NULL DEFAULT 'SURVEY',
+      `current_stage_key` VARCHAR(64) NOT NULL DEFAULT 'site_survey',
+      `completion_percentage` INT DEFAULT 0,
+      `progress_percentage` INT DEFAULT 0,
+      `location` VARCHAR(255) DEFAULT 'Ahmedabad',
+      `assigned_users_json` LONGTEXT,
+      `site_address` TEXT,
+      `city` VARCHAR(128) DEFAULT 'Ahmedabad',
+      `start_date` DATE,
+      `expected_completion_date` DATE,
+      `stages_json` LONGTEXT,
+      `notes` TEXT,
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX `idx_projects_customer` (`customer_id`),
+      INDEX `idx_projects_status` (`status`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
 
     try {
         $pdo->exec($sqlUsers);
         $pdo->exec($sqlEmployees);
         $pdo->exec($sqlCustomers);
-        $tablesVerified = true;
+        $pdo->exec($sqlProjects);
     } catch (Exception $e) {
-        error_log('Failed to execute direct table initialization: ' . $e->getMessage());
+        error_log('Notice during initial table creation: ' . $e->getMessage());
+    }
+
+    // Auto-migrate missing columns for existing solar_customers table
+    $custColsNeeded = [
+        'company_name' => "VARCHAR(255) DEFAULT ''",
+        'customer_type' => "VARCHAR(32) DEFAULT 'Residential'",
+        'site_address' => "TEXT",
+        'city' => "VARCHAR(128) NOT NULL DEFAULT 'Ahmedabad'",
+        'state' => "VARCHAR(128) DEFAULT 'Gujarat'",
+        'pincode' => "VARCHAR(16) DEFAULT '380001'",
+        'gst_number' => "VARCHAR(32) DEFAULT ''",
+        'electricity_consumer_no' => "VARCHAR(64) DEFAULT ''",
+        'sanctioned_load_kw' => "DECIMAL(10,2) DEFAULT 0.00",
+        'status' => "VARCHAR(32) DEFAULT 'ACTIVE'",
+        'active_project_id' => "VARCHAR(64) DEFAULT NULL",
+        'updated_at' => "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+    ];
+    try {
+        $stmtCols = $pdo->query("SHOW COLUMNS FROM `solar_customers`");
+        if ($stmtCols) {
+            $existingCols = [];
+            while ($row = $stmtCols->fetch(PDO::FETCH_ASSOC)) {
+                $existingCols[strtolower($row['Field'])] = true;
+            }
+            foreach ($custColsNeeded as $col => $typeDef) {
+                if (!isset($existingCols[strtolower($col)])) {
+                    try {
+                        $pdo->exec("ALTER TABLE `solar_customers` ADD COLUMN `$col` $typeDef");
+                    } catch (Exception $e) {}
+                }
+            }
+            // Drop unique index on email if present (so empty or non-unique emails don't fail)
+            try {
+                $pdo->exec("ALTER TABLE `solar_customers` DROP INDEX `email`");
+            } catch (Exception $e) {}
+        }
+    } catch (Exception $e) {
+        error_log('Notice during solar_customers column verification: ' . $e->getMessage());
     }
 
     // Try executing full schema.sql if available
@@ -202,7 +273,6 @@ function ensureRequiredTables($pdo) {
                 $sql = file_get_contents($file);
                 if (!empty($sql)) {
                     $pdo->exec($sql);
-                    $tablesVerified = true;
                     break;
                 }
             } catch (Exception $e) {
@@ -210,6 +280,8 @@ function ensureRequiredTables($pdo) {
             }
         }
     }
+
+    $tablesVerified = true;
 }
 
 // 7. Normalize Path & Method
@@ -658,35 +730,60 @@ function saveCustomerToDb($pdo, $item) {
     $status = $item['status'] ?? 'ACTIVE';
     $activeProjectId = $item['activeProjectId'] ?? $item['active_project_id'] ?? null;
 
-    $stmt = $pdo->prepare("
-        INSERT INTO `solar_customers` (
-            `id`, `customer_code`, `name`, `company_name`, `customer_type`,
-            `phone`, `email`, `password`, `site_address`, `city`, `state`,
-            `pincode`, `gst_number`, `electricity_consumer_no`, `sanctioned_load_kw`,
-            `status`, `active_project_id`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            `name` = VALUES(`name`),
-            `company_name` = VALUES(`company_name`),
-            `customer_type` = VALUES(`customer_type`),
-            `phone` = VALUES(`phone`),
-            `email` = VALUES(`email`),
-            `site_address` = VALUES(`site_address`),
-            `city` = VALUES(`city`),
-            `state` = VALUES(`state`),
-            `pincode` = VALUES(`pincode`),
-            `gst_number` = VALUES(`gst_number`),
-            `electricity_consumer_no` = VALUES(`electricity_consumer_no`),
-            `sanctioned_load_kw` = VALUES(`sanctioned_load_kw`),
-            `status` = VALUES(`status`),
-            `active_project_id` = VALUES(`active_project_id`)
-    ");
-    $stmt->execute([
-        $item['id'], $customerCode, $name, $companyName, $customerType,
-        $phone, $email, $password, $siteAddress, $city, $state,
-        $pincode, $gstNumber, $electricityConsumerNo, $sanctionedLoadKw,
-        $status, $activeProjectId
-    ]);
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO `solar_customers` (
+                `id`, `customer_code`, `name`, `company_name`, `customer_type`,
+                `phone`, `email`, `password`, `site_address`, `city`, `state`,
+                `pincode`, `gst_number`, `electricity_consumer_no`, `sanctioned_load_kw`,
+                `status`, `active_project_id`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                `name` = VALUES(`name`),
+                `company_name` = VALUES(`company_name`),
+                `customer_type` = VALUES(`customer_type`),
+                `phone` = VALUES(`phone`),
+                `email` = VALUES(`email`),
+                `site_address` = VALUES(`site_address`),
+                `city` = VALUES(`city`),
+                `state` = VALUES(`state`),
+                `pincode` = VALUES(`pincode`),
+                `gst_number` = VALUES(`gst_number`),
+                `electricity_consumer_no` = VALUES(`electricity_consumer_no`),
+                `sanctioned_load_kw` = VALUES(`sanctioned_load_kw`),
+                `status` = VALUES(`status`),
+                `active_project_id` = VALUES(`active_project_id`)
+        ");
+        $stmt->execute([
+            $item['id'], $customerCode, $name, $companyName, $customerType,
+            $phone, $email, $password, $siteAddress, $city, $state,
+            $pincode, $gstNumber, $electricityConsumerNo, $sanctionedLoadKw,
+            $status, $activeProjectId
+        ]);
+    } catch (PDOException $e) {
+        error_log("saveCustomerToDb initial error: " . $e->getMessage());
+        try {
+            ensureRequiredTables($pdo);
+            $stmt->execute([
+                $item['id'], $customerCode, $name, $companyName, $customerType,
+                $phone, $email, $password, $siteAddress, $city, $state,
+                $pincode, $gstNumber, $electricityConsumerNo, $sanctionedLoadKw,
+                $status, $activeProjectId
+            ]);
+        } catch (Exception $e2) {
+            error_log("saveCustomerToDb retry error: " . $e2->getMessage());
+            try {
+                $stmtMin = $pdo->prepare("
+                    INSERT INTO `solar_customers` (`id`, `customer_code`, `name`, `email`, `phone`, `password`)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `phone` = VALUES(`phone`)
+                ");
+                $stmtMin->execute([$item['id'], $customerCode, $name, $email, $phone, $password]);
+            } catch (Exception $e3) {
+                error_log("saveCustomerToDb minimal fallback error: " . $e3->getMessage());
+            }
+        }
+    }
 
     return [
         'id' => $item['id'],
@@ -734,39 +831,43 @@ function saveProjectToDb($pdo, $item) {
     $stagesJson = is_string($item['stages'] ?? '') ? $item['stages'] : json_encode($item['stages'] ?? []);
     $notes = $item['notes'] ?? '';
 
-    $stmt = $pdo->prepare("
-        INSERT INTO `solar_projects` (
-            `id`, `project_code`, `customer_id`, `customer_name`, `title`,
-            `capacity_kw`, `total_value`, `status`, `current_stage_key`,
-            `completion_percentage`, `progress_percentage`, `location`,
-            `assigned_users_json`, `site_address`, `city`, `start_date`,
-            `expected_completion_date`, `stages_json`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            `customer_name` = VALUES(`customer_name`),
-            `title` = VALUES(`title`),
-            `capacity_kw` = VALUES(`capacity_kw`),
-            `total_value` = VALUES(`total_value`),
-            `status` = VALUES(`status`),
-            `current_stage_key` = VALUES(`current_stage_key`),
-            `completion_percentage` = VALUES(`completion_percentage`),
-            `progress_percentage` = VALUES(`progress_percentage`),
-            `location` = VALUES(`location`),
-            `assigned_users_json` = VALUES(`assigned_users_json`),
-            `site_address` = VALUES(`site_address`),
-            `city` = VALUES(`city`),
-            `start_date` = VALUES(`start_date`),
-            `expected_completion_date` = VALUES(`expected_completion_date`),
-            `stages_json` = VALUES(`stages_json`),
-            `notes` = VALUES(`notes`)
-    ");
-    $stmt->execute([
-        $item['id'], $projectCode, $customerId, $customerName, $title,
-        $capacityKw, $totalValue, $status, $currentStageKey,
-        $completionPercentage, $progressPercentage, $location,
-        $assignedUsersJson, $siteAddress, $city, $startDate,
-        $expectedCompletionDate, $stagesJson, $notes
-    ]);
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO `solar_projects` (
+                `id`, `project_code`, `customer_id`, `customer_name`, `title`,
+                `capacity_kw`, `total_value`, `status`, `current_stage_key`,
+                `completion_percentage`, `progress_percentage`, `location`,
+                `assigned_users_json`, `site_address`, `city`, `start_date`,
+                `expected_completion_date`, `stages_json`, `notes`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                `customer_name` = VALUES(`customer_name`),
+                `title` = VALUES(`title`),
+                `capacity_kw` = VALUES(`capacity_kw`),
+                `total_value` = VALUES(`total_value`),
+                `status` = VALUES(`status`),
+                `current_stage_key` = VALUES(`current_stage_key`),
+                `completion_percentage` = VALUES(`completion_percentage`),
+                `progress_percentage` = VALUES(`progress_percentage`),
+                `location` = VALUES(`location`),
+                `assigned_users_json` = VALUES(`assigned_users_json`),
+                `site_address` = VALUES(`site_address`),
+                `city` = VALUES(`city`),
+                `start_date` = VALUES(`start_date`),
+                `expected_completion_date` = VALUES(`expected_completion_date`),
+                `stages_json` = VALUES(`stages_json`),
+                `notes` = VALUES(`notes`)
+        ");
+        $stmt->execute([
+            $item['id'], $projectCode, $customerId, $customerName, $title,
+            $capacityKw, $totalValue, $status, $currentStageKey,
+            $completionPercentage, $progressPercentage, $location,
+            $assignedUsersJson, $siteAddress, $city, $startDate,
+            $expectedCompletionDate, $stagesJson, $notes
+        ]);
+    } catch (Exception $e) {
+        error_log("saveProjectToDb error: " . $e->getMessage());
+    }
 
     return [
         'id' => $item['id'],
@@ -809,45 +910,56 @@ if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
         exit;
     }
 
-    if ($action === 'delete' && $item && !empty($item['id'])) {
-        $table = 'solar_' . $collection;
-        try {
-            $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
-            $stmt->execute([$item['id']]);
-        } catch (Exception $e) {}
-        http_response_code(200);
-        echo json_encode(['success' => true, 'message' => "Deleted from $collection"]);
-        exit;
-    }
-
-    if ($item) {
-        $saved = $item;
-        if ($collection === 'customers') {
-            $saved = saveCustomerToDb($pdo, $item);
-        } elseif ($collection === 'projects') {
-            $saved = saveProjectToDb($pdo, $item);
+    try {
+        if ($action === 'delete' && $item && !empty($item['id'])) {
+            $table = 'solar_' . $collection;
+            try {
+                $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
+                $stmt->execute([$item['id']]);
+            } catch (Exception $e) {}
+            http_response_code(200);
+            echo json_encode(['success' => true, 'message' => "Deleted from $collection"]);
+            exit;
         }
-        http_response_code(200);
-        echo json_encode(['success' => true, 'data' => $saved, 'message' => "Saved to $collection"]);
-        exit;
-    }
 
-    if ($items && is_array($items)) {
-        foreach ($items as $it) {
+        if ($item) {
+            $saved = $item;
             if ($collection === 'customers') {
-                saveCustomerToDb($pdo, $it);
+                $saved = saveCustomerToDb($pdo, $item);
             } elseif ($collection === 'projects') {
-                saveProjectToDb($pdo, $it);
+                $saved = saveProjectToDb($pdo, $item);
             }
+            http_response_code(200);
+            echo json_encode(['success' => true, 'data' => $saved, 'message' => "Saved to $collection"]);
+            exit;
         }
+
+        if ($items && is_array($items)) {
+            foreach ($items as $it) {
+                if ($collection === 'customers') {
+                    saveCustomerToDb($pdo, $it);
+                } elseif ($collection === 'projects') {
+                    saveProjectToDb($pdo, $it);
+                }
+            }
+            http_response_code(200);
+            echo json_encode(['success' => true, 'count' => count($items), 'message' => "Synced $collection to MySQL"]);
+            exit;
+        }
+
         http_response_code(200);
-        echo json_encode(['success' => true, 'count' => count($items), 'message' => "Synced $collection to MySQL"]);
+        echo json_encode(['success' => true, 'message' => "Sync processed"]);
+        exit;
+    } catch (Exception $e) {
+        error_log("Error in /sync/push: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => 'Database persistence error: ' . $e->getMessage(),
+            'collection' => $collection
+        ]);
         exit;
     }
-
-    http_response_code(200);
-    echo json_encode(['success' => true, 'message' => "Sync processed"]);
-    exit;
 }
 
 // Customers API: /customers

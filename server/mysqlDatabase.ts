@@ -239,6 +239,34 @@ class MySqlDatabaseManager {
         await this.pool.query(sql);
         console.log('[MySQL] Schema and production baseline verified in MySQL database.');
       }
+
+      // Check and migrate columns on solar_customers if table already existed with older schema
+      try {
+        const [cols]: any = await this.pool.query("SHOW COLUMNS FROM `solar_customers`");
+        const existing = new Set<string>((cols as any[]).map(c => String(c.Field).toLowerCase()));
+        const needed: Record<string, string> = {
+          company_name: "VARCHAR(255) DEFAULT ''",
+          customer_type: "VARCHAR(32) DEFAULT 'Residential'",
+          site_address: "TEXT",
+          city: "VARCHAR(128) NOT NULL DEFAULT 'Ahmedabad'",
+          state: "VARCHAR(128) DEFAULT 'Gujarat'",
+          pincode: "VARCHAR(16) DEFAULT '380001'",
+          gst_number: "VARCHAR(32) DEFAULT ''",
+          electricity_consumer_no: "VARCHAR(64) DEFAULT ''",
+          sanctioned_load_kw: "DECIMAL(10,2) DEFAULT 0.00",
+          status: "VARCHAR(32) DEFAULT 'ACTIVE'",
+          active_project_id: "VARCHAR(64) DEFAULT NULL",
+          updated_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+        };
+        for (const [col, typeDef] of Object.entries(needed)) {
+          if (!existing.has(col.toLowerCase())) {
+            try {
+              await this.pool.query(`ALTER TABLE \`solar_customers\` ADD COLUMN \`${col}\` ${typeDef}`);
+            } catch {}
+          }
+        }
+      } catch {}
+
       await this.ensureHashedPasswords();
     } catch (err: any) {
       console.error('[MySQL] Schema execution notice:', err?.message || err);

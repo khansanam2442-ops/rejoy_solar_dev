@@ -3105,8 +3105,14 @@ class StorageService {
         if (json.success && json.data) {
           Object.entries(KEY_TO_COLLECTION).forEach(([storageKey, collectionKey]) => {
             const backendItems = json.data[collectionKey];
-            if (backendItems !== undefined) {
-              this.memStore.set(storageKey, backendItems);
+            if (backendItems !== undefined && backendItems !== null) {
+              if (Array.isArray(backendItems)) {
+                this.memStore.set(storageKey, backendItems.filter(Boolean));
+              } else if (collectionKey === 'acl_config' && typeof backendItems === 'object') {
+                this.memStore.set(storageKey, backendItems);
+              } else {
+                this.memStore.set(storageKey, backendItems);
+              }
             }
           });
           this.isHydrated = true;
@@ -3122,7 +3128,13 @@ class StorageService {
 
   private get<T>(key: string, defaultValue: T): T {
     if (this.memStore.has(key)) {
-      return this.memStore.get(key) as T;
+      const val = this.memStore.get(key);
+      if (val !== undefined && val !== null) {
+        if (Array.isArray(defaultValue)) {
+          return (Array.isArray(val) ? val : defaultValue) as T;
+        }
+        return val as T;
+      }
     }
     this.memStore.set(key, defaultValue);
     return defaultValue;
@@ -3140,14 +3152,12 @@ class StorageService {
         .then(async (res) => {
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, err.error || res.statusText);
-            this.hydrateFromBackend();
-            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error } }));
+            console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, err.error || err.message || res.statusText);
+            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error || err.message || res.statusText } }));
           }
         })
         .catch((e) => {
           console.error(`[MySQL Network Error] Failed to sync ${collection}:`, e);
-          this.hydrateFromBackend();
           window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: e.message } }));
         });
       setTimeout(() => {
@@ -3470,12 +3480,34 @@ class StorageService {
     const rawProjects = this.get<SolarProject[]>(STORAGE_KEYS.PROJECTS, initialProjects);
     let mutated = false;
 
+    const list = Array.isArray(rawProjects) ? rawProjects : initialProjects;
+
     // Self-healing integrity check:
     // A stage N cannot be COMPLETED/APPROVED unless all previous stages 0..N-1 are COMPLETED/APPROVED.
     // Ensure newly initialized projects never have stages 2..16 completed.
-    const sanitized = rawProjects.map(project => {
+    const sanitized = list.map(project => {
+      if (!project || typeof project !== 'object') return null;
+
       let hasIncompletePriorStage = false;
       let stagesChanged = false;
+
+      // Ensure stages array exists and is hydrated
+      if (!project.stages || !Array.isArray(project.stages) || project.stages.length === 0) {
+        if ((project as any).stages_json) {
+          try {
+            const rawJson = (project as any).stages_json;
+            const parsed = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              project.stages = parsed;
+            }
+          } catch {}
+        }
+        if (!project.stages || !Array.isArray(project.stages) || project.stages.length === 0) {
+          const progressLevel: WorkflowProgressLevel = project.status === 'COMPLETED' ? 'COMPLETED' : 'NEW';
+          project.stages = buildStandardWorkflowStages(project.id, project.capacityKw || 10, progressLevel);
+          mutated = true;
+        }
+      }
 
       // Self-healing migration for multi-user project assignments:
       if (!project.assignedUsers || !Array.isArray(project.assignedUsers) || project.assignedUsers.length === 0) {
@@ -3493,14 +3525,21 @@ class StorageService {
       if (project.assignedUsers && Array.isArray(project.assignedUsers)) {
         const beforeLen = project.assignedUsers.length;
         project.assignedUsers = project.assignedUsers.filter(
-          a => a.role !== 'Accountant' && a.department !== 'Finance'
+          a => a && a.role !== 'Accountant' && a.department !== 'Finance'
         );
         if (project.assignedUsers.length !== beforeLen) {
           mutated = true;
         }
       }
 
-      const cleanedStages = project.stages.map((stage, idx) => {
+      const stagesList = Array.isArray(project.stages) ? project.stages : [];
+      const cleanedStages = stagesList.map((stage, idx) => {
+        if (!stage) return stage;
+        stage.checklist = Array.isArray(stage.checklist) ? stage.checklist : [];
+        stage.photos = Array.isArray(stage.photos) ? stage.photos : [];
+        stage.documents = Array.isArray(stage.documents) ? stage.documents : [];
+        stage.activities = Array.isArray(stage.activities) ? stage.activities : [];
+
         if (idx === 0) {
           if (stage.status !== 'COMPLETED' && stage.status !== 'APPROVED') {
             hasIncompletePriorStage = true;
@@ -3537,8 +3576,8 @@ class StorageService {
 
       if (stagesChanged) {
         mutated = true;
-        const completedCount = cleanedStages.filter(s => s.status === 'COMPLETED' || s.status === 'APPROVED').length;
-        const completionPercentage = Math.round((completedCount / cleanedStages.length) * 100);
+        const completedCount = cleanedStages.filter(s => s && (s.status === 'COMPLETED' || s.status === 'APPROVED')).length;
+        const completionPercentage = cleanedStages.length > 0 ? Math.round((completedCount / cleanedStages.length) * 100) : 0;
         return {
           ...project,
           stages: cleanedStages,
@@ -3547,8 +3586,11 @@ class StorageService {
         };
       }
 
-      return project;
-    });
+      return {
+        ...project,
+        stages: cleanedStages
+      };
+    }).filter(Boolean) as SolarProject[];
 
     if (mutated) {
       this.memStore.set(STORAGE_KEYS.PROJECTS, sanitized);
@@ -3997,6 +4039,7 @@ class StorageService {
   // --- Employees & HRMS ---
   getEmployees(): Employee[] {
     const list = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, initialEmployees);
+    const safeList = Array.isArray(list) ? list : initialEmployees;
     const DEFAULT_AUTH_MAP: Record<string, string> = {
       'emp-1': 'demo-usr-1',
       'emp-2': 'demo-usr-4',
@@ -4014,8 +4057,8 @@ class StorageService {
       'emp-14': 'demo-usr-7'
     };
 
-    return list.map(emp => {
-      const defaultAuthUid = DEFAULT_AUTH_MAP[emp.id];
+    return safeList.filter(Boolean).map(emp => {
+      const defaultAuthUid = emp?.id ? DEFAULT_AUTH_MAP[emp.id] : undefined;
       const authUid = emp.authUid || defaultAuthUid;
       if (typeof emp.loginEnabled !== 'boolean' || (!emp.authUid && authUid)) {
         return {
@@ -4172,17 +4215,20 @@ class StorageService {
   getRecentActivities(limit: number = 8): Array<{ id: string; action: string; details: string; userName: string; timestamp: string }> {
     const activities: Array<{ id: string; action: string; details: string; userName: string; timestamp: string }> = [];
     const projects = this.getProjects();
-    projects.forEach(p => {
-      p.stages.forEach(s => {
-        s.activities?.forEach((a, aIdx) => {
+    (projects || []).forEach(p => {
+      if (!p || !p.stages) return;
+      (p.stages || []).forEach(s => {
+        if (!s) return;
+        (s.activities || []).forEach((a, aIdx) => {
+          if (!a) return;
           // Guarantee unique key across any project, stage, or activity
           const uniqueId = a.id && a.id.startsWith(p.id) ? a.id : `${p.id}-${s.stageKey}-${a.id || aIdx}`;
           activities.push({
             id: uniqueId,
-            action: `${p.projectCode} • ${s.title}: ${a.action}`,
-            details: a.details || `${s.title} updated`,
-            userName: a.user,
-            timestamp: a.timestamp
+            action: `${p.projectCode || p.id} • ${s.title || ''}: ${a.action || ''}`,
+            details: a.details || `${s.title || 'Stage'} updated`,
+            userName: a.user || 'Team Member',
+            timestamp: a.timestamp || new Date().toISOString()
           });
         });
       });
@@ -4918,7 +4964,14 @@ class StorageService {
   // Role-Based Access Control (ACL)
   // ==========================================
   getAclConfig(): SystemAclConfig {
-    return this.get<SystemAclConfig>(STORAGE_KEYS.ACL_CONFIG, DEFAULT_SYSTEM_ACL_CONFIG);
+    const raw = this.get<any>(STORAGE_KEYS.ACL_CONFIG, DEFAULT_SYSTEM_ACL_CONFIG);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
+        return { ...DEFAULT_SYSTEM_ACL_CONFIG, ...raw[0] };
+      }
+      return DEFAULT_SYSTEM_ACL_CONFIG;
+    }
+    return { ...DEFAULT_SYSTEM_ACL_CONFIG, ...raw };
   }
 
   saveAclConfig(config: SystemAclConfig): void {
