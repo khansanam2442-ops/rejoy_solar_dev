@@ -5,9 +5,6 @@ import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
-import { storageService } from '../src/services/storage';
-import { DEFAULT_SYSTEM_ACL_CONFIG } from '../src/services/aclDefaults';
-import { DEMO_ACCOUNTS } from '../src/context/AuthContext';
 
 export interface DbConfig {
   host: string;
@@ -78,8 +75,8 @@ class MySqlDatabaseManager {
       this.collections.set('amc_contracts', []);
       this.collections.set('notifications', []);
       this.collections.set('acl_audit_logs', []);
-      this.collections.set('acl_config', [DEFAULT_SYSTEM_ACL_CONFIG]);
-      this.settingsStore = storageService.getSettings();
+      this.collections.set('acl_config', [{ id: 'sys_acl_v1', version: '1.0.0', roles: {} }]);
+      this.settingsStore = { companyName: 'Rejoy Solar ERP', phone: '+91 98250 11223', email: 'admin@rejoysolar.com' };
 
       const defaultUsers: any[] = [
         {
