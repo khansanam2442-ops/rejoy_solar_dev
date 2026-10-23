@@ -2011,21 +2011,38 @@ class MySqlDatabaseManager {
     if (!this.isConnected) return this.getFallbackItems('payslips');
     this.assertDbConnected();
     const [rows] = await this.pool!.query('SELECT * FROM `solar_payslips` ORDER BY `year` DESC, `month` DESC');
-    const mapped = (rows as any[]).map(r => ({
-      id: r.id,
-      employeeId: r.employee_id,
-      employeeName: r.employee_name,
-      month: r.month,
-      year: Number(r.year),
-      basicSalary: Number(r.basic_salary) || 0,
-      allowances: Number(r.allowances) || 0,
-      deductions: Number(r.deductions) || 0,
-      netSalary: Number(r.net_salary) || 0,
-      paymentStatus: r.payment_status,
-      paymentDate: r.payment_date,
-      notes: r.notes,
-      createdAt: r.created_at
-    }));
+    const mapped = (rows as any[]).map(r => {
+      const basicSalary = Number(r.basic_salary) || 0;
+      const allowances = Number(r.allowances) || 0;
+      const deductions = Number(r.deductions) || 0;
+      const netSalary = Number(r.net_salary) || 0;
+      return {
+        id: r.id,
+        payslipNumber: r.id,
+        employeeId: r.employee_id,
+        employeeName: r.employee_name,
+        employeeCode: r.employee_id,
+        month: r.month,
+        year: Number(r.year) || 2026,
+        baseSalary: basicSalary,
+        basicSalary: basicSalary,
+        allowances: allowances,
+        overtimeAmount: allowances,
+        overtimeType: 'DIRECT',
+        totalAdditionalExpenses: 0,
+        additionalExpenses: [],
+        deductions: [],
+        totalDeductions: deductions,
+        grossEarnings: basicSalary + allowances,
+        netPay: netSalary,
+        netSalary: netSalary,
+        paymentStatus: r.payment_status || 'PAID',
+        status: r.payment_status === 'PAID' ? 'PAID' : 'GENERATED',
+        paymentDate: r.payment_date,
+        notes: r.notes || '',
+        createdAt: r.created_at
+      };
+    });
     this.setFallbackItems('payslips', mapped);
     return mapped;
   }
@@ -2042,17 +2059,22 @@ class MySqlDatabaseManager {
         \`payment_status\` = VALUES(\`payment_status\`), \`payment_date\` = VALUES(\`payment_date\`),
         \`net_salary\` = VALUES(\`net_salary\`), \`notes\` = VALUES(\`notes\`)
     `;
+    const basicSalary = Number(item.baseSalary ?? item.basicSalary ?? item.basic_salary) || 0;
+    const allowances = Number(item.overtimeAmount ?? item.allowances) || 0;
+    const deductions = Number(item.totalDeductions ?? (Array.isArray(item.deductions) ? item.deductions.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0) : item.deductions)) || 0;
+    const netSalary = Number(item.netPay ?? item.netSalary ?? item.net_salary) || Math.max(0, basicSalary + allowances - deductions);
+
     await this.pool!.query(sql, [
       item.id,
       item.employeeId,
       item.employeeName,
       item.month,
       Number(item.year) || 2026,
-      Number(item.basicSalary) || 0,
-      Number(item.allowances) || 0,
-      Number(item.deductions) || 0,
-      Number(item.netSalary) || 0,
-      item.paymentStatus || 'UNPAID',
+      basicSalary,
+      allowances,
+      deductions,
+      netSalary,
+      item.status || item.paymentStatus || 'UNPAID',
       item.paymentDate ? String(item.paymentDate).split('T')[0] : null,
       item.notes || ''
     ]);

@@ -28,7 +28,7 @@ export const HrDashboard: React.FC = () => {
   const fieldStaff = employees.filter(e => e.isFieldWorker);
   const onLeaveStaff = employees.filter(e => e.status === 'ON LEAVE');
 
-  const totalPayrollEst = employees.reduce((sum, e) => sum + (e.salaryMonthly || 45000), 0);
+  const totalPayrollEst = employees.reduce((sum, e) => sum + (Number(e.salaryMonthly) || 0), 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -99,9 +99,9 @@ export const HrDashboard: React.FC = () => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-emerald-700 tracking-tight">
-              {Math.max(1, activeStaff.length - onLeaveStaff.length)} <span className="text-xs font-bold text-emerald-600">checked in</span>
+              {totalEmployees === 0 ? 0 : Math.max(0, activeStaff.length - onLeaveStaff.length)} <span className="text-xs font-bold text-emerald-600">checked in</span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 font-medium">96% on-time attendance</p>
+            <p className="text-xs text-slate-500 mt-1 font-medium">{totalEmployees === 0 ? 'No active roster' : 'Active team attendance'}</p>
           </div>
         </div>
 
@@ -163,36 +163,44 @@ export const HrDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {employees.slice(0, 8).map(emp => (
-                <tr key={emp.id} className="hover:bg-slate-50/80">
-                  <td className="py-3 px-3">
-                    <span className="font-bold text-slate-900 block">{emp.name}</span>
-                    <span className="text-[11px] text-slate-400 font-mono">{emp.employeeCode}</span>
-                  </td>
-                  <td className="py-3 px-3 font-semibold text-slate-700">
-                    {emp.systemRole || emp.assignedRole}
-                  </td>
-                  <td className="py-3 px-3 text-slate-600">
-                    {emp.department}
-                  </td>
-                  <td className="py-3 px-3">
-                    {emp.isFieldWorker ? (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                        Field Engineer
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                        HQ Office
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 text-center">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                      Active
-                    </span>
+              {employees.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-slate-400 font-medium">
+                    No employees registered in the company roster.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                employees.slice(0, 8).map(emp => (
+                  <tr key={emp.id} className="hover:bg-slate-50/80">
+                    <td className="py-3 px-3">
+                      <span className="font-bold text-slate-900 block">{emp.name}</span>
+                      <span className="text-[11px] text-slate-400 font-mono">{emp.employeeCode}</span>
+                    </td>
+                    <td className="py-3 px-3 font-semibold text-slate-700">
+                      {emp.systemRole || emp.assignedRole}
+                    </td>
+                    <td className="py-3 px-3 text-slate-600">
+                      {emp.department}
+                    </td>
+                    <td className="py-3 px-3">
+                      {emp.isFieldWorker ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                          Field Engineer
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                          HQ Office
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Active
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

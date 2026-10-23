@@ -218,7 +218,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     phone: '',
     email: '',
     joiningDate: new Date().toISOString().slice(0, 10),
-    salaryMonthly: 45000,
+    salaryMonthly: 0,
     status: 'ACTIVE' as Employee['status'],
     photoUrl: '',
     currentSiteLocation: ''
@@ -259,7 +259,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         phone: employeeToEdit.phone || '',
         email: employeeToEdit.email || '',
         joiningDate: employeeToEdit.joiningDate || new Date().toISOString().slice(0, 10),
-        salaryMonthly: employeeToEdit.salaryMonthly ?? 45000,
+        salaryMonthly: Number(employeeToEdit.salaryMonthly) || 0,
         status: employeeToEdit.status || 'ACTIVE',
         photoUrl: employeeToEdit.photoUrl || '',
         currentSiteLocation: employeeToEdit.currentSiteLocation || ''
@@ -289,7 +289,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         phone: '+91 ',
         email: '',
         joiningDate: new Date().toISOString().slice(0, 10),
-        salaryMonthly: 45000,
+        salaryMonthly: 0,
         status: 'ACTIVE',
         photoUrl: '',
         currentSiteLocation: ''

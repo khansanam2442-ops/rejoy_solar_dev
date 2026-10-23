@@ -328,7 +328,7 @@ export const UserManagementView: React.FC = () => {
         status: formData.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
         accountStatus: formData.status === 'ACTIVE' ? 'ACTIVE' : 'DISABLED',
         joiningDate: new Date().toISOString().split('T')[0],
-        salaryMonthly: 50000,
+        salaryMonthly: 0,
         accountCreatedAt: new Date().toISOString(),
         accountCreatedBy: currentUser?.name || 'Admin',
         createdAt: new Date().toISOString()

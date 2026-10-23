@@ -37,10 +37,12 @@ export const PayslipViewModal: React.FC<PayslipViewModalProps> = ({
   const logoUrl = settings.logoUrl || '/logo-dark.png';
   const currencySymbol = settings.currencySymbol || '₹';
 
-  const formatAmount = (val: number | undefined | null) => {
-    if (val === undefined || val === null || isNaN(val)) return '0';
-    return val.toLocaleString('en-IN', {
-      minimumFractionDigits: val % 1 === 0 ? 0 : 2,
+  const formatAmount = (val: number | string | undefined | null) => {
+    if (val === undefined || val === null || val === '') return '0';
+    const num = Number(val);
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('en-IN', {
+      minimumFractionDigits: num % 1 === 0 ? 0 : 2,
       maximumFractionDigits: 2
     });
   };
@@ -161,7 +163,7 @@ export const PayslipViewModal: React.FC<PayslipViewModalProps> = ({
                 Official Salary Slip Voucher
               </span>
               <h2 id="payslip-view-title" className="text-base font-bold text-slate-900">
-                PAYSLIP FOR {payslip.month.toUpperCase()}
+                PAYSLIP FOR {(payslip.month || 'Selected Period').toUpperCase()}
               </h2>
             </div>
             <div className="text-left sm:text-right">
@@ -323,7 +325,7 @@ export const PayslipViewModal: React.FC<PayslipViewModalProps> = ({
                 Net Salary Payable (Gross Earnings - Total Deductions)
               </span>
               <p className="text-xs text-slate-300 font-medium italic mt-0.5">
-                Amount in Words: <strong>{numberToIndianWords(payslip.netPay)}</strong>
+                Amount in Words: <strong>{numberToIndianWords(Number(payslip.netPay) || 0)}</strong>
               </p>
             </div>
 

@@ -177,7 +177,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
   // Suggested default hourly rate based on base salary: base / 26 working days / 8 hours
   const suggestedHourlyRate = useMemo(() => {
     if (!currentEmployee) return 200;
-    const rate = Math.round(currentEmployee.salaryMonthly / (26 * 8));
+    const rate = Math.round((Number(currentEmployee.salaryMonthly) || 0) / (26 * 8));
     return Math.max(rate, 100);
   }, [currentEmployee]);
 
@@ -188,7 +188,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
     if (!isEditing && !isOvertimeRateManuallyEdited) {
       const newEmp = allEmployees.find(e => e.id === newEmpId);
       if (newEmp) {
-        const newRate = Math.max(Math.round(newEmp.salaryMonthly / (26 * 8)), 100);
+        const newRate = Math.max(Math.round((Number(newEmp.salaryMonthly) || 0) / (26 * 8)), 100);
         setOvertimeRatePerHour(newRate);
       }
     }
@@ -225,7 +225,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
         setOvertimeHours(existingPayslip.overtimeHours ?? 0);
 
         const matchedEmp = allEmployees.find(e => e.id === existingPayslip.employeeId);
-        const defaultRate = matchedEmp ? Math.max(Math.round(matchedEmp.salaryMonthly / (26 * 8)), 100) : 200;
+        const defaultRate = matchedEmp ? Math.max(Math.round((Number(matchedEmp.salaryMonthly) || 0) / (26 * 8)), 100) : 200;
         setOvertimeRatePerHour(existingPayslip.overtimeRatePerHour ?? defaultRate);
         setIsOvertimeRateManuallyEdited(existingPayslip.overtimeRatePerHour !== undefined);
         setDirectOvertimeAmount(existingPayslip.overtimeAmount ?? 0);
@@ -255,7 +255,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
         setOvertimeHours(0);
 
         const matchedEmp = allEmployees.find(e => e.id === targetEmpId);
-        const defaultRate = matchedEmp ? Math.max(Math.round(matchedEmp.salaryMonthly / (26 * 8)), 100) : 200;
+        const defaultRate = matchedEmp ? Math.max(Math.round((Number(matchedEmp.salaryMonthly) || 0) / (26 * 8)), 100) : 200;
         setOvertimeRatePerHour(defaultRate);
         setIsOvertimeRateManuallyEdited(false);
         setDirectOvertimeAmount(0);
@@ -271,7 +271,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
   }, [isOpen, existingPayslip, initialEmployee, allEmployees]);
 
   // Real-time calculations with support for exact float / decimal values
-  const fixedBaseSalary = currentEmployee ? currentEmployee.salaryMonthly : 0;
+  const fixedBaseSalary = currentEmployee ? (Number(currentEmployee.salaryMonthly) || 0) : 0;
 
   const numOvertimeHours = parseFloat(String(overtimeHours)) || 0;
   const numOvertimeRate = parseFloat(String(overtimeRatePerHour)) || 0;
@@ -302,10 +302,12 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
   const grossEarnings = Math.round((fixedBaseSalary + effectiveOvertimeSalary + totalAdditionalExpenses) * 100) / 100;
   const netPay = Math.max(0, Math.round((grossEarnings - totalDeductions) * 100) / 100);
 
-  const formatCurrency = (val: number | undefined | null) => {
-    if (val === undefined || val === null || isNaN(val)) return '0';
-    return val.toLocaleString('en-IN', {
-      minimumFractionDigits: val % 1 === 0 ? 0 : 2,
+  const formatCurrency = (val: number | string | undefined | null) => {
+    if (val === undefined || val === null || val === '') return '0';
+    const num = Number(val);
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('en-IN', {
+      minimumFractionDigits: num % 1 === 0 ? 0 : 2,
       maximumFractionDigits: 2
     });
   };
@@ -919,13 +921,13 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                               {rec.siteLocation || rec.siteProjectTitle || 'Field Visit'}
                             </td>
                             <td className="py-1.5 font-mono text-slate-700">
-                              {rec.fuelExpense?.initialOdometerReading !== undefined
-                                ? `${rec.fuelExpense.initialOdometerReading.toLocaleString('en-IN')} km`
+                              {rec.fuelExpense?.initialOdometerReading != null && !isNaN(Number(rec.fuelExpense.initialOdometerReading))
+                                ? `${Number(rec.fuelExpense.initialOdometerReading).toLocaleString('en-IN')} km`
                                 : '-'}
                             </td>
                             <td className="py-1.5 font-mono text-slate-700">
-                              {rec.fuelExpense?.finalOdometerReading !== undefined
-                                ? `${rec.fuelExpense.finalOdometerReading.toLocaleString('en-IN')} km`
+                              {rec.fuelExpense?.finalOdometerReading != null && !isNaN(Number(rec.fuelExpense.finalOdometerReading))
+                                ? `${Number(rec.fuelExpense.finalOdometerReading).toLocaleString('en-IN')} km`
                                 : '-'}
                             </td>
                             <td className="py-1.5 font-mono font-bold text-emerald-800">

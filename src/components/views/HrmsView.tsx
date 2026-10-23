@@ -40,6 +40,13 @@ import {
   Key
 } from 'lucide-react';
 
+const formatINR = (val: number | string | undefined | null): string => {
+  if (val === undefined || val === null || val === '') return '0';
+  const num = Number(val);
+  if (isNaN(num)) return '0';
+  return num.toLocaleString('en-IN');
+};
+
 export const HrmsView: React.FC = () => {
   const { showToast, openImportExportModal, triggerRefresh, refreshTrigger } = useApp();
   const { currentUser } = useAuth();
@@ -121,13 +128,13 @@ export const HrmsView: React.FC = () => {
 
   // Map each employee to their payslip for the selectedCycle
   const employeePayrollRows = useMemo(() => {
-    return employees.map(emp => {
-      const payslip = payslips.find(
-        p => p.employeeId === emp.id && p.month.toLowerCase() === selectedCycle.toLowerCase()
+    return (employees || []).filter(Boolean).map(emp => {
+      const payslip = (payslips || []).find(
+        p => p && p.employeeId === emp.id && (p.month || '').toLowerCase() === (selectedCycle || '').toLowerCase()
       );
       // Count attendance days present
-      const daysPresent = attendance.filter(
-        a => attendanceBelongsToEmployee(a, emp) && a.status !== 'ABSENT'
+      const daysPresent = (attendance || []).filter(
+        a => a && attendanceBelongsToEmployee(a, emp) && a.status !== 'ABSENT'
       ).length;
 
       return {
@@ -141,11 +148,12 @@ export const HrmsView: React.FC = () => {
   // Filter payroll rows
   const filteredPayrollRows = useMemo(() => {
     return employeePayrollRows.filter(row => {
+      if (!row || !row.employee) return false;
       const matchesSearch =
-        row.employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.employee.employeeCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.employee.department.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.employee.designation.toLowerCase().includes(searchTerm.toLowerCase());
+        (row.employee.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.employee.employeeCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.employee.department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.employee.designation || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       if (!matchesSearch) return false;
 
@@ -161,18 +169,18 @@ export const HrmsView: React.FC = () => {
 
   // Aggregate metrics for selected cycle
   const payrollSummary = useMemo(() => {
-    const activeCyclePayslips = payslips.filter(
-      p => p.month.toLowerCase() === selectedCycle.toLowerCase()
+    const activeCyclePayslips = (payslips || []).filter(
+      p => p && (p.month || '').toLowerCase() === (selectedCycle || '').toLowerCase()
     );
 
-    const totalBaseSalary = employees.reduce((sum, e) => sum + e.salaryMonthly, 0);
-    const totalOvertime = activeCyclePayslips.reduce((sum, p) => sum + (p.overtimeAmount || 0), 0);
-    const totalExpenses = activeCyclePayslips.reduce((sum, p) => sum + (p.totalAdditionalExpenses || 0), 0);
-    const totalDeductions = activeCyclePayslips.reduce((sum, p) => sum + (p.totalDeductions || 0), 0);
-    const totalNetPay = activeCyclePayslips.reduce((sum, p) => sum + (p.netPay || 0), 0);
+    const totalBaseSalary = (employees || []).reduce((sum, e) => sum + (Number(e?.salaryMonthly) || 0), 0);
+    const totalOvertime = activeCyclePayslips.reduce((sum, p) => sum + (Number(p?.overtimeAmount) || 0), 0);
+    const totalExpenses = activeCyclePayslips.reduce((sum, p) => sum + (Number(p?.totalAdditionalExpenses) || 0), 0);
+    const totalDeductions = activeCyclePayslips.reduce((sum, p) => sum + (Number(p?.totalDeductions) || 0), 0);
+    const totalNetPay = activeCyclePayslips.reduce((sum, p) => sum + (Number(p?.netPay) || 0), 0);
 
     return {
-      totalEmployees: employees.length,
+      totalEmployees: (employees || []).length,
       generatedCount: activeCyclePayslips.length,
       totalBaseSalary,
       totalOvertime,
@@ -183,20 +191,20 @@ export const HrmsView: React.FC = () => {
   }, [employees, payslips, selectedCycle]);
 
   const filteredEmployees = useMemo(() => {
-    return employees.filter(e =>
-      e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.employeeCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.department.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    return (employees || []).filter(Boolean).filter(e =>
+      (e.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (e.employeeCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (e.department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (e.designation || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (e.currentSiteLocation && e.currentSiteLocation.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [employees, searchTerm]);
 
   const filteredAttendance = useMemo(() => {
-    return attendance.filter(a =>
-      a.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      a.date.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      a.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    return (attendance || []).filter(Boolean).filter(a =>
+      (a.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (a.date || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (a.status || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (a.siteLocation && a.siteLocation.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (a.siteProjectTitle && a.siteProjectTitle.toLowerCase().includes(searchTerm.toLowerCase()))
     );
@@ -274,14 +282,14 @@ export const HrmsView: React.FC = () => {
       isOpen: true,
       type: 'EMPLOYEE',
       id: emp.id,
-      title: `Delete Employee: ${emp.name}`,
-      description: `Are you sure you want to delete ${emp.name} (${emp.employeeCode}) from the employee directory? This removes them from active operations. Historical field attendance logs will be retained for statutory audit compliance.`,
+      title: `Delete Employee: ${emp.name || 'Staff'}`,
+      description: `Are you sure you want to delete ${emp.name || 'this employee'} (${emp.employeeCode || emp.id}) from the employee directory? This removes them from active operations. Historical field attendance logs will be retained for statutory audit compliance.`,
       details: [
-        { label: 'Name', value: emp.name },
-        { label: 'Code', value: emp.employeeCode },
-        { label: 'Department', value: emp.department },
-        { label: 'Designation', value: emp.designation },
-        { label: 'Monthly Salary', value: `₹${emp.salaryMonthly.toLocaleString('en-IN')}` }
+        { label: 'Name', value: emp.name || '-' },
+        { label: 'Code', value: emp.employeeCode || '-' },
+        { label: 'Department', value: emp.department || '-' },
+        { label: 'Designation', value: emp.designation || '-' },
+        { label: 'Monthly Salary', value: `₹${formatINR(emp.salaryMonthly)}` }
       ]
     });
   };
@@ -426,13 +434,13 @@ export const HrmsView: React.FC = () => {
       isOpen: true,
       type: 'PAYSLIP',
       id: payslip.id,
-      title: `Delete Payslip ${payslip.payslipNumber}?`,
-      description: `Are you sure you want to delete the payslip voucher for ${payslip.employeeName} for ${payslip.month}?`,
+      title: `Delete Payslip ${payslip.payslipNumber || payslip.id}?`,
+      description: `Are you sure you want to delete the payslip voucher for ${payslip.employeeName || 'employee'} for ${payslip.month || 'selected cycle'}?`,
       details: [
-        { label: 'Employee', value: payslip.employeeName },
-        { label: 'Period', value: payslip.month },
-        { label: 'Gross Earnings', value: `₹${payslip.grossEarnings.toLocaleString('en-IN')}` },
-        { label: 'Net Payable', value: `₹${payslip.netPay.toLocaleString('en-IN')}` }
+        { label: 'Employee', value: payslip.employeeName || '-' },
+        { label: 'Period', value: payslip.month || '-' },
+        { label: 'Gross Earnings', value: `₹${formatINR(payslip.grossEarnings)}` },
+        { label: 'Net Payable', value: `₹${formatINR(payslip.netPay)}` }
       ]
     });
   };
@@ -711,12 +719,12 @@ export const HrmsView: React.FC = () => {
                             }}
                           />
                         ) : (
-                          <span>{e.name.slice(0, 2).toUpperCase()}</span>
+                          <span>{(e.name || 'EM').slice(0, 2).toUpperCase()}</span>
                         )}
                       </div>
                       <div className="min-w-0">
-                        <h3 className="font-bold text-base text-slate-900 truncate">{e.name}</h3>
-                        <p className="text-xs text-slate-500 font-medium truncate">{e.designation}</p>
+                        <h3 className="font-bold text-base text-slate-900 truncate">{e.name || 'Employee'}</h3>
+                        <p className="text-xs text-slate-500 font-medium truncate">{e.designation || '-'}</p>
                       </div>
                     </div>
 
@@ -775,7 +783,7 @@ export const HrmsView: React.FC = () => {
                       <DollarSign className="w-3.5 h-3.5 text-slate-400" />
                       <span>Monthly Pay</span>
                     </span>
-                    <span className="font-bold text-slate-900">₹{e.salaryMonthly.toLocaleString('en-IN')}</span>
+                    <span className="font-bold text-slate-900">₹{formatINR(e.salaryMonthly)}</span>
                   </div>
                 </div>
               ))}
@@ -831,9 +839,9 @@ export const HrmsView: React.FC = () => {
                       <td className="py-3.5 px-4 font-bold text-slate-900">
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[10px]">
-                            {a.employeeName.slice(0, 2).toUpperCase()}
+                            {(a.employeeName || 'EM').slice(0, 2).toUpperCase()}
                           </div>
-                          <span>{a.employeeName}</span>
+                          <span>{a.employeeName || 'Staff Member'}</span>
                         </div>
                       </td>
                       <td className="py-3.5 px-4 text-slate-600">{a.date}</td>
@@ -862,8 +870,8 @@ export const HrmsView: React.FC = () => {
                         <div className="flex items-center gap-1">
                           <MapPin className="w-3 h-3 text-emerald-600 shrink-0" />
                           <span>
-                            {typeof a.checkInGps === 'object' && a.checkInGps !== null
-                              ? `${a.checkInGps.latitude?.toFixed(4)}°, ${a.checkInGps.longitude?.toFixed(4)}°`
+                            {typeof a.checkInGps === 'object' && a.checkInGps !== null && typeof a.checkInGps.latitude === 'number' && typeof a.checkInGps.longitude === 'number'
+                              ? `${a.checkInGps.latitude.toFixed(4)}°, ${a.checkInGps.longitude.toFixed(4)}°`
                               : typeof a.checkInGps === 'string'
                                 ? a.checkInGps
                                 : '-'}
@@ -1001,31 +1009,31 @@ export const HrmsView: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Fixed Base Payroll</span>
-              <span className="text-sm font-bold text-slate-800">₹{payrollSummary.totalBaseSalary.toLocaleString('en-IN')}</span>
+              <span className="text-sm font-bold text-slate-800">₹{formatINR(payrollSummary.totalBaseSalary)}</span>
               <span className="text-[10px] text-slate-400 block mt-0.5">Master rates</span>
             </div>
 
             <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-emerald-600 block mb-0.5">Overtime Amount</span>
-              <span className="text-sm font-bold text-emerald-700">+₹{payrollSummary.totalOvertime.toLocaleString('en-IN')}</span>
+              <span className="text-sm font-bold text-emerald-700">+₹{formatINR(payrollSummary.totalOvertime)}</span>
               <span className="text-[10px] text-slate-400 block mt-0.5">Variable earnings</span>
             </div>
 
             <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-sky-600 block mb-0.5">Approved Expenses</span>
-              <span className="text-sm font-bold text-sky-700">+₹{payrollSummary.totalExpenses.toLocaleString('en-IN')}</span>
+              <span className="text-sm font-bold text-sky-700">+₹{formatINR(payrollSummary.totalExpenses)}</span>
               <span className="text-[10px] text-slate-400 block mt-0.5">Travel & site claims</span>
             </div>
 
             <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
               <span className="text-[10px] uppercase font-bold text-rose-600 block mb-0.5">Total Deductions</span>
-              <span className="text-sm font-bold text-rose-700">-₹{payrollSummary.totalDeductions.toLocaleString('en-IN')}</span>
+              <span className="text-sm font-bold text-rose-700">-₹{formatINR(payrollSummary.totalDeductions)}</span>
               <span className="text-[10px] text-slate-400 block mt-0.5">PF, TDS & statutory</span>
             </div>
 
             <div className="bg-white p-3.5 rounded-xl border border-emerald-200 shadow-2xs bg-emerald-50/30">
               <span className="text-[10px] uppercase font-bold text-emerald-800 block mb-0.5">Total Net Disbursed</span>
-              <span className="text-sm font-black text-emerald-800">₹{payrollSummary.totalNetPay.toLocaleString('en-IN')}</span>
+              <span className="text-sm font-black text-emerald-800">₹{formatINR(payrollSummary.totalNetPay)}</span>
               <span className="text-[10px] text-emerald-600 block mt-0.5">{payrollSummary.generatedCount} vouchers</span>
             </div>
 
@@ -1081,35 +1089,35 @@ export const HrmsView: React.FC = () => {
                           <td className="py-3.5 px-4">
                             <div className="flex items-center gap-2.5">
                               <div className="w-7 h-7 rounded-full bg-slate-100 text-slate-800 flex items-center justify-center font-bold text-xs shrink-0">
-                                {emp.name.slice(0, 2).toUpperCase()}
+                                {(emp.name || 'EM').slice(0, 2).toUpperCase()}
                               </div>
                               <div>
-                                <span className="font-bold text-slate-900 block">{emp.name}</span>
-                                <span className="font-mono text-[10px] text-slate-400">{emp.employeeCode}</span>
+                                <span className="font-bold text-slate-900 block">{emp.name || 'Employee'}</span>
+                                <span className="font-mono text-[10px] text-slate-400">{emp.employeeCode || emp.id}</span>
                               </div>
                             </div>
                           </td>
 
                           {/* Department & Role */}
                           <td className="py-3.5 px-4 text-slate-600">
-                            <span className="font-medium text-slate-800 block">{emp.department}</span>
-                            <span className="text-[10px] text-slate-400">{emp.designation}</span>
+                            <span className="font-medium text-slate-800 block">{emp.department || '-'}</span>
+                            <span className="text-[10px] text-slate-400">{emp.designation || '-'}</span>
                           </td>
 
                           {/* Fixed Base Salary (Read-only from employee record) */}
                           <td className="py-3.5 px-4">
                             <span className="font-semibold text-slate-800 block">
-                              ₹{emp.salaryMonthly.toLocaleString('en-IN')}
+                              ₹{formatINR(emp.salaryMonthly)}
                             </span>
                             <span className="text-[10px] text-slate-400">Fixed Base</span>
                           </td>
 
                           {/* Overtime */}
                           <td className="py-3.5 px-4">
-                            {slip && slip.overtimeAmount > 0 ? (
+                            {slip && Number(slip.overtimeAmount) > 0 ? (
                               <div>
                                 <span className="font-semibold text-emerald-700">
-                                  +₹{slip.overtimeAmount.toLocaleString('en-IN')}
+                                  +₹{formatINR(slip.overtimeAmount)}
                                 </span>
                                 <span className="text-[10px] text-slate-400 block">
                                   {slip.overtimeType === 'CALCULATED'
@@ -1124,13 +1132,13 @@ export const HrmsView: React.FC = () => {
 
                           {/* Additional Expenses */}
                           <td className="py-3.5 px-4">
-                            {slip && slip.totalAdditionalExpenses > 0 ? (
+                            {slip && Number(slip.totalAdditionalExpenses) > 0 ? (
                               <div>
                                 <span className="font-semibold text-sky-700">
-                                  +₹{slip.totalAdditionalExpenses.toLocaleString('en-IN')}
+                                  +₹{formatINR(slip.totalAdditionalExpenses)}
                                 </span>
                                 <span className="text-[10px] text-slate-400 block">
-                                  {slip.additionalExpenses.length} item(s)
+                                  {slip.additionalExpenses?.length || 0} item(s)
                                 </span>
                               </div>
                             ) : (
@@ -1140,13 +1148,13 @@ export const HrmsView: React.FC = () => {
 
                           {/* Deductions */}
                           <td className="py-3.5 px-4">
-                            {slip && slip.totalDeductions > 0 ? (
+                            {slip && Number(slip.totalDeductions) > 0 ? (
                               <div>
                                 <span className="font-semibold text-rose-700">
-                                  -₹{slip.totalDeductions.toLocaleString('en-IN')}
+                                  -₹{formatINR(slip.totalDeductions)}
                                 </span>
                                 <span className="text-[10px] text-slate-400 block">
-                                  {slip.deductions.length} item(s)
+                                  {slip.deductions?.length || 0} item(s)
                                 </span>
                               </div>
                             ) : (
@@ -1157,9 +1165,9 @@ export const HrmsView: React.FC = () => {
                           {/* Gross Earnings */}
                           <td className="py-3.5 px-4 font-semibold text-slate-800">
                             {slip ? (
-                              <span>₹{slip.grossEarnings.toLocaleString('en-IN')}</span>
+                              <span>₹{formatINR(slip.grossEarnings)}</span>
                             ) : (
-                              <span className="text-slate-400 text-[11px]">₹{emp.salaryMonthly.toLocaleString('en-IN')} (Est.)</span>
+                              <span className="text-slate-400 text-[11px]">₹{formatINR(emp.salaryMonthly)} (Est.)</span>
                             )}
                           </td>
 
@@ -1167,11 +1175,11 @@ export const HrmsView: React.FC = () => {
                           <td className="py-3.5 px-4">
                             {slip ? (
                               <span className="font-black text-slate-900 text-sm">
-                                ₹{slip.netPay.toLocaleString('en-IN')}
+                                ₹{formatINR(slip.netPay)}
                               </span>
                             ) : (
                               <span className="font-medium text-slate-400 text-xs">
-                                ₹{emp.salaryMonthly.toLocaleString('en-IN')} (Pending)
+                                ₹{formatINR(emp.salaryMonthly)} (Pending)
                               </span>
                             )}
                           </td>

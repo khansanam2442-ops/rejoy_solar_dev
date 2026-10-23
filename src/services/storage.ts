@@ -1155,16 +1155,20 @@ class StorageService {
     return safeList.filter(Boolean).map(emp => {
       const defaultAuthUid = emp?.id ? DEFAULT_AUTH_MAP[emp.id] : undefined;
       const authUid = emp.authUid || defaultAuthUid;
-      if (typeof emp.loginEnabled !== 'boolean' || (!emp.authUid && authUid)) {
-        return {
-          ...emp,
-          authUid,
-          loginEnabled: typeof emp.loginEnabled === 'boolean' ? emp.loginEnabled : true,
-          systemRole: emp.systemRole || emp.assignedRole || 'Project Manager',
-          accountStatus: (emp.status === 'TERMINATED' ? 'DISABLED' : 'ACTIVE') as Employee['accountStatus']
-        };
-      }
-      return emp;
+      const salaryMonthly = Number(emp.salaryMonthly ?? (emp as any).salary_monthly ?? (emp as any).salary) || 0;
+      const safeEmp: Employee = {
+        ...emp,
+        name: emp.name || 'Employee',
+        employeeCode: emp.employeeCode || emp.id || 'EMP-001',
+        department: emp.department || 'Operations',
+        designation: emp.designation || 'Staff',
+        salaryMonthly,
+        authUid,
+        loginEnabled: typeof emp.loginEnabled === 'boolean' ? emp.loginEnabled : true,
+        systemRole: emp.systemRole || emp.assignedRole || 'Project Manager',
+        accountStatus: (emp.status === 'TERMINATED' ? 'DISABLED' : 'ACTIVE') as Employee['accountStatus']
+      };
+      return safeEmp;
     });
   }
 
@@ -1223,7 +1227,41 @@ class StorageService {
 
   // --- Payroll / Payslips ---
   getPayslips(): Payslip[] {
-    return this.get<Payslip[]>(STORAGE_KEYS.PAYSLIPS, initialPayslips);
+    const list = this.get<Payslip[]>(STORAGE_KEYS.PAYSLIPS, initialPayslips);
+    const safeList = Array.isArray(list) ? list : initialPayslips;
+    return safeList.filter(Boolean).map(p => {
+      const baseSalary = Number((p as any).baseSalary ?? (p as any).basicSalary ?? (p as any).basic_salary) || 0;
+      const overtimeAmount = Number((p as any).overtimeAmount ?? (p as any).allowances) || 0;
+      const totalAdditionalExpenses = Number((p as any).totalAdditionalExpenses) || 0;
+      const deductionsArr = Array.isArray(p.deductions) ? p.deductions : [];
+      const totalDeductions = Number((p as any).totalDeductions ?? (typeof (p as any).deductions === 'number' ? (p as any).deductions : 0)) || 0;
+      const grossEarnings = Number((p as any).grossEarnings ?? (baseSalary + overtimeAmount + totalAdditionalExpenses)) || 0;
+      const netPay = Number((p as any).netPay ?? (p as any).netSalary ?? (p as any).net_salary ?? (grossEarnings - totalDeductions)) || 0;
+
+      return {
+        ...p,
+        payslipNumber: p.payslipNumber || p.id || 'PS-001',
+        employeeId: p.employeeId || '',
+        employeeCode: p.employeeCode || '',
+        employeeName: p.employeeName || 'Employee',
+        department: p.department || 'Operations',
+        designation: p.designation || 'Specialist',
+        month: p.month || 'September 2026',
+        generatedDate: p.generatedDate || new Date().toISOString().slice(0, 10),
+        baseSalary,
+        overtimeType: p.overtimeType || 'DIRECT',
+        overtimeHours: p.overtimeHours ?? 0,
+        overtimeRatePerHour: p.overtimeRatePerHour ?? 0,
+        overtimeAmount,
+        additionalExpenses: Array.isArray(p.additionalExpenses) ? p.additionalExpenses : [],
+        totalAdditionalExpenses,
+        deductions: deductionsArr,
+        totalDeductions,
+        grossEarnings,
+        netPay,
+        status: (p.status as any) || ((p as any).paymentStatus === 'PAID' ? 'PAID' : 'GENERATED')
+      };
+    });
   }
 
   savePayslip(payslip: Payslip): void {
