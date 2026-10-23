@@ -405,7 +405,7 @@ export const LoginView: React.FC = () => {
                         autoFocus
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. Vikram Patel"
+                        placeholder="e.g. Administrator Name"
                         className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
                       />
                     </div>
@@ -530,7 +530,7 @@ export const LoginView: React.FC = () => {
           </div>
         </div>
 
-        {/* Developer Quick-Login & Demo Accounts Drawer (Collapsible) */}
+        {/* Quick Administrator Login Drawer (Collapsible) */}
         <div className="mt-5 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 p-4 text-white shadow-xl">
           <button
             type="button"
@@ -538,8 +538,8 @@ export const LoginView: React.FC = () => {
             className="w-full flex items-center justify-between text-left text-xs font-bold text-slate-300 hover:text-white transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Demo Accounts / Fast Login (15 Roles)</span>
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>Authorized Administrator Logins</span>
             </div>
             {showDevAccounts ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
@@ -547,20 +547,20 @@ export const LoginView: React.FC = () => {
           {showDevAccounts && (
             <div className="mt-3.5 pt-3 border-t border-slate-800 space-y-2 animate-in fade-in">
               <p className="text-[11px] text-slate-400">
-                Click any role below to instantly log in and preview its tailored operational dashboard (Default password: <strong className="text-amber-400 font-mono">123456</strong>):
+                Click any administrator below to autofill and log into Rejoy Solar ERP (Default password: <strong className="text-amber-400 font-mono">123456</strong>):
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 max-h-60 overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                 {DEMO_ACCOUNTS.map((acc) => (
                   <button
-                    key={acc.role}
+                    key={acc.email}
                     type="button"
                     onClick={() => handleSelectDemoAccount(acc)}
                     disabled={isSubmitting}
-                    className="p-2 text-left bg-slate-800 hover:bg-amber-500 hover:text-slate-950 border border-slate-700/60 rounded-xl transition-all text-slate-200 group cursor-pointer"
+                    className="p-2.5 text-left bg-slate-800 hover:bg-amber-500 hover:text-slate-950 border border-slate-700/60 rounded-xl transition-all text-slate-200 group cursor-pointer"
                   >
                     <div className="text-[11px] font-bold truncate group-hover:text-slate-950">
-                      {acc.role}
+                      {acc.name}
                     </div>
                     <div className="text-[9px] text-slate-400 font-mono truncate group-hover:text-slate-900">
                       {acc.email}

@@ -715,234 +715,52 @@ export function generateFullSql(): string {
   lines.push('');
 
   lines.push('-- ==========================================================');
-  lines.push('-- DATA MIGRATION: POPULATING ALL EXISTING PRODUCTION DATA');
+  lines.push('-- SYSTEM CONFIGURATION & AUTHORIZED AUTHENTICATION BASELINE');
   lines.push('-- ==========================================================');
   lines.push('');
 
   // --- Seed solar_users ---
   lines.push('-- Pushing users data into solar_users');
-  DEMO_ACCOUNTS.forEach(account => {
-    lines.push(`INSERT INTO \`solar_users\` (\`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`, \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`)
-VALUES (${escapeSql(account.profile.id)}, ${escapeSql(account.name)}, ${escapeSql(account.email)}, ${escapeSql(account.password)}, ${escapeSql(account.role)}, ${escapeSql(account.profile.phone || '+91 98000 00000')}, ${escapeSql(account.department)}, ${escapeSql(account.profile.designation || account.role)}, ${escapeSql(account.profile.employeeId)}, ${account.isFieldWorker ? 1 : 0}, 'ACTIVE')
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`role\` = VALUES(\`role\`), \`password\` = VALUES(\`password\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_customers ---
-  const customers = storageService.getCustomers() as any[];
-  lines.push(`-- Pushing ${customers.length} records into solar_customers`);
-  customers.forEach((c: any) => {
-    lines.push(`INSERT INTO \`solar_customers\` (\`id\`, \`customer_code\`, \`name\`, \`company_name\`, \`customer_type\`, \`phone\`, \`email\`, \`password\`, \`site_address\`, \`city\`, \`state\`, \`pincode\`, \`gst_number\`, \`electricity_consumer_no\`, \`sanctioned_load_kw\`, \`status\`, \`active_project_id\`)
-VALUES (${escapeSql(c.id)}, ${escapeSql(c.customerCode || c.id)}, ${escapeSql(c.name)}, ${escapeSql(c.companyName || '')}, ${escapeSql(c.customerType || 'Residential')}, ${escapeSql(c.phone)}, ${escapeSql(c.email || '')}, ${escapeSql(c.password || '123456')}, ${escapeSql(c.siteAddress)}, ${escapeSql(c.city)}, ${escapeSql(c.state || 'Gujarat')}, ${escapeSql(c.pincode || '')}, ${escapeSql(c.gstNumber || '')}, ${escapeSql(c.electricityConsumerNo || '')}, ${Number(c.sanctionedLoadKw) || 0}, ${escapeSql(c.status || 'ACTIVE')}, ${escapeSql(c.activeProjectId || null)})
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`phone\` = VALUES(\`phone\`), \`password\` = VALUES(\`password\`), \`email\` = VALUES(\`email\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_leads ---
-  const leads = storageService.getLeads();
-  lines.push(`-- Pushing ${leads.length} records into solar_leads`);
-  leads.forEach(l => {
-    lines.push(`INSERT INTO \`solar_leads\` (\`id\`, \`customer_name\`, \`company_name\`, \`phone\`, \`email\`, \`address\`, \`city\`, \`solar_capacity_kw\`, \`estimated_value\`, \`source\`, \`assigned_salesperson_id\`, \`assigned_salesperson_name\`, \`status\`, \`notes\`, \`next_follow_up_date\`)
-VALUES (${escapeSql(l.id)}, ${escapeSql(l.customerName)}, ${escapeSql(l.companyName || '')}, ${escapeSql(l.phone)}, ${escapeSql(l.email || '')}, ${escapeSql(l.address || '')}, ${escapeSql(l.city || '')}, ${Number(l.solarCapacityKw) || 0}, ${Number(l.estimatedValue) || 0}, ${escapeSql(l.source || 'Website')}, ${escapeSql(l.assignedSalespersonId || '')}, ${escapeSql(l.assignedSalespersonName || '')}, ${escapeSql(l.status || 'NEW')}, ${escapeSql(l.notes || '')}, ${l.nextFollowUpDate ? escapeSql(l.nextFollowUpDate.split('T')[0]) : 'NULL'})
-ON DUPLICATE KEY UPDATE \`customer_name\` = VALUES(\`customer_name\`), \`status\` = VALUES(\`status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_projects & project stages ---
-  const projects = storageService.getProjects() as any[];
-  lines.push(`-- Pushing ${projects.length} records into solar_projects and stages`);
-  projects.forEach((p: any) => {
-    lines.push(`INSERT INTO \`solar_projects\` (\`id\`, \`project_code\`, \`customer_id\`, \`customer_name\`, \`title\`, \`capacity_kw\`, \`total_value\`, \`status\`, \`current_stage_key\`, \`completion_percentage\`, \`project_manager_id\`, \`project_manager_name\`, \`site_address\`, \`city\`, \`inverter_model\`, \`panel_model\`, \`structure_type\`, \`start_date\`, \`expected_completion_date\`, \`notes\`, \`assignments_json\`)
-VALUES (${escapeSql(p.id)}, ${escapeSql(p.projectCode || p.id)}, ${escapeSql(p.customerId)}, ${escapeSql(p.customerName)}, ${escapeSql(p.title)}, ${Number(p.capacityKw) || 0}, ${Number(p.totalValue) || 0}, ${escapeSql(p.status || 'PLANNING')}, ${escapeSql(p.currentStageKey || 'site_survey')}, ${Number(p.completionPercentage) || 0}, ${escapeSql(p.projectManagerId || '')}, ${escapeSql(p.projectManagerName || '')}, ${escapeSql(p.siteAddress)}, ${escapeSql(p.city)}, ${escapeSql(p.inverterModel || '')}, ${escapeSql(p.panelModel || '')}, ${escapeSql(p.structureType || 'Elevated GI Structure')}, ${p.startDate ? escapeSql(p.startDate.split('T')[0]) : 'NULL'}, ${p.expectedCompletionDate ? escapeSql(p.expectedCompletionDate.split('T')[0]) : 'NULL'}, ${escapeSql(p.notes || '')}, ${escapeSql(p.assignments || [])})
-ON DUPLICATE KEY UPDATE \`title\` = VALUES(\`title\`), \`status\` = VALUES(\`status\`), \`completion_percentage\` = VALUES(\`completion_percentage\`);`);
-
-    if (Array.isArray(p.stages)) {
-      p.stages.forEach((st: any, sidx: number) => {
-        lines.push(`INSERT INTO \`solar_project_stages\` (\`id\`, \`project_id\`, \`stage_key\`, \`title\`, \`stage_order\`, \`department\`, \`assigned_role\`, \`assigned_employee_id\`, \`assigned_employee_name\`, \`status\`, \`priority\`, \`start_date\`, \`due_date\`, \`completed_date\`, \`checklist_json\`, \`photos_json\`, \`documents_json\`, \`notes\`, \`approved_by\`)
-VALUES (${escapeSql(st.id || `${p.id}_st_${sidx}`)}, ${escapeSql(p.id)}, ${escapeSql(st.key || st.stageKey || 'stage')}, ${escapeSql(st.title || st.name)}, ${sidx + 1}, ${escapeSql(st.department || 'Operations')}, ${escapeSql(st.assignedRole || 'Project Manager')}, ${escapeSql(st.assignedEmployeeId || '')}, ${escapeSql(st.assignedEmployeeName || '')}, ${escapeSql(st.status || 'NOT STARTED')}, ${escapeSql(st.priority || 'MEDIUM')}, ${st.startDate ? escapeSql(st.startDate.split('T')[0]) : 'NULL'}, ${st.dueDate ? escapeSql(st.dueDate.split('T')[0]) : 'NULL'}, ${st.completedDate ? escapeSql(st.completedDate.split('T')[0]) : 'NULL'}, ${escapeSql(st.checklist || [])}, ${escapeSql(st.photos || [])}, ${escapeSql(st.documents || [])}, ${escapeSql(st.notes || '')}, ${escapeSql(st.approvedBy || '')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
-      });
+  const adminUsers = [
+    {
+      id: "emp-1",
+      name: "Vikram Patel",
+      email: "admin@rejoysolar.com",
+      password: "123456",
+      role: "Admin",
+      phone: "+91 98250 11223",
+      department: "Administration",
+      designation: "Managing Director & Admin",
+      employeeId: "EMP001"
+    },
+    {
+      id: "usr-kunal",
+      name: "Kunal Das",
+      email: "kunaldas2442@gmail.com",
+      password: "123456",
+      role: "Admin",
+      phone: "+91 98250 11223",
+      department: "Administration",
+      designation: "Owner / Admin",
+      employeeId: "EMP000"
+    },
+    {
+      id: "usr-admin-fallback",
+      name: "Admin System Fallback",
+      email: "dasest404@gmail.com",
+      password: "123456",
+      role: "Admin",
+      phone: "+91 98250 11223",
+      department: "Administration",
+      designation: "Lead Administrator",
+      employeeId: "EMP-ADM-404"
     }
-  });
-  lines.push('');
+  ];
 
-  // --- Seed solar_employees ---
-  const employees = storageService.getEmployees() as any[];
-  lines.push(`-- Pushing ${employees.length} records into solar_employees`);
-  employees.forEach((e: any) => {
-    lines.push(`INSERT INTO \`solar_employees\` (\`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`, \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`, \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`, \`is_field_worker\`, \`account_status\`)
-VALUES (${escapeSql(e.id)}, ${escapeSql(e.employeeCode || e.id)}, ${escapeSql(e.name)}, ${escapeSql(e.photoUrl || '')}, ${escapeSql(e.department)}, ${escapeSql(e.designation)}, ${escapeSql(e.phone)}, ${escapeSql(e.email)}, ${e.joiningDate ? escapeSql(e.joiningDate.split('T')[0]) : "'2025-01-01'"}, ${Number(e.salaryMonthly) || 0}, ${escapeSql(e.status || 'ACTIVE')}, ${escapeSql(e.currentSiteLocation || '')}, ${e.loginEnabled !== false ? 1 : 0}, ${escapeSql(e.systemRole || 'Super Admin')}, ${e.isFieldWorker ? 1 : 0}, ${escapeSql(e.accountStatus || 'ACTIVE')})
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`phone\` = VALUES(\`phone\`), \`department\` = VALUES(\`department\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_payments ---
-  const payments = storageService.getPayments() as any[];
-  lines.push(`-- Pushing ${payments.length} records into solar_payments`);
-  payments.forEach((pay: any) => {
-    lines.push(`INSERT INTO \`solar_payments\` (\`id\`, \`receipt_number\`, \`project_id\`, \`customer_id\`, \`customer_name\`, \`milestone\`, \`amount\`, \`status\`, \`due_date\`, \`paid_date\`, \`payment_mode\`, \`transaction_reference\`, \`notes\`, \`tally_sync_status\`)
-VALUES (${escapeSql(pay.id)}, ${escapeSql(pay.receiptNumber || pay.id)}, ${escapeSql(pay.projectId)}, ${escapeSql(pay.customerId)}, ${escapeSql(pay.customerName)}, ${escapeSql(pay.milestone)}, ${Number(pay.amount) || 0}, ${escapeSql(pay.status || 'PENDING')}, ${pay.dueDate ? escapeSql(pay.dueDate.split('T')[0]) : 'NULL'}, ${pay.paidDate ? escapeSql(pay.paidDate.split('T')[0]) : 'NULL'}, ${escapeSql(pay.paymentMode || 'Bank NEFT/RTGS')}, ${escapeSql(pay.transactionReference || '')}, ${escapeSql(pay.notes || '')}, ${escapeSql(pay.tallySyncStatus || 'NOT SYNCED')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`), \`amount\` = VALUES(\`amount\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_expenses ---
-  const expenses = storageService.getExpenses() as any[];
-  lines.push(`-- Pushing ${expenses.length} records into solar_expenses`);
-  expenses.forEach((ex: any) => {
-    lines.push(`INSERT INTO \`solar_expenses\` (\`id\`, \`expense_number\`, \`project_id\`, \`project_code\`, \`vendor_name\`, \`category\`, \`amount\`, \`expense_date\`, \`payment_mode\`, \`reference_no\`, \`notes\`, \`approved_by\`, \`tally_sync_status\`)
-VALUES (${escapeSql(ex.id)}, ${escapeSql(ex.expenseNumber || ex.id)}, ${escapeSql(ex.projectId || '')}, ${escapeSql(ex.projectCode || '')}, ${escapeSql(ex.vendorName)}, ${escapeSql(ex.category)}, ${Number(ex.amount) || 0}, ${ex.expenseDate ? escapeSql(ex.expenseDate.split('T')[0]) : "'2026-08-01'"}, ${escapeSql(ex.paymentMode || 'Bank Payment')}, ${escapeSql(ex.referenceNo || '')}, ${escapeSql(ex.notes || '')}, ${escapeSql(ex.approvedBy || '')}, ${escapeSql(ex.tallySyncStatus || 'NOT SYNCED')})
-ON DUPLICATE KEY UPDATE \`amount\` = VALUES(\`amount\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_attendance ---
-  const attendance = storageService.getAttendance() as any[];
-  lines.push(`-- Pushing ${attendance.length} records into solar_attendance`);
-  attendance.forEach((att: any) => {
-    lines.push(`INSERT INTO \`solar_attendance\` (\`id\`, \`employee_id\`, \`employee_name\`, \`attendance_date\`, \`check_in_time\`, \`check_out_time\`, \`check_in_gps_json\`, \`check_out_gps_json\`, \`site_project_id\`, \`site_project_title\`, \`status\`)
-VALUES (${escapeSql(att.id)}, ${escapeSql(att.employeeId)}, ${escapeSql(att.employeeName)}, ${escapeSql(att.attendanceDate || att.date)}, ${escapeSql(att.checkInTime)}, ${escapeSql(att.checkOutTime || null)}, ${escapeSql(att.checkInGps || null)}, ${escapeSql(att.checkOutGps || null)}, ${escapeSql(att.siteProjectId || '')}, ${escapeSql(att.siteProjectTitle || '')}, ${escapeSql(att.status || 'PRESENT')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_payslips ---
-  const payslips = storageService.getPayslips() as any[];
-  lines.push(`-- Pushing ${payslips.length} records into solar_payslips`);
-  payslips.forEach((ps: any) => {
-    lines.push(`INSERT INTO \`solar_payslips\` (\`id\`, \`employee_id\`, \`employee_name\`, \`month\`, \`year\`, \`basic_salary\`, \`allowances\`, \`deductions\`, \`net_salary\`, \`payment_status\`, \`payment_date\`, \`notes\`)
-VALUES (${escapeSql(ps.id)}, ${escapeSql(ps.employeeId)}, ${escapeSql(ps.employeeName)}, ${escapeSql(ps.month)}, ${Number(ps.year) || 2026}, ${Number(ps.basicSalary || ps.baseSalary) || 0}, ${Number(ps.allowances) || 0}, ${Number(ps.deductions) || 0}, ${Number(ps.netSalary) || 0}, ${escapeSql(ps.paymentStatus || ps.status || 'PAID')}, ${ps.paymentDate ? escapeSql(ps.paymentDate.split('T')[0]) : 'NULL'}, ${escapeSql(ps.notes || '')})
-ON DUPLICATE KEY UPDATE \`payment_status\` = VALUES(\`payment_status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_holidays ---
-  const holidays = storageService.getHolidays() as any[];
-  lines.push(`-- Pushing ${holidays.length} records into solar_holidays`);
-  holidays.forEach((h: any) => {
-    lines.push(`INSERT INTO \`solar_holidays\` (\`id\`, \`name\`, \`holiday_date\`, \`type\`, \`description\`)
-VALUES (${escapeSql(h.id)}, ${escapeSql(h.name)}, ${escapeSql(h.date || h.holidayDate)}, ${escapeSql(h.type || 'Mandatory')}, ${escapeSql(h.description || '')})
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_service_tickets ---
-  const tickets = storageService.getServiceTickets() as any[];
-  lines.push(`-- Pushing ${tickets.length} records into solar_service_tickets`);
-  tickets.forEach((tk: any) => {
-    lines.push(`INSERT INTO \`solar_service_tickets\` (\`id\`, \`ticket_id\`, \`customer_id\`, \`customer_name\`, \`project_id\`, \`project_title\`, \`issue\`, \`category\`, \`priority\`, \`assigned_technician_id\`, \`assigned_technician_name\`, \`status\`, \`scheduled_date\`, \`resolved_date\`, \`notes\`, \`photos_json\`)
-VALUES (${escapeSql(tk.id)}, ${escapeSql(tk.ticketId || tk.id)}, ${escapeSql(tk.customerId)}, ${escapeSql(tk.customerName)}, ${escapeSql(tk.projectId)}, ${escapeSql(tk.projectTitle || '')}, ${escapeSql(tk.issue)}, ${escapeSql(tk.category || 'Inverter Warning')}, ${escapeSql(tk.priority || 'MEDIUM')}, ${escapeSql(tk.assignedTechnicianId || '')}, ${escapeSql(tk.assignedTechnicianName || '')}, ${escapeSql(tk.status || 'OPEN')}, ${tk.scheduledDate ? escapeSql(tk.scheduledDate.split('T')[0]) : 'NULL'}, ${tk.resolvedDate ? escapeSql(tk.resolvedDate.split('T')[0]) : 'NULL'}, ${escapeSql(tk.notes || '')}, ${escapeSql(tk.photos || [])})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_amc_contracts ---
-  const amcContracts = storageService.getAMCContracts() as any[];
-  lines.push(`-- Pushing ${amcContracts.length} records into solar_amc_contracts`);
-  amcContracts.forEach((amc: any) => {
-    lines.push(`INSERT INTO \`solar_amc_contracts\` (\`id\`, \`amc_code\`, \`customer_id\`, \`customer_name\`, \`project_id\`, \`project_title\`, \`plan_name\`, \`start_date\`, \`end_date\`, \`annual_amount\`, \`visits_completed\`, \`total_visits\`, \`status\`)
-VALUES (${escapeSql(amc.id)}, ${escapeSql(amc.amcCode || amc.id)}, ${escapeSql(amc.customerId)}, ${escapeSql(amc.customerName)}, ${escapeSql(amc.projectId)}, ${escapeSql(amc.projectTitle || '')}, ${escapeSql(amc.planName || 'Comprehensive AMC')}, ${escapeSql(amc.startDate.split('T')[0])}, ${escapeSql(amc.endDate.split('T')[0])}, ${Number(amc.annualAmount) || 0}, ${Number(amc.visitsCompleted) || 0}, ${Number(amc.totalVisits) || 4}, ${escapeSql(amc.status || 'ACTIVE')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_products ---
-  const products = storageService.getProducts() as any[];
-  lines.push(`-- Pushing ${products.length} records into solar_products`);
-  products.forEach((prod: any) => {
-    lines.push(`INSERT INTO \`solar_products\` (\`id\`, \`name\`, \`sku\`, \`category\`, \`brand\`, \`model\`, \`specifications\`, \`unit\`, \`hsn_code\`, \`gst_rate\`, \`unit_price\`, \`current_stock\`, \`reorder_level\`, \`warehouse_id\`, \`status\`)
-VALUES (${escapeSql(prod.id)}, ${escapeSql(prod.name)}, ${escapeSql(prod.sku)}, ${escapeSql(prod.category)}, ${escapeSql(prod.brand || '')}, ${escapeSql(prod.model || '')}, ${escapeSql(prod.specifications || prod.specification || '')}, ${escapeSql(prod.unit || 'Nos')}, ${escapeSql(prod.hsnCode || '')}, ${Number(prod.gstRate || prod.gst) || 18}, ${Number(prod.unitPrice || prod.price) || 0}, ${Number(prod.currentStock || prod.stock) || 0}, ${Number(prod.reorderLevel) || 0}, ${escapeSql(prod.warehouseId || '')}, ${escapeSql(prod.status || 'ACTIVE')})
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`current_stock\` = VALUES(\`current_stock\`), \`unit_price\` = VALUES(\`unit_price\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_vendors ---
-  const vendors = storageService.getVendors() as any[];
-  lines.push(`-- Pushing ${vendors.length} records into solar_vendors`);
-  vendors.forEach((v: any) => {
-    lines.push(`INSERT INTO \`solar_vendors\` (\`id\`, \`name\`, \`vendor_code\`, \`contact_person\`, \`phone\`, \`email\`, \`address\`, \`city\`, \`state\`, \`gst_number\`, \`pan_number\`, \`payment_terms\`, \`rating\`, \`categories_json\`, \`status\`)
-VALUES (${escapeSql(v.id)}, ${escapeSql(v.name)}, ${escapeSql(v.vendorCode || v.id)}, ${escapeSql(v.contactPerson || '')}, ${escapeSql(v.phone || '')}, ${escapeSql(v.email || '')}, ${escapeSql(v.address || '')}, ${escapeSql(v.city || '')}, ${escapeSql(v.state || '')}, ${escapeSql(v.gstNumber || '')}, ${escapeSql(v.panNumber || v.pan || '')}, ${escapeSql(v.paymentTerms || '30 Days')}, ${Number(v.rating) || 4.5}, ${escapeSql(v.categories || v.category || [])}, ${escapeSql(v.status || 'ACTIVE')})
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`phone\` = VALUES(\`phone\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_purchase_orders ---
-  const purchaseOrders = storageService.getPurchaseOrders() as any[];
-  lines.push(`-- Pushing ${purchaseOrders.length} records into solar_purchase_orders`);
-  purchaseOrders.forEach((po: any) => {
-    lines.push(`INSERT INTO \`solar_purchase_orders\` (\`id\`, \`po_number\`, \`vendor_id\`, \`vendor_name\`, \`po_date\`, \`expected_delivery_date\`, \`project_id\`, \`items_json\`, \`subtotal\`, \`gst_amount\`, \`total_amount\`, \`status\`, \`payment_status\`, \`receipts_json\`, \`notes\`)
-VALUES (${escapeSql(po.id)}, ${escapeSql(po.poNumber || po.orderNumber || po.id)}, ${escapeSql(po.vendorId)}, ${escapeSql(po.vendorName)}, ${po.poDate || po.orderDate ? escapeSql((po.poDate || po.orderDate).split('T')[0]) : "'2026-08-01'"}, ${po.expectedDeliveryDate ? escapeSql(po.expectedDeliveryDate.split('T')[0]) : 'NULL'}, ${escapeSql(po.projectId || '')}, ${escapeSql(po.items || [])}, ${Number(po.subtotal) || 0}, ${Number(po.gstAmount || po.taxAmount) || 0}, ${Number(po.totalAmount) || 0}, ${escapeSql(po.status || 'ISSUED')}, ${escapeSql(po.paymentStatus || 'PENDING')}, ${escapeSql(po.receipts || [])}, ${escapeSql(po.notes || '')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`), \`total_amount\` = VALUES(\`total_amount\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_boms ---
-  const boms = storageService.getBOMs() as any[];
-  lines.push(`-- Pushing ${boms.length} records into solar_boms`);
-  boms.forEach((bom: any) => {
-    lines.push(`INSERT INTO \`solar_boms\` (\`id\`, \`bom_number\`, \`project_id\`, \`project_title\`, \`system_capacity_kw\`, \`version\`, \`status\`, \`items_json\`, \`total_estimated_cost\`, \`created_by\`, \`approved_by\`, \`notes\`)
-VALUES (${escapeSql(bom.id)}, ${escapeSql(bom.bomNumber || bom.id)}, ${escapeSql(bom.projectId)}, ${escapeSql(bom.projectTitle)}, ${Number(bom.systemCapacityKw || bom.capacityKw) || 0}, ${escapeSql(bom.version || '1.0')}, ${escapeSql(bom.status || 'APPROVED')}, ${escapeSql(bom.items || [])}, ${Number(bom.totalEstimatedCost || bom.totalCost) || 0}, ${escapeSql(bom.createdBy || '')}, ${escapeSql(bom.approvedBy || '')}, ${escapeSql(bom.notes || '')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_sales_invoices ---
-  const salesInvoices = storageService.getSalesInvoices() as any[];
-  lines.push(`-- Pushing ${salesInvoices.length} records into solar_sales_invoices`);
-  salesInvoices.forEach((inv: any) => {
-    lines.push(`INSERT INTO \`solar_sales_invoices\` (\`id\`, \`invoice_number\`, \`project_id\`, \`customer_id\`, \`customer_name\`, \`invoice_date\`, \`due_date\`, \`items_json\`, \`subtotal\`, \`gst_amount\`, \`total_amount\`, \`payment_status\`, \`paid_amount\`, \`balance_amount\`, \`eway_bill_number\`, \`eway_bill_details_json\`, \`warehouse_id\`, \`notes\`)
-VALUES (${escapeSql(inv.id)}, ${escapeSql(inv.invoiceNumber || inv.id)}, ${escapeSql(inv.projectId || '')}, ${escapeSql(inv.customerId)}, ${escapeSql(inv.customerName)}, ${inv.invoiceDate ? escapeSql(inv.invoiceDate.split('T')[0]) : "'2026-08-01'"}, ${inv.dueDate ? escapeSql(inv.dueDate.split('T')[0]) : 'NULL'}, ${escapeSql(inv.items || [])}, ${Number(inv.subtotal) || 0}, ${Number(inv.gstAmount || inv.taxAmount) || 0}, ${Number(inv.totalAmount) || 0}, ${escapeSql(inv.paymentStatus || inv.status || 'UNPAID')}, ${Number(inv.paidAmount) || 0}, ${Number(inv.balanceAmount) || 0}, ${escapeSql(inv.ewayBillNumber || '')}, ${escapeSql(inv.ewayBillDetails || null)}, ${escapeSql(inv.warehouseId || '')}, ${escapeSql(inv.notes || '')})
-ON DUPLICATE KEY UPDATE \`payment_status\` = VALUES(\`payment_status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_warehouses ---
-  const warehouses = storageService.getWarehouses() as any[];
-  lines.push(`-- Pushing ${warehouses.length} records into solar_warehouses`);
-  warehouses.forEach((wh: any) => {
-    lines.push(`INSERT INTO \`solar_warehouses\` (\`id\`, \`name\`, \`code\`, \`address\`, \`city\`, \`state\`, \`pincode\`, \`manager_name\`, \`manager_phone\`, \`gst_number\`, \`is_active\`)
-VALUES (${escapeSql(wh.id)}, ${escapeSql(wh.name)}, ${escapeSql(wh.code)}, ${escapeSql(wh.address)}, ${escapeSql(wh.city)}, ${escapeSql(wh.state || '')}, ${escapeSql(wh.pincode || '')}, ${escapeSql(wh.managerName || wh.contactPerson || '')}, ${escapeSql(wh.managerPhone || wh.contactPhone || '')}, ${escapeSql(wh.gstNumber || '')}, ${wh.isActive !== false ? 1 : 0})
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`code\` = VALUES(\`code\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_stock_movements ---
-  const stockMovements = storageService.getStockMovements() as any[];
-  lines.push(`-- Pushing ${stockMovements.length} records into solar_stock_movements`);
-  stockMovements.forEach((sm: any) => {
-    lines.push(`INSERT INTO \`solar_stock_movements\` (\`id\`, \`product_id\`, \`product_name\`, \`sku\`, \`movement_type\`, \`quantity\`, \`balance_after\`, \`reference_number\`, \`warehouse_id\`, \`notes\`, \`timestamp\`, \`performed_by\`)
-VALUES (${escapeSql(sm.id)}, ${escapeSql(sm.productId)}, ${escapeSql(sm.productName)}, ${escapeSql(sm.sku || '')}, ${escapeSql(sm.movementType)}, ${Number(sm.quantity) || 0}, ${Number(sm.balanceAfter) || 0}, ${escapeSql(sm.referenceNumber || '')}, ${escapeSql(sm.warehouseId || '')}, ${escapeSql(sm.notes || '')}, ${escapeSql(sm.timestamp)}, ${escapeSql(sm.performedBy || '')})
-ON DUPLICATE KEY UPDATE \`balance_after\` = VALUES(\`balance_after\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_stock_audits ---
-  const stockAudits = storageService.getStockAudits() as any[];
-  lines.push(`-- Pushing ${stockAudits.length} records into solar_stock_audits`);
-  stockAudits.forEach((sa: any) => {
-    lines.push(`INSERT INTO \`solar_stock_audits\` (\`id\`, \`audit_number\`, \`warehouse_id\`, \`warehouse_name\`, \`audit_date\`, \`auditor_name\`, \`status\`, \`discrepancies_count\`, \`items_json\`, \`notes\`)
-VALUES (${escapeSql(sa.id)}, ${escapeSql(sa.auditNumber || sa.id)}, ${escapeSql(sa.warehouseId)}, ${escapeSql(sa.warehouseName)}, ${escapeSql(sa.auditDate)}, ${escapeSql(sa.auditorName || sa.performedBy || '')}, ${escapeSql(sa.status || 'COMPLETED')}, ${Number(sa.discrepanciesCount || sa.discrepanciesFound) || 0}, ${escapeSql(sa.items || [])}, ${escapeSql(sa.notes || '')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_quotations ---
-  const quotations = storageService.getQuotations() as any[];
-  lines.push(`-- Pushing ${quotations.length} records into solar_quotations`);
-  quotations.forEach((q: any) => {
-    lines.push(`INSERT INTO \`solar_quotations\` (\`id\`, \`quotation_number\`, \`customer_id\`, \`customer_name\`, \`project_id\`, \`capacity_kw\`, \`rate_per_wp\`, \`base_amount\`, \`tax_amount\`, \`panel_brand\`, \`inverter_brand\`, \`structure_type\`, \`items_json\`, \`subtotal\`, \`discount_amount\`, \`gst_percent\`, \`gst_amount\`, \`total_amount\`, \`status\`, \`valid_until\`)
-VALUES (${escapeSql(q.id)}, ${escapeSql(q.quotationNumber || q.id)}, ${escapeSql(q.customerId || '')}, ${escapeSql(q.customerName)}, ${escapeSql(q.projectId || '')}, ${Number(q.capacityKw) || 0}, ${Number(q.ratePerWp) || 0}, ${Number(q.baseAmount) || 0}, ${Number(q.taxAmount) || 0}, ${escapeSql(q.panelBrand || '')}, ${escapeSql(q.inverterBrand || '')}, ${escapeSql(q.structureType || '')}, ${escapeSql(q.items || [])}, ${Number(q.subtotal) || 0}, ${Number(q.discountAmount) || 0}, ${Number(q.gstPercent) || 13.8}, ${Number(q.gstAmount) || 0}, ${Number(q.totalAmount) || 0}, ${escapeSql(q.status || 'DRAFT')}, ${q.validUntil ? escapeSql(q.validUntil.split('T')[0]) : 'NULL'})
-ON DUPLICATE KEY UPDATE \`total_amount\` = VALUES(\`total_amount\`);`);
-  });
-  lines.push('');
-
-  // --- Seed solar_site_surveys ---
-  const surveys = storageService.getSurveys() as any[];
-  lines.push(`-- Pushing ${surveys.length} records into solar_site_surveys`);
-  surveys.forEach((sur: any) => {
-    lines.push(`INSERT INTO \`solar_site_surveys\` (\`id\`, \`project_id\`, \`customer_id\`, \`engineer_id\`, \`engineer_name\`, \`survey_date\`, \`status\`, \`site_address\`, \`latitude\`, \`longitude\`, \`location_name\`, \`roof_type\`, \`roof_area_sqft\`, \`shadow_free_area_sqft\`, \`recommended_capacity_kw\`, \`feasibility_score\`, \`photos_json\`, \`notes\`)
-VALUES (${escapeSql(sur.id)}, ${escapeSql(sur.projectId || '')}, ${escapeSql(sur.customerId || '')}, ${escapeSql(sur.engineerId || '')}, ${escapeSql(sur.engineerName)}, ${escapeSql(sur.surveyDate ? sur.surveyDate.split('T')[0] : '2026-08-01')}, ${escapeSql(sur.status || 'DRAFT')}, ${escapeSql(sur.siteAddress)}, ${sur.latitude ?? 'NULL'}, ${sur.longitude ?? 'NULL'}, ${escapeSql(sur.locationName || '')}, ${escapeSql(sur.roofType || 'RCC Flat')}, ${Number(sur.roofAreaSqft || sur.roofAreaSqFt) || 0}, ${Number(sur.shadowFreeAreaSqft || sur.shadowFreeAreaSqFt) || 0}, ${Number(sur.recommendedCapacityKw) || 0}, ${escapeSql(sur.feasibilityScore || 'GOOD')}, ${escapeSql(sur.photos || [])}, ${escapeSql(sur.notes || '')})
-ON DUPLICATE KEY UPDATE \`status\` = VALUES(\`status\`);`);
+  adminUsers.forEach(account => {
+    lines.push(`INSERT INTO \`solar_users\` (\`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`, \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`)
+VALUES (${escapeSql(account.id)}, ${escapeSql(account.name)}, ${escapeSql(account.email)}, ${escapeSql(account.password)}, ${escapeSql(account.role)}, ${escapeSql(account.phone)}, ${escapeSql(account.department)}, ${escapeSql(account.designation)}, ${escapeSql(account.employeeId)}, 0, 'ACTIVE')
+ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`role\` = VALUES(\`role\`), \`password\` = VALUES(\`password\`);`);
   });
   lines.push('');
 

@@ -388,8 +388,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>('cust-1');
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>('proj-1');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isWhatsAppOpen, setIsWhatsAppOpen] = useState(false);
   const [whatsAppData, setWhatsAppData] = useState<{

@@ -132,34 +132,75 @@ export interface DemoAccount {
   badgeColor: string;
 }
 
-/**
- * Default password for all local/development/demo accounts.
- * WARNING: This credential is strictly for local development and demonstration environments.
- * It must NEVER be used in production environments.
- */
 export const DEMO_DEFAULT_PASSWORD = '123456';
 
-export const DEMO_ACCOUNTS: DemoAccount[] = ROLE_DEFINITIONS.map((r, idx) => ({
-  name: `${r.role} Demo`,
-  email: `${r.role.toLowerCase().replace(/[^a-z0-9]/g, '')}@rejoysolar.com`,
-  role: r.role,
-  password: DEMO_DEFAULT_PASSWORD,
-  department: r.department,
-  isFieldWorker: Boolean(r.isFieldWorkerDefault),
-  profile: {
-    id: `demo-usr-${idx + 1}`,
-    employeeId: `EMP00${idx + 1}`,
-    name: `${r.role} Demo User`,
-    email: `${r.role.toLowerCase().replace(/[^a-z0-9]/g, '')}@rejoysolar.com`,
-    role: r.role,
-    phone: '+91 98000 00000',
-    department: r.department,
-    designation: r.role,
-    isFieldWorker: Boolean(r.isFieldWorkerDefault)
+export const SYSTEM_ADMIN_ACCOUNTS: DemoAccount[] = [
+  {
+    name: 'System Administrator',
+    email: 'admin@rejoysolar.com',
+    role: 'Admin',
+    password: DEMO_DEFAULT_PASSWORD,
+    department: 'Administration',
+    isFieldWorker: false,
+    profile: {
+      id: 'usr-admin-1',
+      employeeId: 'EMP-ADMIN-1',
+      name: 'System Administrator',
+      email: 'admin@rejoysolar.com',
+      role: 'Admin',
+      phone: '+91 98250 11223',
+      department: 'Administration',
+      designation: 'Principal Admin',
+      isFieldWorker: false
+    },
+    description: 'Master system authority & administrative control',
+    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-300'
   },
-  description: r.description,
-  badgeColor: r.badgeColor
-}));
+  {
+    name: 'Kunal Das',
+    email: 'kunaldas2442@gmail.com',
+    role: 'Admin',
+    password: DEMO_DEFAULT_PASSWORD,
+    department: 'Administration',
+    isFieldWorker: false,
+    profile: {
+      id: 'usr-kunal-2',
+      employeeId: 'EMP-KUNAL-2',
+      name: 'Kunal Das',
+      email: 'kunaldas2442@gmail.com',
+      role: 'Admin',
+      phone: '+91 98250 11223',
+      department: 'Administration',
+      designation: 'Managing Director & Lead Administrator',
+      isFieldWorker: false
+    },
+    description: 'Managing Director & Lead Administrator',
+    badgeColor: 'bg-amber-100 text-amber-800 border-amber-300'
+  },
+  {
+    name: 'Dasest Admin',
+    email: 'dasest404@gmail.com',
+    role: 'Admin',
+    password: DEMO_DEFAULT_PASSWORD,
+    department: 'Administration',
+    isFieldWorker: false,
+    profile: {
+      id: 'usr-dasest-3',
+      employeeId: 'EMP-DASEST-3',
+      name: 'Dasest Admin',
+      email: 'dasest404@gmail.com',
+      role: 'Admin',
+      phone: '+91 98250 11223',
+      department: 'Administration',
+      designation: 'System Administrator',
+      isFieldWorker: false
+    },
+    description: 'System Administrator',
+    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300'
+  }
+];
+
+export const DEMO_ACCOUNTS: DemoAccount[] = SYSTEM_ADMIN_ACCOUNTS;
 
 export interface AuthContextType {
   currentUser: UserProfile | null;

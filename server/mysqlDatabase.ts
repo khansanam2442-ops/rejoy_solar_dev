@@ -55,63 +55,47 @@ class MySqlDatabaseManager {
 
   private initDefaultCollections() {
     try {
-      this.collections.set('customers', storageService.getCustomers());
-      this.collections.set('leads', storageService.getLeads());
-      this.collections.set('projects', storageService.getProjects());
-      this.collections.set('employees', storageService.getEmployees());
-      this.collections.set('payments', storageService.getPayments());
-      this.collections.set('expenses', storageService.getExpenses());
-      this.collections.set('products', storageService.getProducts());
-      this.collections.set('vendors', storageService.getVendors());
-      this.collections.set('purchase_orders', storageService.getPurchaseOrders());
-      this.collections.set('sales_invoices', storageService.getSalesInvoices());
-      this.collections.set('attendance', storageService.getAttendance());
-      this.collections.set('payslips', storageService.getPayslips());
-      this.collections.set('holidays', storageService.getHolidays());
-      this.collections.set('quotations', storageService.getQuotations());
-      this.collections.set('surveys', storageService.getSurveys());
-      this.collections.set('boms', storageService.getBOMs());
-      this.collections.set('warehouses', storageService.getWarehouses());
-      this.collections.set('stock_movements', storageService.getStockMovements());
-      this.collections.set('stock_audits', storageService.getStockAudits());
-      this.collections.set('service_tickets', storageService.getServiceTickets());
-      this.collections.set('amc_contracts', storageService.getAMCContracts());
-      this.collections.set('notifications', storageService.getNotifications());
+      this.collections.set('customers', []);
+      this.collections.set('leads', []);
+      this.collections.set('projects', []);
+      this.collections.set('employees', []);
+      this.collections.set('payments', []);
+      this.collections.set('expenses', []);
+      this.collections.set('products', []);
+      this.collections.set('vendors', []);
+      this.collections.set('purchase_orders', []);
+      this.collections.set('sales_invoices', []);
+      this.collections.set('attendance', []);
+      this.collections.set('payslips', []);
+      this.collections.set('holidays', []);
+      this.collections.set('quotations', []);
+      this.collections.set('surveys', []);
+      this.collections.set('boms', []);
+      this.collections.set('warehouses', []);
+      this.collections.set('stock_movements', []);
+      this.collections.set('stock_audits', []);
+      this.collections.set('service_tickets', []);
+      this.collections.set('amc_contracts', []);
+      this.collections.set('notifications', []);
       this.collections.set('acl_audit_logs', []);
       this.collections.set('acl_config', [DEFAULT_SYSTEM_ACL_CONFIG]);
       this.settingsStore = storageService.getSettings();
 
-      const defaultUsers: any[] = DEMO_ACCOUNTS.map(d => ({
-        id: d.profile.id,
-        name: d.name,
-        email: d.email,
-        password: d.password,
-        role: d.role,
-        phone: d.profile.phone || '+91 98000 00000',
-        department: d.department,
-        designation: d.role,
-        employeeId: d.profile.employeeId,
-        isFieldWorker: Boolean(d.isFieldWorker),
-        status: 'ACTIVE'
-      }));
-
-      if (!defaultUsers.some(u => u.email === 'admin@rejoysolar.com')) {
-        defaultUsers.unshift({
-          id: 'emp-1',
-          name: 'Vikram Patel',
+      const defaultUsers: any[] = [
+        {
+          id: 'usr-admin',
+          name: 'System Administrator',
           email: 'admin@rejoysolar.com',
           password: '123456',
           role: 'Admin',
           phone: '+91 98250 11223',
           department: 'Administration',
-          designation: 'Managing Director & Admin',
-          employeeId: 'EMP001',
+          designation: 'Principal Administrator',
+          employeeId: 'ADM-001',
           isFieldWorker: false,
           status: 'ACTIVE'
-        });
-      }
-      if (!defaultUsers.some(u => u.email === 'kunaldas2442@gmail.com')) {
-        defaultUsers.push({
+        },
+        {
           id: 'usr-kunal',
           name: 'Kunal Das',
           email: 'kunaldas2442@gmail.com',
@@ -123,10 +107,8 @@ class MySqlDatabaseManager {
           employeeId: 'EMP000',
           isFieldWorker: false,
           status: 'ACTIVE'
-        });
-      }
-      if (!defaultUsers.some(u => u.email === 'dasest404@gmail.com')) {
-        defaultUsers.push({
+        },
+        {
           id: 'usr-admin-fallback',
           name: 'Admin System Fallback',
           email: 'dasest404@gmail.com',
@@ -138,8 +120,8 @@ class MySqlDatabaseManager {
           employeeId: 'EMP-ADM-404',
           isFieldWorker: false,
           status: 'ACTIVE'
-        });
-      }
+        }
+      ];
 
       this.collections.set('users', defaultUsers);
     } catch (e) {
@@ -238,6 +220,36 @@ class MySqlDatabaseManager {
         const sql = fs.readFileSync(dumpPath, 'utf-8');
         await this.pool.query(sql);
         console.log('[MySQL] Schema and production baseline verified in MySQL database.');
+        // Purge dummy demo records from MySQL business tables
+        try {
+          await this.pool.query(`
+            DELETE FROM \`solar_customers\` WHERE \`id\` IN ('cust-manohar', 'cust-1', 'cust-2', 'cust-3', 'cust-4', 'cust-5');
+            DELETE FROM \`solar_leads\` WHERE \`id\` LIKE 'lead-%' AND \`customer_name\` IN ('Shree Ram Plastics', 'Kalyan Packaging Solutions', 'Silver Oak Elite Villas Society', 'Navkar Diamond Tools', 'Balaji Cold Chain Logistics');
+            DELETE FROM \`solar_projects\` WHERE \`id\` IN ('proj-manohar', 'proj-1', 'proj-2', 'proj-3', 'proj-4', 'proj-5');
+            DELETE FROM \`solar_project_stages\` WHERE \`project_id\` IN ('proj-manohar', 'proj-1', 'proj-2', 'proj-3', 'proj-4', 'proj-5');
+            DELETE FROM \`solar_payments\` WHERE \`id\` IN ('pay-1', 'pay-2', 'pay-3', 'pay-4', 'pay-5', 'pay-6');
+            DELETE FROM \`solar_expenses\` WHERE \`id\` IN ('exp-1', 'exp-2', 'exp-3', 'exp-4', 'exp-5', 'exp-6');
+            DELETE FROM \`solar_employees\` WHERE \`id\` LIKE 'emp-%' AND \`email\` LIKE '%@rejoysolar.com' AND \`email\` != 'admin@rejoysolar.com';
+            DELETE FROM \`solar_attendance\` WHERE \`id\` LIKE 'att-%';
+            DELETE FROM \`solar_payslips\` WHERE \`id\` LIKE 'ps-%';
+            DELETE FROM \`solar_holidays\` WHERE \`id\` LIKE 'hol-%';
+            DELETE FROM \`solar_products\` WHERE \`id\` LIKE 'prod-%';
+            DELETE FROM \`solar_vendors\` WHERE \`id\` LIKE 'vnd-%';
+            DELETE FROM \`solar_purchase_orders\` WHERE \`id\` LIKE 'po-%';
+            DELETE FROM \`solar_boms\` WHERE \`id\` LIKE 'bom-%';
+            DELETE FROM \`solar_sales_invoices\` WHERE \`id\` LIKE 'inv-%';
+            DELETE FROM \`solar_warehouses\` WHERE \`id\` IN ('wh-bhl-01', 'wh-1', 'wh-2', 'wh-3');
+            DELETE FROM \`solar_stock_movements\` WHERE \`id\` LIKE 'sm-%';
+            DELETE FROM \`solar_stock_audits\` WHERE \`id\` LIKE 'audit-%';
+            DELETE FROM \`solar_service_tickets\` WHERE \`id\` LIKE 'srv-%';
+            DELETE FROM \`solar_amc_contracts\` WHERE \`id\` LIKE 'amc-%';
+            DELETE FROM \`solar_notifications\` WHERE \`id\` LIKE 'notif-%';
+            DELETE FROM \`solar_quotations\` WHERE \`id\` IN ('quote-waaree-5kw-ref', 'quote-1');
+            DELETE FROM \`solar_site_surveys\` WHERE \`id\` IN ('surv-1');
+            DELETE FROM \`solar_users\` WHERE \`id\` LIKE 'demo-usr-%';
+          `);
+        } catch {}
+  
       }
 
       // Check and migrate columns on solar_customers if table already existed with older schema
@@ -776,8 +788,8 @@ class MySqlDatabaseManager {
 
     const existing = await this.getExistingRow('solar_projects', item.id);
     const projectCode = item.projectCode ?? item.project_code ?? existing?.project_code ?? item.id;
-    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? 'cust-1';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Customer';
+    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
     const title = item.title ?? existing?.title ?? 'Solar EPC Project';
     const capacityKw = Number(item.capacityKw ?? item.capacity_kw ?? existing?.capacity_kw) || 0;
     const totalValue = Number(item.totalValue ?? item.total_value ?? existing?.total_value) || 0;
@@ -1596,8 +1608,8 @@ class MySqlDatabaseManager {
     const existing = await this.getExistingRow('solar_sales_invoices', item.id);
     const invoiceNumber = item.invoiceNumber ?? item.invoice_number ?? existing?.invoice_number ?? item.id;
     const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
-    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? 'cust-1';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Customer';
+    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
     const rawInvDate = item.invoiceDate ?? item.invoice_date ?? existing?.invoice_date;
     const invoiceDate = this.toSqlDate(rawInvDate) ?? new Date().toISOString().split('T')[0];
     const rawDueDate = item.dueDate ?? item.due_date ?? existing?.due_date;
@@ -2355,10 +2367,10 @@ class MySqlDatabaseManager {
     const existing = await this.getExistingRow('solar_service_tickets', item.id);
     const ticketId = item.ticketId ?? item.ticket_id ?? item.ticketNumber ?? item.ticket_number ?? existing?.ticket_id ?? item.id;
     const ticketNumber = item.ticketNumber ?? item.ticket_number ?? ticketId;
-    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? 'cust-1';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Customer';
-    const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? 'proj-1';
-    const projectTitle = item.projectTitle ?? item.project_title ?? item.projectCode ?? existing?.project_title ?? 'Solar EPC';
+    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
+    const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
+    const projectTitle = item.projectTitle ?? item.project_title ?? item.projectCode ?? existing?.project_title ?? '';
     const issue = item.issue ?? item.title ?? item.description ?? existing?.issue ?? 'Service Ticket Alert';
     const title = item.title ?? item.issue ?? existing?.title ?? 'Service Ticket Alert';
     const description = item.description ?? item.notes ?? item.issue ?? existing?.description ?? '';
@@ -2462,10 +2474,10 @@ class MySqlDatabaseManager {
     const existing = await this.getExistingRow('solar_amc_contracts', item.id);
     const amcCode = item.amcCode ?? item.amc_code ?? item.contractNumber ?? item.contract_number ?? existing?.amc_code ?? item.id;
     const contractNumber = item.contractNumber ?? item.contract_number ?? amcCode;
-    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? 'cust-1';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Customer';
-    const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? 'proj-1';
-    const projectTitle = item.projectTitle ?? item.project_title ?? existing?.project_title ?? 'Solar EPC System';
+    const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
+    const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
+    const projectTitle = item.projectTitle ?? item.project_title ?? existing?.project_title ?? '';
     const planName = item.planName ?? item.plan_name ?? existing?.plan_name ?? 'Comprehensive Solar AMC';
     const rawStart = item.startDate ?? item.start_date ?? existing?.start_date;
     const startDate = this.toSqlDate(rawStart) ?? new Date().toISOString().split('T')[0];

@@ -40,10 +40,10 @@ export const ServiceView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
   const [ticketForm, setTicketForm] = useState({
-    customerName: 'ABC Industries Ltd.',
-    projectId: 'proj-1',
+    customerName: '',
+    projectId: '',
     category: 'Inverter Error / Offline' as const,
-    issue: 'Inverter #2 tripping with Error 302 grid over-voltage during peak sunshine hours.',
+    issue: '',
     priority: 'HIGH' as Priority
   });
 
@@ -71,7 +71,7 @@ export const ServiceView: React.FC = () => {
   const handleCreateTicket = (e: React.FormEvent) => {
     e.preventDefault();
     const activeCustName = isCustomer && currentCustomer ? currentCustomer.name : ticketForm.customerName;
-    const activeCustId = isCustomer && currentCustomer ? currentCustomer.id : 'cust-1';
+    const activeCustId = isCustomer && currentCustomer ? currentCustomer.id : (customers.find(c => c.name.toLowerCase() === activeCustName.toLowerCase())?.id || '');
     const activeProjId = isCustomer && currentCustomer?.activeProjectId ? currentCustomer.activeProjectId : ticketForm.projectId;
 
     const newTicket: ServiceTicket = {

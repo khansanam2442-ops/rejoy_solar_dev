@@ -34,14 +34,14 @@ export const FinanceView: React.FC = () => {
   // New Payment Modal
   const [isNewPaymentOpen, setIsNewPaymentOpen] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
-    customerName: 'ABC Industries Ltd.',
-    projectId: 'proj-1',
-    milestone: 'Structure Completion & Module Delivery',
-    amount: 1500000,
+    customerName: '',
+    projectId: '',
+    milestone: 'Advance Booking',
+    amount: 0,
     dueDate: new Date().toISOString().slice(0, 10),
     paymentMode: 'Bank NEFT/RTGS',
     status: 'PAID' as const,
-    transactionReference: 'HDFC-NEFT-992104'
+    transactionReference: ''
   });
 
   const payments = useMemo(() => storageService.getPayments(), []);
@@ -70,11 +70,11 @@ export const FinanceView: React.FC = () => {
 
   const handleSavePayment = (e: React.FormEvent) => {
     e.preventDefault();
-    const proj = storageService.getProjectById(paymentForm.projectId);
+    const proj = paymentForm.projectId ? storageService.getProjectById(paymentForm.projectId) : null;
     const newPayment: PaymentRecord = {
       id: `pay-${Date.now()}`,
       projectId: paymentForm.projectId,
-      customerId: proj?.customerId || 'cust-1',
+      customerId: proj?.customerId || '',
       customerName: paymentForm.customerName,
       milestone: paymentForm.milestone as any,
       amount: paymentForm.amount,
