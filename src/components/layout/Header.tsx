@@ -207,12 +207,10 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
               {/* Sign Out Control */}
               <div className="pt-2 px-2">
                 <button
+                  type="button"
                   onClick={async () => {
                     setShowUserMenu(false);
                     await logout();
-                    if (typeof window !== 'undefined') {
-                      window.history.replaceState(null, '', '/login');
-                    }
                   }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
                 >

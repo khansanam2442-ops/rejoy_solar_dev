@@ -3266,6 +3266,91 @@ class MySqlDatabaseManager {
     return null;
   }
 
+  public async findUserByIdOrEmail(idOrEmail: string): Promise<any | null> {
+    if (!idOrEmail) return null;
+    const clean = idOrEmail.trim().toLowerCase();
+    const cleanCustId = idOrEmail.startsWith('usr-') ? idOrEmail.slice(4) : idOrEmail;
+
+    if (!this.isConnected) {
+      const users = this.getFallbackItems('users');
+      const u = users.find((x: any) => x && (x.id === idOrEmail || (x.email && String(x.email).trim().toLowerCase() === clean)));
+      if (u) {
+        return {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          phone: u.phone,
+          department: u.department,
+          designation: u.designation,
+          employeeId: u.employeeId || u.employee_id,
+          isFieldWorker: Boolean(u.isFieldWorker || u.is_field_worker),
+          status: u.status || 'ACTIVE'
+        };
+      }
+      const customers = this.getFallbackItems('customers');
+      const c = customers.find((x: any) => x && (x.id === idOrEmail || x.id === cleanCustId || (x.email && String(x.email).trim().toLowerCase() === clean)));
+      if (c) {
+        return {
+          id: `usr-${c.id}`,
+          customerId: c.id,
+          name: c.name,
+          email: c.email,
+          role: 'Customer',
+          phone: c.phone,
+          department: 'Customer',
+          designation: 'Customer',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        };
+      }
+      return null;
+    }
+
+    this.assertDbConnected();
+    const [users]: any = await this.pool!.query(
+      'SELECT id, name, email, role, phone, department, designation, employee_id, is_field_worker, status FROM `solar_users` WHERE id = ? OR LOWER(email) = ?',
+      [idOrEmail, clean]
+    );
+    if (Array.isArray(users) && users.length > 0) {
+      const u = users[0];
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        phone: u.phone,
+        department: u.department,
+        designation: u.designation,
+        employeeId: u.employee_id,
+        isFieldWorker: Boolean(u.is_field_worker),
+        status: u.status || 'ACTIVE'
+      };
+    }
+
+    const [customers]: any = await this.pool!.query(
+      'SELECT id, customer_code, name, email, phone FROM `solar_customers` WHERE id = ? OR LOWER(email) = ?',
+      [cleanCustId, clean]
+    );
+    if (Array.isArray(customers) && customers.length > 0) {
+      const c = customers[0];
+      return {
+        id: `usr-${c.id}`,
+        customerId: c.id,
+        name: c.name,
+        email: c.email,
+        role: 'Customer',
+        phone: c.phone,
+        department: 'Customer',
+        designation: 'Customer',
+        isFieldWorker: false,
+        status: 'ACTIVE'
+      };
+    }
+
+    return null;
+  }
+
   public async backupAndWipeData(confirmation: string): Promise<{
     success: boolean;
     backupFile: string;

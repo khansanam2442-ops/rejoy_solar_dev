@@ -21,7 +21,8 @@ import {
   ArrowRight,
   ShoppingCart,
   ShieldCheck,
-  Navigation
+  Navigation,
+  LogOut
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -39,7 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
     activeSettingsTab,
     openSettingsTab
   } = useApp();
-  const { currentUser, isCustomer, isAdmin, isFieldStaff, canAccessModule, currentRole } = useAuth();
+  const { currentUser, isCustomer, isAdmin, isFieldStaff, canAccessModule, currentRole, logout } = useAuth();
 
   const [crmOpen, setCrmOpen] = useState(true);
   const [salesPurchaseOpen, setSalesPurchaseOpen] = useState(true);
@@ -635,16 +636,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
             </>
           )}
 
-          {/* Quick Info card at bottom of sidebar */}
-          <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-lg space-y-1">
+          {/* Security & Session Info Card */}
+          <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
             <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
-              <span>Firebase Auth</span>
-              <span className="text-[10px] text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded font-medium">Active</span>
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Session Active</span>
+              </span>
+              <span className="text-[10px] text-emerald-800 bg-emerald-100/80 px-1.5 py-0.5 rounded font-bold">Secure</span>
             </div>
             <p className="text-[11px] text-slate-500 leading-tight">
-              Session is secured with Firebase Auth. Operational permissions are enforced across all modules.
+              Authenticated as <span className="font-semibold text-slate-700">{currentUser?.name || 'Authorized User'}</span> ({currentRole}).
             </p>
           </div>
+
+          {/* Quick Sign Out Action Button */}
+          <button
+            type="button"
+            onClick={async () => {
+              onCloseMobile();
+              await logout();
+            }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50/50 hover:bg-rose-50 border border-rose-200/80 hover:border-rose-300 rounded-xl transition-all cursor-pointer shadow-2xs select-none"
+          >
+            <LogOut className="w-4 h-4 text-rose-500" />
+            <span>Sign Out</span>
+          </button>
         </div>
       </aside>
     </>

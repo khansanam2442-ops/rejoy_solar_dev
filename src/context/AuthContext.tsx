@@ -236,50 +236,128 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const USER_PROFILE_STORAGE_KEY = 'rejoysolar_profile_';
 const ACTIVE_SESSION_STORAGE_KEY = 'rejoysolar_active_session';
+const AUTH_TOKEN_KEY = 'rejoysolar_auth_token';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-
-  // Initialize session from local storage on mount
-  useEffect(() => {
+  // Synchronously initialize user from local storage to prevent unwanted redirect or flash on refresh
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
+      if (typeof window === 'undefined') return null;
       const savedSession = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
       if (savedSession) {
         const parsed = JSON.parse(savedSession);
-        if (parsed && parsed.email) {
-          // Re-link with fresh employee record if exists to sync any updated roles
-          const employees = storageService.getEmployees();
-          const cleanEmail = parsed.email.trim().toLowerCase();
-          const linkedEmp = employees.find(
-            e => (e.id && e.id === parsed.id) || (e.email && e.email.trim().toLowerCase() === cleanEmail)
-          );
-          if (linkedEmp) {
-            parsed.role = linkedEmp.systemRole || linkedEmp.assignedRole || parsed.role;
-            parsed.name = linkedEmp.name || parsed.name;
-            parsed.department = linkedEmp.department || parsed.department;
-            parsed.designation = linkedEmp.designation || parsed.designation;
-            parsed.employeeId = linkedEmp.employeeCode || parsed.employeeId;
-            parsed.isFieldWorker = linkedEmp.isFieldWorker ?? parsed.isFieldWorker;
-          }
-          setCurrentUser(parsed);
+        if (parsed && parsed.email && parsed.role) {
+          return parsed;
         }
       }
     } catch (e) {
-      console.warn('Could not restore auth session:', e);
-    } finally {
-      setLoading(false);
+      console.warn('[Auth] Failed to parse initial session:', e);
     }
-  }, []);
+    return null;
+  });
 
-  // Persist active user profile changes
-  const saveUserProfile = (profile: UserProfile) => {
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean(localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY));
+  });
+
+  // Persist active user profile changes and session token
+  const saveUserProfile = (profile: UserProfile, token?: string) => {
     setCurrentUser(profile);
     if (profile.id) {
       localStorage.setItem(USER_PROFILE_STORAGE_KEY + profile.id, JSON.stringify(profile));
     }
     localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(profile));
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+      apiClient.setToken(token);
+    }
   };
+
+  // Initialize and verify session against MySQL backend on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    const restoreAndVerifySession = async () => {
+      try {
+        const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+        const savedSession = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+
+        if (!savedToken && !savedSession) {
+          if (isMounted) {
+            setCurrentUser(null);
+            setLoading(false);
+          }
+          return;
+        }
+
+        if (savedToken) {
+          apiClient.setToken(savedToken);
+          const verifyRes = await apiClient.verifySession(savedToken);
+
+          if (verifyRes.success && verifyRes.user) {
+            const u = verifyRes.user;
+            const isFw = Boolean(
+              u.isFieldWorker ??
+              [
+                'Site Survey Engineer',
+                'Site Inspector',
+                'Civil Team',
+                'Structure Team',
+                'Installation Team',
+                'Electrical Team',
+                'Technician'
+              ].includes(u.role)
+            );
+
+            const verifiedProfile: UserProfile = {
+              id: u.id,
+              employeeId: u.employeeId || (u.customerId ? `CUST-${u.customerId}` : `EMP-${u.id}`),
+              name: u.name || 'Solar Team Member',
+              email: u.email,
+              role: u.role as UserRole,
+              phone: u.phone || '+91 98250 11223',
+              department: u.department || (u.role === 'Customer' ? 'Client Portal' : 'Administration'),
+              designation: u.designation || u.role,
+              isFieldWorker: isFw,
+              assignedProjects: []
+            };
+
+            if (isMounted) {
+              saveUserProfile(verifiedProfile, verifyRes.token || savedToken);
+            }
+          } else if (
+            verifyRes.message &&
+            (verifyRes.message.includes('expired') ||
+              verifyRes.message.includes('Invalid') ||
+              verifyRes.message.includes('not found') ||
+              verifyRes.message.includes('disabled') ||
+              verifyRes.message.includes('Malformed'))
+          ) {
+            console.warn('[Auth] Session invalidated by MySQL backend:', verifyRes.message);
+            localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            apiClient.setToken(null);
+            if (isMounted) {
+              setCurrentUser(null);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Auth] Error verifying session with backend, keeping cached state:', err);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    restoreAndVerifySession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const login = async (email: string, pass: string): Promise<void> => {
     setLoading(true);
@@ -336,7 +414,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         assignedProjects: []
       };
 
-      saveUserProfile(authenticatedProfile);
+      saveUserProfile(authenticatedProfile, data.token);
     } catch (err: any) {
       throw new Error(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
@@ -361,15 +439,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       // If an existing administrator is already authenticated, send credentials for privilege escalation authorization
-      const activeSession = currentUser?.role === 'Admin' ? localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) : null;
-      if (activeSession) {
-        try {
-          const parsed = JSON.parse(activeSession);
-          if (parsed && parsed.email) {
-            headers['Authorization'] = `Bearer admin-session-${parsed.email}`;
-            headers['x-admin-token'] = parsed.id || parsed.email;
-          }
-        } catch {}
+      const existingToken = apiClient.getToken() || localStorage.getItem(AUTH_TOKEN_KEY);
+      if (existingToken) {
+        headers['Authorization'] = existingToken.startsWith('Bearer ') ? existingToken : `Bearer ${existingToken}`;
+        headers['x-admin-token'] = existingToken;
       }
 
       // Register directly via backend MySQL API
@@ -416,7 +489,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         assignedProjects: []
       };
 
-      saveUserProfile(newProfile);
+      saveUserProfile(newProfile, data.token);
     } catch (err: any) {
       throw new Error(err?.message || 'Registration failed.');
     } finally {
@@ -430,8 +503,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentUser?.id) {
         liveLocationService.sendOffline(currentUser.id, currentUser.email, currentUser.employeeId).catch(() => {});
       }
+      try {
+        await apiClient.logout();
+      } catch (e) {
+        console.warn('[Auth] Server logout notification error:', e);
+      }
+
+      // Synchronously clear all persistent tokens and auth cache
       localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      if (currentUser?.id) {
+        localStorage.removeItem(USER_PROFILE_STORAGE_KEY + currentUser.id);
+      }
+      sessionStorage.clear();
+      apiClient.setToken(null);
       setCurrentUser(null);
+
+      // Explicitly redirect to login route
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '/login');
+      }
     } finally {
       setLoading(false);
     }

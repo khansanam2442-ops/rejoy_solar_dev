@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { dbManager, getDbConfigFromEnv } from '../mysqlDatabase';
+import { generateToken, verifyToken } from '../services/tokenService';
 
 export const apiRouter = Router();
 
@@ -218,11 +219,13 @@ apiRouter.post(['/auth/register', '/auth/register/'], async (req: Request, res: 
       isAuthorizedByAdmin
     );
 
+    const sessionToken = generateToken(user);
+
     res.status(201).json({
       success: true,
       message: 'Admin account created successfully.',
       user,
-      token: `jwt-mysql-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      token: sessionToken
     });
   } catch (err: any) {
     const msg = err?.message || 'Registration failed';
@@ -245,10 +248,11 @@ apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Respon
 
     const user = await dbManager.authenticateUser(email, password);
     if (user) {
+      const sessionToken = generateToken(user);
       res.json({
         success: true,
         user,
-        token: `jwt-mysql-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        token: sessionToken
       });
     } else {
       res.status(401).json({
@@ -259,6 +263,60 @@ apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Respon
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Authentication error' });
   }
+});
+
+// Session Verification & Current User Profile Endpoint (/api/auth/me & /api/auth/verify)
+apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const tokenHeader = (req.headers['x-auth-token'] as string) || (req.headers['x-session-token'] as string);
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (authHeader || tokenHeader);
+
+    if (!token) {
+      res.status(401).json({ success: false, message: 'Authentication required. No session token provided.' });
+      return;
+    }
+
+    const verification = verifyToken(token);
+    if (!verification.valid || !verification.payload) {
+      res.status(401).json({ success: false, message: verification.error || 'Session expired or invalid.' });
+      return;
+    }
+
+    const user = await dbManager.findUserByIdOrEmail(verification.payload.sub || verification.payload.email);
+    if (!user) {
+      res.status(401).json({ success: false, message: 'User account not found or has been removed from database.' });
+      return;
+    }
+
+    if (user.status && user.status === 'DISABLED') {
+      res.status(403).json({ success: false, message: 'Account has been disabled. Please contact system administrator.' });
+      return;
+    }
+
+    // Refresh token if more than half of the validity has elapsed
+    const now = Math.floor(Date.now() / 1000);
+    let refreshedToken = token;
+    if (verification.payload.exp - now < 3 * 24 * 3600) {
+      refreshedToken = generateToken(user);
+    }
+
+    res.json({
+      success: true,
+      user,
+      token: refreshedToken
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Session verification failed' });
+  }
+});
+
+// Explicit Logout Endpoint (/api/auth/logout)
+apiRouter.post(['/auth/logout', '/auth/logout/'], async (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    message: 'Session cleared and logged out successfully.'
+  });
 });
 
 // ==========================================================

@@ -20,9 +20,48 @@ class ApiClient {
   private baseUrl: string = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
     ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
     : '/api';
+  private token: string | null = (typeof window !== 'undefined' ? localStorage.getItem('rejoysolar_auth_token') : null);
 
   public getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  public setToken(token: string | null): void {
+    this.token = token;
+    if (typeof window !== 'undefined') {
+      if (token) {
+        localStorage.setItem('rejoysolar_auth_token', token);
+      } else {
+        localStorage.removeItem('rejoysolar_auth_token');
+      }
+    }
+  }
+
+  public getToken(): string | null {
+    if (!this.token && typeof window !== 'undefined') {
+      this.token = localStorage.getItem('rejoysolar_auth_token');
+    }
+    return this.token;
+  }
+
+  public getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+    const headers: Record<string, string> = { ...extraHeaders };
+    const t = this.getToken();
+    if (t) {
+      headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+      headers['x-auth-token'] = t;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('rejoysolar_active_session');
+        if (raw) {
+          const u = JSON.parse(raw);
+          if (u?.id) headers['x-user-id'] = u.id;
+          if (u?.role) headers['x-user-role'] = u.role;
+        }
+      } catch {}
+    }
+    return headers;
   }
 
   // --- Database Management & Migration ---
@@ -160,7 +199,7 @@ class ApiClient {
   async syncPush(collection: string, payload: { item?: any; items?: any[]; action?: string }): Promise<any> {
     const res = await fetch(`${this.baseUrl}/sync/push`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ collection, ...payload })
     });
     return this.handleResponse(res);
@@ -175,9 +214,56 @@ class ApiClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: pass })
       });
-      return await res.json();
+      const data = await res.json();
+      if (res.ok && data.success && data.token) {
+        this.setToken(data.token);
+      }
+      return data;
     } catch (e: any) {
       return { success: false, message: e.message };
+    }
+  }
+
+  async verifySession(customToken?: string): Promise<{ success: boolean; user?: any; token?: string; message?: string }> {
+    const t = customToken || this.getToken();
+    if (!t) {
+      return { success: false, message: 'No active session token' };
+    }
+    try {
+      const res = await fetch(`${this.baseUrl}/auth/me`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': t.startsWith('Bearer ') ? t : `Bearer ${t}`,
+          'x-auth-token': t
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.user) {
+        if (data.token) {
+          this.setToken(data.token);
+        }
+        return { success: true, user: data.user, token: data.token || t };
+      }
+      return { success: false, message: data.message || `HTTP ${res.status}` };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Session verification network error' };
+    }
+  }
+
+  async logout(): Promise<{ success: boolean; message?: string }> {
+    try {
+      const t = this.getToken();
+      this.setToken(null);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (t) headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+      const res = await fetch(`${this.baseUrl}/auth/logout`, {
+        method: 'POST',
+        headers
+      });
+      return await res.json();
+    } catch {
+      return { success: true };
     }
   }
 
