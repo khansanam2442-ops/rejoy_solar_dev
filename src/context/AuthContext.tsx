@@ -3,6 +3,7 @@ import { UserProfile, UserRole } from '../types/solar';
 import { storageService } from '../services/storage';
 import { liveLocationService } from '../services/liveLocationService';
 import { apiClient } from '../services/apiClient';
+import { safeStorage, safeSessionStorage } from '../services/safeStorage';
 
 export interface RoleDefinition {
   role: UserRole;
@@ -239,11 +240,10 @@ const ACTIVE_SESSION_STORAGE_KEY = 'rejoysolar_active_session';
 const AUTH_TOKEN_KEY = 'rejoysolar_auth_token';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Synchronously initialize user from local storage to prevent unwanted redirect or flash on refresh
+  // Synchronously initialize user from safe storage to prevent unwanted redirect or flash on refresh
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
-      if (typeof window === 'undefined') return null;
-      const savedSession = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+      const savedSession = safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
       if (savedSession) {
         const parsed = JSON.parse(savedSession);
         if (parsed && parsed.email && parsed.role) {
@@ -257,20 +257,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [loading, setLoading] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return Boolean(localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY));
+    try {
+      return Boolean(safeStorage.getItem(AUTH_TOKEN_KEY) || safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY));
+    } catch {
+      return false;
+    }
   });
 
   // Persist active user profile changes and session token
   const saveUserProfile = (profile: UserProfile, token?: string) => {
     setCurrentUser(profile);
-    if (profile.id) {
-      localStorage.setItem(USER_PROFILE_STORAGE_KEY + profile.id, JSON.stringify(profile));
-    }
-    localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(profile));
-    if (token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, token);
-      apiClient.setToken(token);
+    try {
+      if (profile.id) {
+        safeStorage.setItem(USER_PROFILE_STORAGE_KEY + profile.id, JSON.stringify(profile));
+      }
+      safeStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(profile));
+      if (token) {
+        safeStorage.setItem(AUTH_TOKEN_KEY, token);
+        apiClient.setToken(token);
+      }
+    } catch (e) {
+      console.warn('[Auth] Error saving user profile to storage:', e);
     }
   };
 
@@ -280,8 +287,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const restoreAndVerifySession = async () => {
       try {
-        const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
-        const savedSession = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+        const savedToken = safeStorage.getItem(AUTH_TOKEN_KEY);
+        const savedSession = safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
 
         if (!savedToken && !savedSession) {
           if (isMounted) {
@@ -335,8 +342,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               verifyRes.message.includes('Malformed'))
           ) {
             console.warn('[Auth] Session invalidated by MySQL backend:', verifyRes.message);
-            localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-            localStorage.removeItem(AUTH_TOKEN_KEY);
+            safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+            safeStorage.removeItem(AUTH_TOKEN_KEY);
             apiClient.setToken(null);
             if (isMounted) {
               setCurrentUser(null);
@@ -439,7 +446,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       // If an existing administrator is already authenticated, send credentials for privilege escalation authorization
-      const existingToken = apiClient.getToken() || localStorage.getItem(AUTH_TOKEN_KEY);
+      const existingToken = apiClient.getToken() || safeStorage.getItem(AUTH_TOKEN_KEY);
       if (existingToken) {
         headers['Authorization'] = existingToken.startsWith('Bearer ') ? existingToken : `Bearer ${existingToken}`;
         headers['x-admin-token'] = existingToken;
@@ -510,12 +517,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Synchronously clear all persistent tokens and auth cache
-      localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-      localStorage.removeItem(AUTH_TOKEN_KEY);
+      safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+      safeStorage.removeItem(AUTH_TOKEN_KEY);
       if (currentUser?.id) {
-        localStorage.removeItem(USER_PROFILE_STORAGE_KEY + currentUser.id);
+        safeStorage.removeItem(USER_PROFILE_STORAGE_KEY + currentUser.id);
       }
-      sessionStorage.clear();
+      safeSessionStorage.clear();
       apiClient.setToken(null);
       setCurrentUser(null);
 

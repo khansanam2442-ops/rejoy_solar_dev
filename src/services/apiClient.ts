@@ -16,11 +16,17 @@ export interface DbStatusResponse {
   tables?: string[];
 }
 
+import { safeStorage } from './safeStorage';
+
 class ApiClient {
   private baseUrl: string = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
     ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
     : '/api';
-  private token: string | null = (typeof window !== 'undefined' ? localStorage.getItem('rejoysolar_auth_token') : null);
+  private token: string | null = null;
+
+  constructor() {
+    this.token = safeStorage.getItem('rejoysolar_auth_token');
+  }
 
   public getBaseUrl(): string {
     return this.baseUrl;
@@ -28,18 +34,16 @@ class ApiClient {
 
   public setToken(token: string | null): void {
     this.token = token;
-    if (typeof window !== 'undefined') {
-      if (token) {
-        localStorage.setItem('rejoysolar_auth_token', token);
-      } else {
-        localStorage.removeItem('rejoysolar_auth_token');
-      }
+    if (token) {
+      safeStorage.setItem('rejoysolar_auth_token', token);
+    } else {
+      safeStorage.removeItem('rejoysolar_auth_token');
     }
   }
 
   public getToken(): string | null {
-    if (!this.token && typeof window !== 'undefined') {
-      this.token = localStorage.getItem('rejoysolar_auth_token');
+    if (!this.token) {
+      this.token = safeStorage.getItem('rejoysolar_auth_token');
     }
     return this.token;
   }
@@ -51,16 +55,14 @@ class ApiClient {
       headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
       headers['x-auth-token'] = t;
     }
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('rejoysolar_active_session');
-        if (raw) {
-          const u = JSON.parse(raw);
-          if (u?.id) headers['x-user-id'] = u.id;
-          if (u?.role) headers['x-user-role'] = u.role;
-        }
-      } catch {}
-    }
+    try {
+      const raw = safeStorage.getItem('rejoysolar_active_session');
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u?.id) headers['x-user-id'] = u.id;
+        if (u?.role) headers['x-user-role'] = u.role;
+      }
+    } catch {}
     return headers;
   }
 

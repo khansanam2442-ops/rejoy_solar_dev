@@ -1,5 +1,6 @@
 import React, { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
+import { safeStorage, safeSessionStorage } from '../../services/safeStorage';
 
 interface Props {
   children: ReactNode;
@@ -37,8 +38,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   private handleHardReset = () => {
     if (window.confirm('This will clear local session storage and re-initialize with fresh demo data. Continue?')) {
-      localStorage.clear();
-      sessionStorage.clear();
+      try {
+        safeStorage.clear();
+        safeSessionStorage.clear();
+      } catch (e) {
+        console.warn('Error clearing storage:', e);
+      }
       window.location.href = '/';
     }
   };

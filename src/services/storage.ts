@@ -39,6 +39,7 @@ import {
 } from '../types/solar';
 import { SystemAclConfig, AclAuditLogEntry } from '../types/acl';
 import { DEFAULT_SYSTEM_ACL_CONFIG } from './aclDefaults';
+import { safeStorage, safeSessionStorage } from './safeStorage';
 import { buildStandardWorkflowStages, WorkflowProgressLevel } from './workflowStages';
 import {
   validateCustomer,
@@ -183,8 +184,8 @@ class StorageService {
           'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2', 'solar_erp_settings_v2'
         ];
         obsoleteKeys.forEach(k => {
-          localStorage.removeItem(k);
-          sessionStorage.removeItem(k);
+          safeStorage.removeItem(k);
+          safeSessionStorage.removeItem(k);
         });
       } catch {}
       this.hydrateFromBackend();

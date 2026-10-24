@@ -41,7 +41,7 @@
           pre.innerHTML = '<div style="max-width: 420px; padding: 24px; background: #1e293b; border: 1px solid #334155; border-radius: 16px; text-align: center;">' +
             '<div style="color: #f87171; font-size: 16px; font-weight: 700; margin-bottom: 8px;">Unable to load Solar ERP</div>' +
             '<div style="color: #94a3b8; font-size: 12px; margin-bottom: 16px; font-family: monospace; word-break: break-all;">' + msg + '</div>' +
-            '<button onclick="localStorage.clear(); window.location.reload();" style="padding: 8px 16px; background: #f59e0b; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">Reload Application</button>' +
+            '<button onclick="try { window.localStorage && window.localStorage.clear(); } catch(err) {} window.location.reload();" style="padding: 8px 16px; background: #f59e0b; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">Reload Application</button>' +
             '</div>';
         }
       });
