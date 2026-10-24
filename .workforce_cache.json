@@ -5,11 +5,11 @@
     "name": "Admin Demo",
     "email": "admin@rejoysolar.com",
     "role": "Admin",
-    "updatedAt": "2026-10-23T09:19:39.565Z",
-    "lastSeenAt": "2026-10-23T09:19:39.565Z",
-    "isOnline": false,
+    "updatedAt": "2026-10-24T13:16:33.079Z",
+    "lastSeenAt": "2026-10-24T13:16:33.079Z",
+    "isOnline": true,
     "isSharingLocation": false,
     "hasLocation": false,
-    "status": "offline"
+    "status": "online"
   }
 ]

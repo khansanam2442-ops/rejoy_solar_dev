@@ -1,26 +1,42 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { execSync } from 'child_process';
 
 // Resolve the pre-bundled production server path
-const distServerPath = path.resolve(process.cwd(), 'dist', 'server.cjs');
+const distDir = path.resolve(process.cwd(), 'dist');
+const distServerPath = path.resolve(distDir, 'server.cjs');
+const distIndexPath = path.resolve(distDir, 'index.html');
 
 // Determine if running under Vite development mode or production
 const isRunningInDev = Boolean(
   process.env.VITE_DEV === 'true' ||
-  process.env.npm_lifecycle_event === 'dev' ||
-  (process.env.NODE_ENV !== 'production' && !fs.existsSync(distServerPath))
+  process.env.npm_lifecycle_event === 'dev'
 );
 
-if (!isRunningInDev && fs.existsSync(distServerPath)) {
-  // Production server runtime (`node server.ts`):
-  // Run the pre-bundled CommonJS server created during `npm run build`.
-  // This guarantees fast startup, native Node.js compatibility, and zero runtime TypeScript loader issues.
-  console.log('[Server Runner] Launching production server from dist/server.cjs');
-  const mod = await import(pathToFileURL(distServerPath).href);
-  const start = mod.startServer || (mod.default && mod.default.startServer);
-  if (typeof start === 'function') {
-    await start();
+if (!isRunningInDev) {
+  // Production server runtime (`node server.ts` or `npm start`):
+  // If dist/server.cjs or dist/index.html is missing, automatically build it first!
+  if (!fs.existsSync(distServerPath) || !fs.existsSync(distIndexPath)) {
+    console.log('[Server Runner] Production artifacts missing. Triggering auto-build...');
+    try {
+      execSync('npm run build', { stdio: 'inherit' });
+      console.log('[Server Runner] Build completed successfully.');
+    } catch (buildErr) {
+      console.error('[Server Runner] Auto-build failed:', buildErr);
+    }
+  }
+
+  if (fs.existsSync(distServerPath)) {
+    console.log('[Server Runner] Launching production server from dist/server.cjs');
+    const mod = await import(pathToFileURL(distServerPath).href);
+    const start = mod.startServer || (mod.default && mod.default.startServer);
+    if (typeof start === 'function') {
+      await start();
+    }
+  } else {
+    console.error('[Server Runner] Fatal: dist/server.cjs could not be found or built.');
+    process.exit(1);
   }
 } else {
   // Development server runtime (`tsx server.ts`):
@@ -29,3 +45,4 @@ if (!isRunningInDev && fs.existsSync(distServerPath)) {
   const { startServer } = await import('./server/serverApp.ts');
   await startServer();
 }
+

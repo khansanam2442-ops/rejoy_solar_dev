@@ -970,6 +970,15 @@ async function startServer() {
       index: false
     }));
 
+    // Explicit mount for /assets to prevent any route collision
+    const assetsDir = path.join(distPath, 'assets');
+    if (fs.existsSync(assetsDir)) {
+      app.use('/assets', express.static(assetsDir, {
+        maxAge: '1y',
+        immutable: true
+      }));
+    }
+
     // Production SPA history fallback for all frontend routes on direct navigation & refresh
     app.get('*', (req, res) => {
       // If the request has a static asset extension (e.g. .css, .js, .png, .map), return clean 404
