@@ -139,6 +139,9 @@ const ProtectedApp: React.FC = () => {
   // Route URL Synchronization & Protection
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // CRITICAL: Never alter routes while authentication session is actively being verified!
+    if (loading) return;
+
     const path = window.location.pathname.toLowerCase();
 
     if (isAuthenticated && currentUser) {
@@ -146,7 +149,7 @@ const ProtectedApp: React.FC = () => {
         const targetPath = getRoleDefaultPath(currentUser.role);
         window.history.replaceState(null, '', targetPath);
       }
-    } else if (!loading && !isAuthenticated) {
+    } else if (!isAuthenticated) {
       if (path !== '/login' && !path.endsWith('/login')) {
         window.history.replaceState(null, '', '/login');
       }

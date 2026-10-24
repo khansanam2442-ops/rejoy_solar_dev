@@ -214,6 +214,7 @@ class ApiClient {
       const res = await fetch(`${this.baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password: pass })
       });
       const data = await res.json();
@@ -228,24 +229,32 @@ class ApiClient {
 
   async verifySession(customToken?: string): Promise<{ success: boolean; user?: any; token?: string; message?: string }> {
     const t = customToken || this.getToken();
-    if (!t) {
-      return { success: false, message: 'No active session token' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    if (t) {
+      headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+      headers['x-auth-token'] = t;
     }
+
     try {
       const res = await fetch(`${this.baseUrl}/auth/me`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': t.startsWith('Bearer ') ? t : `Bearer ${t}`,
-          'x-auth-token': t
-        }
+        headers,
+        credentials: 'include'
       });
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        return { success: false, message: `HTTP ${res.status}: Non-JSON response` };
+      }
+
       if (res.ok && data.success && data.user) {
         if (data.token) {
           this.setToken(data.token);
         }
-        return { success: true, user: data.user, token: data.token || t };
+        return { success: true, user: data.user, token: data.token || t || '' };
       }
       return { success: false, message: data.message || `HTTP ${res.status}` };
     } catch (e: any) {
@@ -261,7 +270,8 @@ class ApiClient {
       if (t) headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
       const res = await fetch(`${this.baseUrl}/auth/logout`, {
         method: 'POST',
-        headers
+        headers,
+        credentials: 'include'
       });
       return await res.json();
     } catch {

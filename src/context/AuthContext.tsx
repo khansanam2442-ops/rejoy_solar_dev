@@ -256,13 +256,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   });
 
-  const [loading, setLoading] = useState<boolean>(() => {
-    try {
-      return Boolean(safeStorage.getItem(AUTH_TOKEN_KEY) || safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY));
-    } catch {
-      return false;
-    }
-  });
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Persist active user profile changes and session token
   const saveUserProfile = (profile: UserProfile, token?: string) => {
@@ -290,65 +284,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const savedToken = safeStorage.getItem(AUTH_TOKEN_KEY);
         const savedSession = safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
 
-        if (!savedToken && !savedSession) {
-          if (isMounted) {
-            setCurrentUser(null);
-            setLoading(false);
-          }
-          return;
+        // Pre-populate currentUser from savedSession if present to prevent UI flicker
+        if (savedSession && !currentUser) {
+          try {
+            const parsed = JSON.parse(savedSession);
+            if (parsed && parsed.email && parsed.role) {
+              setCurrentUser(parsed);
+            }
+          } catch {}
         }
 
         if (savedToken) {
           apiClient.setToken(savedToken);
-          const verifyRes = await apiClient.verifySession(savedToken);
+        }
 
-          if (verifyRes.success && verifyRes.user) {
-            const u = verifyRes.user;
-            const isFw = Boolean(
-              u.isFieldWorker ??
-              [
-                'Site Survey Engineer',
-                'Site Inspector',
-                'Civil Team',
-                'Structure Team',
-                'Installation Team',
-                'Electrical Team',
-                'Technician'
-              ].includes(u.role)
-            );
+        // Authoritatively verify session with MySQL backend API
+        const verifyRes = await apiClient.verifySession(savedToken || undefined);
 
-            const verifiedProfile: UserProfile = {
-              id: u.id,
-              employeeId: u.employeeId || (u.customerId ? `CUST-${u.customerId}` : `EMP-${u.id}`),
-              name: u.name || 'Solar Team Member',
-              email: u.email,
-              role: u.role as UserRole,
-              phone: u.phone || '+91 98250 11223',
-              department: u.department || (u.role === 'Customer' ? 'Client Portal' : 'Administration'),
-              designation: u.designation || u.role,
-              isFieldWorker: isFw,
-              assignedProjects: []
-            };
+        if (verifyRes.success && verifyRes.user) {
+          const u = verifyRes.user;
+          const isFw = Boolean(
+            u.isFieldWorker ??
+            [
+              'Site Survey Engineer',
+              'Site Inspector',
+              'Civil Team',
+              'Structure Team',
+              'Installation Team',
+              'Electrical Team',
+              'Technician'
+            ].includes(u.role)
+          );
 
-            if (isMounted) {
-              saveUserProfile(verifiedProfile, verifyRes.token || savedToken);
-            }
-          } else if (
-            verifyRes.message &&
-            (verifyRes.message.includes('expired') ||
-              verifyRes.message.includes('Invalid') ||
-              verifyRes.message.includes('not found') ||
-              verifyRes.message.includes('disabled') ||
-              verifyRes.message.includes('Malformed'))
-          ) {
-            console.warn('[Auth] Session invalidated by MySQL backend:', verifyRes.message);
-            safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-            safeStorage.removeItem(AUTH_TOKEN_KEY);
-            apiClient.setToken(null);
-            if (isMounted) {
-              setCurrentUser(null);
-            }
+          const verifiedProfile: UserProfile = {
+            id: u.id,
+            employeeId: u.employeeId || (u.customerId ? `CUST-${u.customerId}` : `EMP-${u.id}`),
+            name: u.name || 'Solar Team Member',
+            email: u.email,
+            role: u.role as UserRole,
+            phone: u.phone || '+91 98250 11223',
+            department: u.department || (u.role === 'Customer' ? 'Client Portal' : 'Administration'),
+            designation: u.designation || u.role,
+            isFieldWorker: isFw,
+            assignedProjects: []
+          };
+
+          if (isMounted) {
+            saveUserProfile(verifiedProfile, verifyRes.token || savedToken || undefined);
           }
+        } else if (
+          verifyRes.message &&
+          (verifyRes.message.includes('expired') ||
+            verifyRes.message.includes('Invalid') ||
+            verifyRes.message.includes('not found') ||
+            verifyRes.message.includes('disabled') ||
+            verifyRes.message.includes('Malformed'))
+        ) {
+          // Token genuinely expired or invalidated by MySQL backend
+          console.warn('[Auth] Session invalidated by MySQL backend:', verifyRes.message);
+          safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+          safeStorage.removeItem(AUTH_TOKEN_KEY);
+          apiClient.setToken(null);
+          if (isMounted) {
+            setCurrentUser(null);
+          }
+        } else if (!savedToken && !savedSession) {
+          // No credentials found anywhere
+          if (isMounted) {
+            setCurrentUser(null);
+          }
+        } else if (savedSession) {
+          // Backend temporarily unreachable (e.g. offline standby), keep cached session
+          console.log('[Auth] Preserving cached session state during backend notice:', verifyRes.message);
         }
       } catch (err) {
         console.warn('[Auth] Error verifying session with backend, keeping cached state:', err);

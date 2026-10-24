@@ -220,6 +220,10 @@ apiRouter.post(['/auth/register', '/auth/register/'], async (req: Request, res: 
     );
 
     const sessionToken = generateToken(user);
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    const cookieFlags = [`Path=/`, `Max-Age=${7 * 24 * 3600}`, `SameSite=${isHttps ? 'None' : 'Lax'}`];
+    if (isHttps) cookieFlags.push('Secure', 'Partitioned');
+    res.setHeader('Set-Cookie', `rejoysolar_auth_token=${encodeURIComponent(sessionToken)}; ${cookieFlags.join('; ')}`);
 
     res.status(201).json({
       success: true,
@@ -249,6 +253,10 @@ apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Respon
     const user = await dbManager.authenticateUser(email, password);
     if (user) {
       const sessionToken = generateToken(user);
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      const cookieFlags = [`Path=/`, `Max-Age=${7 * 24 * 3600}`, `SameSite=${isHttps ? 'None' : 'Lax'}`];
+      if (isHttps) cookieFlags.push('Secure', 'Partitioned');
+      res.setHeader('Set-Cookie', `rejoysolar_auth_token=${encodeURIComponent(sessionToken)}; ${cookieFlags.join('; ')}`);
       res.json({
         success: true,
         user,
@@ -270,7 +278,12 @@ apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async 
   try {
     const authHeader = req.headers.authorization;
     const tokenHeader = (req.headers['x-auth-token'] as string) || (req.headers['x-session-token'] as string);
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (authHeader || tokenHeader);
+    let cookieToken: string | null = null;
+    if (req.headers.cookie) {
+      const match = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_auth_token=([^;]*)/);
+      if (match) cookieToken = decodeURIComponent(match[1]);
+    }
+    const token = (authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (authHeader || tokenHeader)) || cookieToken;
 
     if (!token) {
       res.status(401).json({ success: false, message: 'Authentication required. No session token provided.' });
@@ -312,7 +325,12 @@ apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async 
 });
 
 // Explicit Logout Endpoint (/api/auth/logout)
-apiRouter.post(['/auth/logout', '/auth/logout/'], async (_req: Request, res: Response) => {
+apiRouter.post(['/auth/logout', '/auth/logout/'], async (req: Request, res: Response) => {
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader(
+    'Set-Cookie',
+    `rejoysolar_auth_token=; Path=/; Max-Age=0; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure; Partitioned' : ''}`
+  );
   res.json({
     success: true,
     message: 'Session cleared and logged out successfully.'
