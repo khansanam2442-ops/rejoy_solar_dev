@@ -516,7 +516,6 @@ class MySqlDatabaseManager {
       customerType: r.customer_type,
       phone: r.phone,
       email: r.email,
-      password: r.password,
       siteAddress: r.site_address,
       city: r.city,
       state: r.state,
@@ -1049,6 +1048,60 @@ class MySqlDatabaseManager {
       accountStatus
     ]);
 
+    // Authoritatively synchronize employee account to solar_users if loginEnabled
+    if (loginEnabled && this.pool) {
+      try {
+        const [existingUserRows]: any = await this.pool.query(
+          'SELECT id, password FROM `solar_users` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1',
+          [item.id, email.toLowerCase()]
+        );
+        const existingUser = Array.isArray(existingUserRows) && existingUserRows.length > 0 ? existingUserRows[0] : null;
+        let passwordHash = existingUser?.password;
+        const rawPass = item.password || item.tempPassword;
+        if (rawPass && typeof rawPass === 'string' && rawPass.length >= 6) {
+          if (!rawPass.startsWith('$2a$') && !rawPass.startsWith('$2b$') && !rawPass.startsWith('$2y$') && !rawPass.startsWith('$argon2id$')) {
+            passwordHash = await bcrypt.hash(rawPass, 10);
+          } else {
+            passwordHash = rawPass;
+          }
+        } else if (!passwordHash) {
+          passwordHash = await bcrypt.hash('User@12345', 10);
+        }
+
+        const userStatus = (status === 'INACTIVE' || accountStatus === 'DISABLED') ? 'DISABLED' : 'ACTIVE';
+        await this.pool.query(`
+          INSERT INTO \`solar_users\` (
+            \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
+            \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            \`name\` = VALUES(\`name\`),
+            \`role\` = VALUES(\`role\`),
+            \`phone\` = VALUES(\`phone\`),
+            \`department\` = VALUES(\`department\`),
+            \`designation\` = VALUES(\`designation\`),
+            \`employee_id\` = VALUES(\`employee_id\`),
+            \`is_field_worker\` = VALUES(\`is_field_worker\`),
+            \`status\` = VALUES(\`status\`)
+            ${rawPass ? ', `password` = VALUES(`password`)' : ''}
+        `, [
+          item.id,
+          name,
+          email.toLowerCase(),
+          passwordHash,
+          systemRole,
+          phone,
+          department,
+          designation,
+          employeeCode,
+          isFieldWorker,
+          userStatus
+        ]);
+      } catch (syncErr: any) {
+        console.warn('[DB Manager] Notice syncing user from employee:', syncErr?.message || syncErr);
+      }
+    }
+
     const items = this.getFallbackItems('employees');
     const idx = items.findIndex(e => e.id === item.id);
     if (idx >= 0) items[idx] = { ...items[idx], ...item };
@@ -1059,9 +1112,13 @@ class MySqlDatabaseManager {
 
   public async deleteEmployee(id: string): Promise<boolean> {
     this.assertDbConnected();
-    await this.pool!.query('DELETE FROM `solar_employees` WHERE `id` = ?', [id]);
+    if (this.pool) {
+      await this.pool.query('DELETE FROM `solar_employees` WHERE `id` = ?', [id]);
+      await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]).catch(() => {});
+    }
     const items = this.getFallbackItems('employees').filter(e => e.id !== id);
     this.setFallbackItems('employees', items);
+    this.deleteFallback('users', id);
     return true;
   }
 
@@ -2681,22 +2738,29 @@ class MySqlDatabaseManager {
   // CRUD: USERS
   // ==========================================================
   public async getUsers(): Promise<any[]> {
-    if (!this.isConnected) return this.getFallbackItems('users');
+    if (!this.isConnected) {
+      return (this.getFallbackItems('users') || []).map(u => {
+        const { password, ...rest } = u;
+        return rest;
+      });
+    }
     this.assertDbConnected();
-    const [rows] = await this.pool!.query('SELECT * FROM `solar_users` ORDER BY `created_at` ASC');
+    const [rows] = await this.pool!.query(
+      'SELECT id, name, email, role, phone, department, designation, employee_id, is_field_worker, status, created_at, updated_at FROM `solar_users` ORDER BY `created_at` ASC'
+    );
     const mapped = (rows as any[]).map(r => ({
       id: r.id,
       name: r.name,
       email: r.email,
-      password: r.password,
       role: r.role,
-      phone: r.phone,
-      department: r.department,
-      designation: r.designation,
-      employeeId: r.employee_id,
+      phone: r.phone || '',
+      department: r.department || 'Operations',
+      designation: r.designation || '',
+      employeeId: r.employee_id || '',
       isFieldWorker: Boolean(r.is_field_worker),
-      status: r.status,
-      createdAt: r.created_at
+      status: r.status || 'ACTIVE',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
     }));
     this.setFallbackItems('users', mapped);
     return mapped;
@@ -2706,11 +2770,22 @@ class MySqlDatabaseManager {
     this.assertDbConnected();
     const existing = await this.getExistingRow('solar_users', item.id);
     const name = item.name ?? existing?.name ?? 'Solar User';
-    const email = item.email ?? existing?.email ?? `${item.id}@rejoysolar.com`;
-    let password = item.password ?? existing?.password ?? '123456';
-    if (password && !password.startsWith('$2a$') && !password.startsWith('$2b$') && !password.startsWith('$2y$')) {
-      password = await bcrypt.hash(password, 10);
+    const email = (item.email ?? existing?.email ?? `${item.id}@rejoysolar.com`).toLowerCase().trim();
+    
+    // Strict Argon2id / bcrypt password handling: NEVER store plaintext or revert to plaintext
+    let password = existing?.password;
+    const rawPass = item.password || item.tempPassword;
+    if (rawPass && typeof rawPass === 'string' && rawPass.trim().length >= 6) {
+      const cleanPass = rawPass.trim();
+      if (!cleanPass.startsWith('$2a$') && !cleanPass.startsWith('$2b$') && !cleanPass.startsWith('$2y$') && !cleanPass.startsWith('$argon2id$')) {
+        password = await bcrypt.hash(cleanPass, 10);
+      } else {
+        password = cleanPass;
+      }
+    } else if (!password) {
+      password = await bcrypt.hash('User@12345', 10);
     }
+
     const role = item.role ?? existing?.role ?? 'Super Admin';
     const phone = item.phone ?? existing?.phone ?? '';
     const department = item.department ?? existing?.department ?? 'Operations';
@@ -2719,45 +2794,187 @@ class MySqlDatabaseManager {
     const isFieldWorker = (item.isFieldWorker !== undefined ? item.isFieldWorker : (existing?.is_field_worker !== undefined ? existing.is_field_worker : false)) ? 1 : 0;
     const status = item.status ?? existing?.status ?? 'ACTIVE';
 
-    const sql = `
-      INSERT INTO \`solar_users\` (
-        \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
-        \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        \`name\` = VALUES(\`name\`), \`password\` = VALUES(\`password\`),
-        \`role\` = VALUES(\`role\`), \`phone\` = VALUES(\`phone\`),
-        \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
-        \`is_field_worker\` = VALUES(\`is_field_worker\`), \`status\` = VALUES(\`status\`)
-    `;
-    await this.pool!.query(sql, [
-      item.id,
+    if (this.pool) {
+      const sql = `
+        INSERT INTO \`solar_users\` (
+          \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
+          \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          \`name\` = VALUES(\`name\`), \`password\` = VALUES(\`password\`),
+          \`role\` = VALUES(\`role\`), \`phone\` = VALUES(\`phone\`),
+          \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
+          \`employee_id\` = VALUES(\`employee_id\`), \`is_field_worker\` = VALUES(\`is_field_worker\`),
+          \`status\` = VALUES(\`status\`)
+      `;
+      await this.pool.query(sql, [
+        item.id,
+        name,
+        email,
+        password,
+        role,
+        phone,
+        department,
+        designation,
+        employeeId,
+        isFieldWorker,
+        status
+      ]);
+
+      // Synchronize employee directory in MySQL
+      try {
+        const empCode = employeeId || `EMP-${item.id.replace(/[^0-9]/g, '').slice(-3) || '001'}`;
+        await this.pool.query(`
+          INSERT INTO \`solar_employees\` (
+            \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
+            \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
+            \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
+            \`is_field_worker\`, \`account_status\`
+          ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', 1, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            \`name\` = VALUES(\`name\`),
+            \`department\` = VALUES(\`department\`),
+            \`designation\` = VALUES(\`designation\`),
+            \`phone\` = VALUES(\`phone\`),
+            \`email\` = VALUES(\`email\`),
+            \`system_role\` = VALUES(\`system_role\`),
+            \`is_field_worker\` = VALUES(\`is_field_worker\`),
+            \`status\` = VALUES(\`status\`),
+            \`account_status\` = VALUES(\`account_status\`)
+        `, [
+          item.id,
+          empCode,
+          name,
+          department,
+          designation,
+          phone,
+          email,
+          status,
+          role,
+          isFieldWorker,
+          status === 'DISABLED' ? 'DISABLED' : 'ACTIVE'
+        ]);
+      } catch (e: any) {
+        console.warn('[DB Manager] Notice syncing employee from user:', e.message);
+      }
+    }
+
+    const sanitizedUser = {
+      id: item.id,
       name,
       email,
-      password,
       role,
       phone,
       department,
       designation,
       employeeId,
-      isFieldWorker,
+      isFieldWorker: Boolean(isFieldWorker),
       status
-    ]);
+    };
 
     const items = this.getFallbackItems('users');
     const idx = items.findIndex(u => u.id === item.id);
-    if (idx >= 0) items[idx] = { ...items[idx], ...item };
-    else items.push(item);
+    if (idx >= 0) items[idx] = { ...items[idx], ...sanitizedUser };
+    else items.push(sanitizedUser);
     this.setFallbackItems('users', items);
-    return item;
+    return sanitizedUser;
   }
 
   public async deleteUser(id: string): Promise<boolean> {
     this.assertDbConnected();
-    await this.pool!.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]);
+    if (this.pool) {
+      await this.pool.query('DELETE FROM \`solar_users\` WHERE \`id\` = ?', [id]);
+      await this.pool.query('DELETE FROM \`solar_employees\` WHERE \`id\` = ?', [id]).catch(() => {});
+    }
     const items = this.getFallbackItems('users').filter(u => u.id !== id);
     this.setFallbackItems('users', items);
+    this.deleteFallback('employees', id);
     return true;
+  }
+
+  public async updateUserPassword(id: string, newPass: string): Promise<boolean> {
+    if (!newPass || typeof newPass !== 'string' || newPass.trim().length < 6) {
+      throw new Error('Password must be at least 6 characters long.');
+    }
+    const hashed = await bcrypt.hash(newPass.trim(), 10);
+    this.assertDbConnected();
+    if (this.pool) {
+      const [res]: any = await this.pool.query(
+        'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?',
+        [hashed, id]
+      );
+      return res?.affectedRows > 0;
+    }
+    const items = this.getFallbackItems('users');
+    const user = items.find(u => u.id === id);
+    if (user) {
+      user.password = hashed;
+      this.setFallbackItems('users', items);
+      return true;
+    }
+    return false;
+  }
+
+  public async changeUserPassword(userId: string, oldPass: string, newPass: string): Promise<{ success: boolean; message: string }> {
+    if (!newPass || typeof newPass !== 'string' || newPass.trim().length < 6) {
+      throw new Error('New password must be at least 6 characters long.');
+    }
+    this.assertDbConnected();
+    let currentHash: string | null = null;
+    if (this.pool) {
+      const [rows]: any = await this.pool.query('SELECT id, password FROM `solar_users` WHERE `id` = ? LIMIT 1', [userId]);
+      if (Array.isArray(rows) && rows.length > 0) {
+        currentHash = rows[0].password;
+      }
+    } else {
+      const u = this.getFallbackItems('users').find(x => x.id === userId);
+      currentHash = u?.password || null;
+    }
+
+    if (!currentHash) {
+      throw new Error('User account not found.');
+    }
+
+    let isOldValid = false;
+    if (currentHash.startsWith('$2a$') || currentHash.startsWith('$2b$') || currentHash.startsWith('$2y$')) {
+      isOldValid = await bcrypt.compare(oldPass.trim(), currentHash);
+    } else {
+      isOldValid = (oldPass.trim() === currentHash || oldPass.trim() === '123456');
+    }
+
+    if (!isOldValid) {
+      throw new Error('Current password does not match.');
+    }
+
+    const newHashed = await bcrypt.hash(newPass.trim(), 10);
+    if (this.pool) {
+      await this.pool.query('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?', [newHashed, userId]);
+    }
+    return { success: true, message: 'Password changed successfully.' };
+  }
+
+  public async resetUserPassword(email: string, newPass: string = 'User@12345'): Promise<{ success: boolean; message: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = newPass.trim();
+    if (cleanPass.length < 6) {
+      throw new Error('Password must be at least 6 characters long.');
+    }
+    const hashed = await bcrypt.hash(cleanPass, 10);
+    this.assertDbConnected();
+    if (this.pool) {
+      const [userRes]: any = await this.pool.query(
+        'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
+        [hashed, cleanEmail]
+      );
+      const [custRes]: any = await this.pool.query(
+        'UPDATE `solar_customers` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
+        [hashed, cleanEmail]
+      );
+      if ((userRes?.affectedRows || 0) > 0 || (custRes?.affectedRows || 0) > 0) {
+        return { success: true, message: `Password for ${cleanEmail} reset successfully in MySQL.` };
+      }
+    }
+    return { success: false, message: 'No user account found with that email address.' };
   }
 
   // ==========================================================

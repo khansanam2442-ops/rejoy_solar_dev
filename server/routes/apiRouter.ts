@@ -365,6 +365,100 @@ apiRouter.post(['/auth/logout', '/auth/logout/'], async (req: Request, res: Resp
   });
 });
 
+// Password Change Endpoint (/api/auth/change-password)
+apiRouter.post(['/auth/change-password', '/auth/change-password/'], async (req: Request, res: Response) => {
+  try {
+    const { userId, oldPassword, newPassword } = req.body || {};
+    if (!userId || !oldPassword || !newPassword) {
+      res.status(400).json({ success: false, message: 'User ID, current password, and new password are required.' });
+      return;
+    }
+    const result = await dbManager.changeUserPassword(userId, oldPassword, newPassword);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err?.message || 'Password change failed.' });
+  }
+});
+
+// Password Reset Endpoint (/api/auth/reset-password)
+apiRouter.post(['/auth/reset-password', '/auth/reset-password/'], async (req: Request, res: Response) => {
+  try {
+    const { email, newPassword } = req.body || {};
+    if (!email) {
+      res.status(400).json({ success: false, message: 'Email address is required.' });
+      return;
+    }
+    const result = await dbManager.resetUserPassword(email, newPassword);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err?.message || 'Password reset failed.' });
+  }
+});
+
+// ==========================================================
+// 3B. USERS MODULE API (MYSQL USER MANAGEMENT)
+// ==========================================================
+
+apiRouter.get('/users', async (_req: Request, res: Response) => {
+  try {
+    const users = await dbManager.getUsers();
+    res.json({ success: true, count: users.length, data: users });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch users' });
+  }
+});
+
+apiRouter.post('/users', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.name || !payload.email) {
+      res.status(400).json({ success: false, message: 'User name and email are required.' });
+      return;
+    }
+    const id = payload.id || `usr-${Date.now()}`;
+    const saved = await dbManager.saveUser({ ...payload, id });
+    res.status(201).json({ success: true, data: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to create user' });
+  }
+});
+
+apiRouter.put('/users/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const payload = req.body || {};
+    const updated = await dbManager.saveUser({ ...payload, id });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update user' });
+  }
+});
+
+apiRouter.put('/users/:id/password', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body || {};
+    if (!password || String(password).trim().length < 6) {
+      res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+      return;
+    }
+    const ok = await dbManager.updateUserPassword(id, String(password).trim());
+    res.json({ success: ok, message: ok ? 'User password securely updated in MySQL.' : 'User account not found.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Password update failed' });
+  }
+});
+
+apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await dbManager.deleteUser(id);
+    res.json({ success: true, message: 'User deleted from MySQL.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete user' });
+  }
+});
+
 // ==========================================================
 // 4. CUSTOMERS MODULE API
 // ==========================================================

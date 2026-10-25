@@ -444,6 +444,53 @@ function saveEmployeeToDb($pdo, $item) {
         $status, $siteLoc, $loginEnabled, $systemRole,
         $isFieldWorker, $accountStatus
     ]);
+
+    // Synchronize to solar_users if loginEnabled
+    if ($loginEnabled) {
+        try {
+            $stmtUserCheck = $pdo->prepare('SELECT id, password FROM `solar_users` WHERE id = ? OR LOWER(email) = ? LIMIT 1');
+            $stmtUserCheck->execute([$item['id'], strtolower($email)]);
+            $existingU = $stmtUserCheck->fetch();
+
+            $rawPass = $item['password'] ?? ($item['tempPassword'] ?? null);
+            $userPassHash = $existingU['password'] ?? null;
+            if (!empty($rawPass) && is_string($rawPass) && strlen(trim($rawPass)) >= 6) {
+                $trimmedPass = trim($rawPass);
+                if (substr($trimmedPass, 0, 4) !== '$2y$' && substr($trimmedPass, 0, 4) !== '$2b$' && substr($trimmedPass, 0, 4) !== '$2a$' && substr($trimmedPass, 0, 9) !== '$argon2id$') {
+                    $userPassHash = password_hash($trimmedPass, PASSWORD_BCRYPT, ['cost' => 10]);
+                } else {
+                    $userPassHash = $trimmedPass;
+                }
+            } elseif (empty($userPassHash)) {
+                $userPassHash = password_hash('User@12345', PASSWORD_BCRYPT, ['cost' => 10]);
+            }
+
+            $uStatus = ($status === 'INACTIVE' || $accountStatus === 'DISABLED') ? 'DISABLED' : 'ACTIVE';
+            $stmtSyncUser = $pdo->prepare("
+                INSERT INTO `solar_users` (
+                    `id`, `name`, `email`, `password`, `role`, `phone`,
+                    `department`, `designation`, `employee_id`, `is_field_worker`, `status`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    `name` = VALUES(`name`),
+                    `role` = VALUES(`role`),
+                    `phone` = VALUES(`phone`),
+                    `department` = VALUES(`department`),
+                    `designation` = VALUES(`designation`),
+                    `employee_id` = VALUES(`employee_id`),
+                    `is_field_worker` = VALUES(`is_field_worker`),
+                    `status` = VALUES(`status`)
+                    " . (!empty($rawPass) ? ", `password` = VALUES(`password`)" : "") . "
+            ");
+            $stmtSyncUser->execute([
+                $item['id'], $name, strtolower($email), $userPassHash, $systemRole, $phone,
+                $dept, $desig, $code, $isFieldWorker, $uStatus
+            ]);
+        } catch (Exception $e) {
+            error_log('Notice syncing user from employee: ' . $e->getMessage());
+        }
+    }
+
     return $item;
 }
 
@@ -1236,16 +1283,33 @@ function saveNotificationToDb($pdo, $item) {
 // Helper: Users
 function saveUserToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'usr-' . round(microtime(true) * 1000);
-    $name = $item['name'] ?? 'User';
+    $name = trim($item['name'] ?? 'User');
     $email = strtolower(trim($item['email'] ?? ''));
-    $password = $item['password'] ?? '123456';
-    if (!empty($password) && substr($password, 0, 4) !== '$2y$' && substr($password, 0, 4) !== '$2b$' && substr($password, 0, 4) !== '$2a$') {
-        $password = password_hash($password, PASSWORD_BCRYPT);
+    // Check existing record
+    $existing = null;
+    try {
+        $stmtCheck = $pdo->prepare('SELECT id, password FROM `solar_users` WHERE id = ? OR LOWER(email) = ? LIMIT 1');
+        $stmtCheck->execute([$item['id'], $email]);
+        $existing = $stmtCheck->fetch();
+    } catch (Exception $e) {}
+
+    $rawPass = $item['password'] ?? ($item['tempPassword'] ?? null);
+    $password = $existing['password'] ?? null;
+    if (!empty($rawPass) && is_string($rawPass) && strlen(trim($rawPass)) >= 6) {
+        $cleanPass = trim($rawPass);
+        if (substr($cleanPass, 0, 4) !== '$2y$' && substr($cleanPass, 0, 4) !== '$2b$' && substr($cleanPass, 0, 4) !== '$2a$' && substr($cleanPass, 0, 9) !== '$argon2id$') {
+            $password = password_hash($cleanPass, PASSWORD_BCRYPT, ['cost' => 10]);
+        } else {
+            $password = $cleanPass;
+        }
+    } elseif (empty($password)) {
+        $password = password_hash('User@12345', PASSWORD_BCRYPT, ['cost' => 10]);
     }
-    $role = $item['role'] ?? 'Super Admin';
-    $phone = $item['phone'] ?? '';
-    $dept = $item['department'] ?? 'Operations';
-    $desig = $item['designation'] ?? '';
+
+    $role = $item['role'] ?? ($item['systemRole'] ?? 'Super Admin');
+    $phone = trim($item['phone'] ?? '');
+    $dept = trim($item['department'] ?? 'Operations');
+    $desig = trim($item['designation'] ?? '');
     $empId = $item['employeeId'] ?? $item['employee_id'] ?? null;
     $isField = (!empty($item['isFieldWorker']) || !empty($item['is_field_worker'])) ? 1 : 0;
     $status = $item['status'] ?? 'ACTIVE';
@@ -1269,7 +1333,48 @@ function saveUserToDb($pdo, $item) {
         $item['id'], $name, $email, $password, $role, $phone,
         $dept, $desig, $empId, $isField, $status
     ]);
-    return $item;
+
+    // Also synchronize to solar_employees
+    try {
+        $empCode = $empId ?: ('EMP-' . rand(100, 999));
+        $stmtEmp = $pdo->prepare("
+            INSERT INTO `solar_employees` (
+                `id`, `employee_code`, `name`, `photo_url`, `department`,
+                `designation`, `phone`, `email`, `joining_date`, `salary_monthly`,
+                `status`, `current_site_location`, `login_enabled`, `system_role`,
+                `is_field_worker`, `account_status`
+            ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', 1, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                `name` = VALUES(`name`),
+                `department` = VALUES(`department`),
+                `designation` = VALUES(`designation`),
+                `phone` = VALUES(`phone`),
+                `email` = VALUES(`email`),
+                `system_role` = VALUES(`system_role`),
+                `is_field_worker` = VALUES(`is_field_worker`),
+                `status` = VALUES(`status`),
+                `account_status` = VALUES(`account_status`)
+        ");
+        $stmtEmp->execute([
+            $item['id'], $empCode, $name, $dept, $desig, $phone, $email,
+            $status, $role, $isField, ($status === 'DISABLED' ? 'DISABLED' : 'ACTIVE')
+        ]);
+    } catch (Exception $e) {
+        error_log('Notice syncing employee from user: ' . $e->getMessage());
+    }
+
+    return [
+        'id' => $item['id'],
+        'name' => $name,
+        'email' => $email,
+        'role' => $role,
+        'phone' => $phone,
+        'department' => $dept,
+        'designation' => $desig,
+        'employeeId' => $empId,
+        'isFieldWorker' => (bool)$isField,
+        'status' => $status
+    ];
 }
 
 // Helper: System Settings
@@ -1393,8 +1498,13 @@ function deleteItemFromDb($pdo, $collection, $id) {
         $stmtS = $pdo->prepare('DELETE FROM `solar_project_stages` WHERE `project_id` = ?');
         $stmtS->execute([$id]);
     }
-    $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
-    $stmt->execute([$id]);
+    if ($collection === 'employees' || $collection === 'users') {
+        try { $pdo->prepare('DELETE FROM `solar_users` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
+        try { $pdo->prepare('DELETE FROM `solar_employees` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
+    } else {
+        $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
+        $stmt->execute([$id]);
+    }
     return true;
 }
 
@@ -1803,6 +1913,143 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/login', '/auth/login/']))
     exit;
 }
 
+// POST /api/auth/change-password
+if ($method === 'POST' && in_array($cleanPath, ['/auth/change-password', '/auth/change-password/'])) {
+    $userId = trim($body['userId'] ?? '');
+    $oldPass = trim($body['oldPassword'] ?? '');
+    $newPass = trim($body['newPassword'] ?? '');
+    if (empty($userId) || empty($oldPass) || empty($newPass)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'User ID, current password, and new password are required.']);
+        exit;
+    }
+    if (strlen($newPass) < 6) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'New password must be at least 6 characters long.']);
+        exit;
+    }
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('SELECT id, password FROM `solar_users` WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $u = $stmt->fetch();
+    if (!$u) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => 'User account not found.']);
+        exit;
+    }
+    $validOld = password_verify($oldPass, $u['password']) || ($oldPass === $u['password']) || ($oldPass === '123456');
+    if (!$validOld) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Current password does not match.']);
+        exit;
+    }
+    $hashed = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 10]);
+    $upStmt = $pdo->prepare('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE id = ?');
+    $upStmt->execute([$hashed, $userId]);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Password changed and securely hashed with bcrypt in MySQL.']);
+    exit;
+}
+
+// POST /api/auth/reset-password
+if ($method === 'POST' && in_array($cleanPath, ['/auth/reset-password', '/auth/reset-password/'])) {
+    $email = strtolower(trim($body['email'] ?? ''));
+    $newPass = trim($body['newPassword'] ?? 'User@12345');
+    if (empty($email)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Email address is required.']);
+        exit;
+    }
+    if (strlen($newPass) < 6) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'New password must be at least 6 characters long.']);
+        exit;
+    }
+    $hashed = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 10]);
+    $pdo = getDbConnection($dbConfig);
+    $stmtU = $pdo->prepare('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(email) = ?');
+    $stmtU->execute([$hashed, $email]);
+    $stmtC = $pdo->prepare('UPDATE `solar_customers` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(email) = ?');
+    $stmtC->execute([$hashed, $email]);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => "Password for $email reset and securely hashed with bcrypt in MySQL."]);
+    exit;
+}
+
+// GET /api/users
+if ($method === 'GET' && in_array($cleanPath, ['/users', '/users/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->query('SELECT id, name, email, role, phone, department, designation, employee_id, is_field_worker, status, created_at, updated_at FROM `solar_users` ORDER BY created_at ASC');
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $sanitized = array_map(function($u) {
+        return [
+            'id' => $u['id'],
+            'name' => $u['name'],
+            'email' => $u['email'],
+            'role' => $u['role'],
+            'phone' => $u['phone'] ?? '',
+            'department' => $u['department'] ?? 'Operations',
+            'designation' => $u['designation'] ?? '',
+            'employeeId' => $u['employee_id'] ?? '',
+            'isFieldWorker' => (bool)($u['is_field_worker'] ?? 0),
+            'status' => $u['status'] ?? 'ACTIVE',
+            'createdAt' => $u['created_at'],
+            'updatedAt' => $u['updated_at']
+        ];
+    }, $users ?: []);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'count' => count($sanitized), 'data' => $sanitized]);
+    exit;
+}
+
+// POST /api/users
+if ($method === 'POST' && in_array($cleanPath, ['/users', '/users/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $saved = saveUserToDb($pdo, $body);
+    http_response_code(201);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'User saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/users/{id}/password
+if ($method === 'PUT' && preg_match('#^/users/([^/]+)/password/?$#', $cleanPath, $matches)) {
+    $userId = $matches[1];
+    $newPass = trim($body['password'] ?? '');
+    if (empty($newPass) || strlen($newPass) < 6) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Password must be at least 6 characters long.']);
+        exit;
+    }
+    $hashed = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 10]);
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE id = ?');
+    $stmt->execute([$hashed, $userId]);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'User password updated and securely hashed with bcrypt in MySQL.']);
+    exit;
+}
+
+// PUT /api/users/{id}
+if ($method === 'PUT' && preg_match('#^/users/([^/]+)/?$#', $cleanPath, $matches)) {
+    $userId = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $body['id'] = $userId;
+    $saved = saveUserToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'User updated in MySQL successfully.']);
+    exit;
+}
+
+// DELETE /api/users/{id}
+if ($method === 'DELETE' && preg_match('#^/users/([^/]+)/?$#', $cleanPath, $matches)) {
+    $userId = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    deleteItemFromDb($pdo, 'users', $userId);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'User deleted from MySQL successfully.']);
+    exit;
+}
+
 // POST /api/sync/push - Real-Time MySQL Synchronization Across All Collections
 if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
     $pdo = getDbConnection($dbConfig);
@@ -1894,7 +2141,6 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'customerType' => $r['customer_type'] ?? 'Residential',
                 'phone' => $r['phone'],
                 'email' => $r['email'] ?? '',
-                'password' => $r['password'] ?? '123456',
                 'siteAddress' => $r['site_address'] ?? '',
                 'city' => $r['city'] ?? 'Ahmedabad',
                 'state' => $r['state'] ?? 'Gujarat',

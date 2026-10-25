@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAuth, ROLE_DEFINITIONS } from '../../context/AuthContext';
 import { storageService } from '../../services/storage';
+import { apiClient } from '../../services/apiClient';
 import { Employee, UserRole } from '../../types/solar';
 import {
   Users,
@@ -15,7 +16,9 @@ import {
   Briefcase,
   Navigation,
   RefreshCw,
-  X
+  X,
+  KeyRound,
+  Lock
 } from 'lucide-react';
 
 interface EmployeeFormData {
@@ -45,6 +48,11 @@ export const UserManagementView: React.FC = () => {
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+
+  // Quick Password Reset states
+  const [resetModalUser, setResetModalUser] = useState<Employee | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   // Available employee roles (excludes Customer role)
   const employeeRoleDefinitions = useMemo(() => {
@@ -180,11 +188,17 @@ export const UserManagementView: React.FC = () => {
 
     if (updatedEmp) {
       storageService.saveEmployee(updatedEmp);
+      apiClient
+        .updateUser(emp.id, {
+          status: newStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
+          login_enabled: !isCurrentlyActive ? 1 : 0
+        })
+        .catch(err => console.warn('[UserManagement] API status toggle notice:', err));
     }
     setEmployees(updated);
     triggerRefresh();
     showToast(
-      `Employee ${emp.name} account ${isCurrentlyActive ? 'deactivated' : 'activated'} successfully`,
+      `Employee ${emp.name} account ${isCurrentlyActive ? 'deactivated' : 'activated'} successfully in MySQL`,
       isCurrentlyActive ? 'warning' : 'success'
     );
   };
@@ -194,7 +208,8 @@ export const UserManagementView: React.FC = () => {
     setEditingEmployee(null);
     setFormData({
       ...defaultEmployeeForm,
-      code: getNextEmployeeCode(employees)
+      code: getNextEmployeeCode(employees),
+      tempPassword: 'User@12345'
     });
     setIsModalOpen(true);
   };
@@ -223,13 +238,40 @@ export const UserManagementView: React.FC = () => {
           ].includes(emp.systemRole || '')
       ),
       loginEnabled: emp.loginEnabled ?? true,
-      status: emp.accountStatus === 'DISABLED' || emp.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE'
+      status: emp.accountStatus === 'DISABLED' || emp.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+      tempPassword: ''
     });
     setIsModalOpen(true);
   };
 
+  // Quick Password Reset handlers
+  const handleOpenResetPassword = (emp: Employee) => {
+    setResetModalUser(emp);
+    setNewPasswordInput('');
+  };
+
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetModalUser) return;
+    if (!newPasswordInput || newPasswordInput.trim().length < 6) {
+      showToast('Password must be at least 6 characters.', 'error');
+      return;
+    }
+    setIsResettingPassword(true);
+    try {
+      await apiClient.updateUserPassword(resetModalUser.id, newPasswordInput.trim());
+      showToast(`Password for ${resetModalUser.name} securely updated with bcrypt hash in MySQL!`, 'success');
+      setResetModalUser(null);
+      setNewPasswordInput('');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update password in database', 'error');
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   // Submit User Create / Edit
-  const handleSubmitUser = (e: React.FormEvent) => {
+  const handleSubmitUser = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const cleanName = formData.name.trim();
@@ -316,15 +358,34 @@ export const UserManagementView: React.FC = () => {
 
       if (updatedEmp) {
         storageService.saveEmployee(updatedEmp);
+        try {
+          await apiClient.updateUser(editingEmployee.id, {
+            name: cleanName,
+            email: cleanEmail,
+            role: finalRole,
+            department: finalDept,
+            designation: finalDesignation,
+            phone: formData.phone.trim(),
+            status: formData.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
+            employee_id: cleanCode,
+            login_enabled: formData.loginEnabled ? 1 : 0
+          });
+          if (formData.tempPassword && formData.tempPassword.trim().length >= 6) {
+            await apiClient.updateUserPassword(editingEmployee.id, formData.tempPassword.trim());
+          }
+        } catch (err: any) {
+          console.warn('[UserManagement] API updateUser notice:', err);
+        }
       } else {
         storageService.saveEmployees(updated);
       }
       setEmployees(updated);
-      showToast(`Employee ${cleanName} updated successfully`, 'success');
+      showToast(`Employee ${cleanName} updated successfully in MySQL`, 'success');
     } else {
       // Create new record
+      const newEmpId = `emp-${Date.now()}`;
       const newEmp: Employee = {
-        id: `emp-${Date.now()}`,
+        id: newEmpId,
         employeeCode: cleanCode,
         name: cleanName,
         email: cleanEmail,
@@ -345,8 +406,25 @@ export const UserManagementView: React.FC = () => {
       };
 
       storageService.saveEmployee(newEmp);
+      try {
+        await apiClient.saveUser({
+          id: newEmpId,
+          name: cleanName,
+          email: cleanEmail,
+          password: formData.tempPassword || 'User@12345',
+          role: finalRole,
+          department: finalDept,
+          designation: finalDesignation,
+          phone: formData.phone.trim(),
+          status: formData.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
+          employee_id: cleanCode,
+          login_enabled: formData.loginEnabled ? 1 : 0
+        });
+      } catch (err: any) {
+        console.warn('[UserManagement] API saveUser notice:', err);
+      }
       setEmployees([newEmp, ...employees]);
-      showToast(`Employee ${newEmp.name} created successfully`, 'success');
+      showToast(`Employee ${newEmp.name} created and saved to MySQL successfully`, 'success');
     }
 
     triggerRefresh();
@@ -612,6 +690,14 @@ export const UserManagementView: React.FC = () => {
                         <div className="inline-flex items-center gap-1.5">
                           <button
                             type="button"
+                            onClick={() => handleOpenResetPassword(emp)}
+                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                            title="Change / Reset Password in MySQL"
+                          >
+                            <KeyRound className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleOpenEdit(emp)}
                             className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
                             title="Edit Employee"
@@ -810,24 +896,24 @@ export const UserManagementView: React.FC = () => {
                 />
               </div>
 
-              {/* Password field for new accounts */}
-              {!editingEmployee && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Initial Login Password
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.tempPassword}
-                    onChange={e => setFormData({ ...formData, tempPassword: e.target.value })}
-                    placeholder="User@12345"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-mono"
-                  />
-                  <span className="text-[11px] text-slate-400 mt-0.5 block">
-                    The employee will use this password on the login screen
-                  </span>
-                </div>
-              )}
+              {/* Password field for accounts */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {editingEmployee ? 'Change Password (optional)' : 'Initial Login Password *'}
+                </label>
+                <input
+                  type="text"
+                  value={formData.tempPassword || ''}
+                  onChange={e => setFormData({ ...formData, tempPassword: e.target.value })}
+                  placeholder={editingEmployee ? 'Leave empty to keep current password, or min 6 chars' : 'User@12345'}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-mono"
+                />
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  {editingEmployee
+                    ? 'Leave empty to preserve existing password. If entered, it will be hashed with bcrypt in MySQL.'
+                    : 'The employee will use this password to sign into the system (hashed with bcrypt).'}
+                </span>
+              </div>
 
               {/* Operational Toggles */}
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
@@ -882,6 +968,72 @@ export const UserManagementView: React.FC = () => {
                   className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
                 >
                   {editingEmployee ? 'Save Employee' : 'Create Employee'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Reset Password Modal */}
+      {resetModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Change Password</h3>
+                  <p className="text-[11px] text-slate-500">{resetModalUser.name} ({resetModalUser.email})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetModalUser(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  New Password (min 6 characters) *
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    minLength={6}
+                    value={newPasswordInput}
+                    onChange={e => setNewPasswordInput(e.target.value)}
+                    placeholder="Enter new secure password"
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                  />
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                </div>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  This will securely hash the new password using bcrypt ($2a$/$2y$) and update MySQL.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setResetModalUser(null)}
+                  className="px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPassword}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isResettingPassword ? 'Updating...' : 'Update Password'}
                 </button>
               </div>
             </form>

@@ -92,6 +92,7 @@ const STORAGE_KEYS = {
   ACL_AUDIT_LOGS: 'solar_erp_acl_audit_logs_v2',
   WAREHOUSES: 'solar_erp_warehouses_v2',
   STOCK_AUDITS: 'solar_erp_stock_audits_v2',
+  USERS: 'solar_erp_users_v2',
 };
 
 const initialWarehouses: Warehouse[] = [];
@@ -159,7 +160,8 @@ const KEY_TO_COLLECTION: Record<string, string> = {
   [STORAGE_KEYS.ACL_CONFIG]: 'acl_config',
   [STORAGE_KEYS.ACL_AUDIT_LOGS]: 'acl_audit_logs',
   [STORAGE_KEYS.WAREHOUSES]: 'warehouses',
-  [STORAGE_KEYS.STOCK_AUDITS]: 'stock_audits'
+  [STORAGE_KEYS.STOCK_AUDITS]: 'stock_audits',
+  [STORAGE_KEYS.USERS]: 'users'
 };
 
 class StorageService {
@@ -1225,6 +1227,32 @@ class StorageService {
     this.deleteSync('employees', id);
     if (typeof fetch !== 'undefined') {
       fetch(`/api/employees/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    }
+  }
+
+  // --- Users & Credentials ---
+  getUsers(): any[] {
+    return this.get<any[]>(STORAGE_KEYS.USERS, []);
+  }
+
+  saveUser(user: any): void {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === user.id || (user.email && u.email?.toLowerCase() === user.email?.toLowerCase()));
+    if (index >= 0) {
+      users[index] = { ...users[index], ...user, updatedAt: new Date().toISOString() };
+    } else {
+      users.unshift({ ...user, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    }
+    this.set(STORAGE_KEYS.USERS, users, user);
+  }
+
+  deleteUser(id: string): void {
+    const users = this.getUsers().filter(u => u.id !== id);
+    this.set(STORAGE_KEYS.USERS, users);
+    this.deleteSync('users', id);
+    if (typeof fetch !== 'undefined') {
+      fetch(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
     }
   }
 

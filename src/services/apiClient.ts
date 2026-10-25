@@ -1074,10 +1074,12 @@ class ApiClient {
     }
   }
 
-  // --- Users ---
+  // --- Users & Passwords ---
   async getUsers(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/users`);
+      const res = await fetch(`${this.baseUrl}/users`, {
+        headers: this.getAuthHeaders()
+      });
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1089,19 +1091,98 @@ class ApiClient {
     try {
       const res = await fetch(`${this.baseUrl}/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(user)
       });
       const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || 'Failed to save user');
+      }
       return data.data || user;
-    } catch {
-      return user;
+    } catch (e: any) {
+      console.error('[apiClient] saveUser error:', e);
+      throw e;
+    }
+  }
+
+  async updateUser(id: string, updates: any): Promise<any> {
+    try {
+      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || 'Failed to update user');
+      }
+      return data.data || updates;
+    } catch (e: any) {
+      console.error('[apiClient] updateUser error:', e);
+      throw e;
+    }
+  }
+
+  async updateUserPassword(id: string, password: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}/password`, {
+        method: 'PUT',
+        headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ password })
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || 'Failed to update password');
+      }
+      return data;
+    } catch (e: any) {
+      console.error('[apiClient] updateUserPassword error:', e);
+      throw e;
+    }
+  }
+
+  async changePassword(userId: string, oldPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await fetch(`${this.baseUrl}/auth/change-password`, {
+        method: 'POST',
+        headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ userId, oldPassword, newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || 'Failed to change password');
+      }
+      return data;
+    } catch (e: any) {
+      console.error('[apiClient] changePassword error:', e);
+      throw e;
+    }
+  }
+
+  async resetPassword(email: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await fetch(`${this.baseUrl}/auth/reset-password`, {
+        method: 'POST',
+        headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ email, newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.message || data.error || 'Failed to reset password');
+      }
+      return data;
+    } catch (e: any) {
+      console.error('[apiClient] resetPassword error:', e);
+      throw e;
     }
   }
 
   async deleteUser(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: this.getAuthHeaders()
+      });
       return res.ok;
     } catch {
       return false;
