@@ -2871,7 +2871,7 @@ class MySqlDatabaseManager {
   // DISPATCHER: SAVE & DELETE BY COLLECTION KEY
   // ==========================================================
   public async saveItem(collection: string, item: any): Promise<any> {
-    if (!item || !item.id) {
+    if (!item || (!item.id && collection !== 'settings' && collection !== 'acl_config')) {
       throw new Error(`Invalid item payload for collection ${collection}`);
     }
 

@@ -130,39 +130,67 @@ apiRouter.get('/bootstrap', async (_req: Request, res: Response) => {
 
 // Bulk & Entity sync endpoint for data updates directly to MySQL
 apiRouter.post('/sync/push', async (req: Request, res: Response) => {
+  const { collection, item, items, action, payload } = req.body || {};
+  let effectiveItem = item || payload;
+
   try {
-    const { collection, item, items, action, payload } = req.body || {};
-    const effectiveItem = item || payload;
     if (!collection) {
       res.status(400).json({ success: false, message: 'Collection name is required.' });
       return;
     }
 
-    if (effectiveItem && action === 'delete') {
-      await dbManager.deleteItem(collection, effectiveItem.id);
+    // For singleton stores like settings and acl_config, allow passing either directly or via items
+    if (!effectiveItem && (collection === 'settings' || collection === 'acl_config')) {
+      effectiveItem = items || req.body.settings || req.body.config || req.body;
+    }
+
+    // Handle delete action
+    const deleteId = effectiveItem?.id || req.body?.id || (typeof effectiveItem === 'string' ? effectiveItem : null);
+    if (deleteId && (action === 'delete' || req.body.isDelete)) {
+      await dbManager.deleteItem(collection, deleteId);
+      console.log(`[MySQL Write Success] Deleted record ${deleteId} from collection "${collection}"`);
       res.json({ success: true, message: `Deleted from ${collection}` });
       return;
     }
 
+    // Handle single item save
     if (effectiveItem) {
       const saved = await dbManager.saveItem(collection, effectiveItem);
+      console.log(`[MySQL Write Success] Committed record "${effectiveItem.id || 'singleton'}" to collection "${collection}"`);
       res.json({ success: true, data: saved, message: `Saved to ${collection}` });
       return;
     }
 
+    // Handle array batch save
     if (items && Array.isArray(items)) {
       for (const it of items) {
-        if (it && it.id) {
+        if (it && (it.id || collection === 'settings' || collection === 'acl_config')) {
           await dbManager.saveItem(collection, it);
         }
       }
+      console.log(`[MySQL Write Success] Committed batch of ${items.length} records to collection "${collection}"`);
       res.json({ success: true, count: items.length, message: `Synced ${collection} to MySQL` });
       return;
     }
 
-    res.status(400).json({ success: false, message: 'Invalid sync payload.' });
+    res.status(400).json({ success: false, message: 'Invalid sync payload. Expected "item" or "items" array.' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || 'Sync error' });
+    // Safe diagnostics logging without sensitive user or auth credentials
+    const safeDiagnostics = {
+      collection: collection || 'unknown',
+      action: action || 'save',
+      recordId: effectiveItem?.id || (Array.isArray(items) ? `batch_${items.length}` : undefined),
+      errorMessage: err?.message || String(err),
+      sqlState: err?.sqlState,
+      sqlCode: err?.code,
+      timestamp: new Date().toISOString()
+    };
+    console.error(`[MySQL Write Error] Write failure in collection "${collection}":`, safeDiagnostics);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Sync error',
+      diagnostics: safeDiagnostics
+    });
   }
 });
 

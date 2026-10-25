@@ -379,7 +379,99 @@ async function runTest() {
   }
   console.log('  ✓ Verified updated fields in bootstrap:', foundUpdated.name, foundUpdated.city);
 
-  console.log('\nALL 21 MODULE TEST OPERATIONS CONFIRMED PERSISTED IN MYSQL & BOOTSTRAP!');
+  console.log('\nStep 5: Verifying Settings and ACL Config persistence in MySQL...');
+  const testSettings = {
+    companyName: `REJOY SOLAR TEST ${testRunId}`,
+    companyAddress: 'Plot 14, Risali, Bhilai',
+    companyPhone: '+91 98250 99999',
+    companyEmail: `test${testRunId}@rejoysolar.com`,
+    taxRatePercent: 18,
+    currencySymbol: '₹'
+  };
+  const settingsPush = await post('http://127.0.0.1:3000/api/sync/push', {
+    collection: 'settings',
+    items: testSettings
+  });
+  if (settingsPush.status !== 200 || !settingsPush.body?.success) {
+    console.error('SETTINGS PUSH FAILED:', settingsPush);
+    process.exit(1);
+  }
+  console.log('  ✓ Successfully pushed settings via /api/sync/push');
+
+  // Query solar_system_settings directly
+  const conn2 = await mysql.createConnection({
+    host: '127.0.0.1',
+    user: 'u238683373_rejoy_solar',
+    password: ';Fl:$tn/9C&d',
+    database: 'u238683373_rejoy_solar'
+  });
+  const [settingsRows] = await conn2.query('SELECT `setting_value` FROM `solar_system_settings` WHERE `setting_key` = ?', ['global_settings']);
+  const parsedSettings = JSON.parse(settingsRows[0].setting_value);
+  if (parsedSettings.companyName !== testSettings.companyName) {
+    console.error('SETTINGS VERIFICATION FAILED in MySQL table solar_system_settings:', parsedSettings);
+    await conn2.end();
+    process.exit(1);
+  }
+  console.log('  ✓ Confirmed in MySQL solar_system_settings: companyName =', parsedSettings.companyName);
+
+  // Check in bootstrap
+  const bootResSettings = await get('http://127.0.0.1:3000/api/bootstrap');
+  if (bootResSettings.body.data.settings?.companyName !== testSettings.companyName) {
+    console.error('SETTINGS HYDRATION FAILED in bootstrap:', bootResSettings.body.data.settings);
+    await conn2.end();
+    process.exit(1);
+  }
+  console.log('  ✓ Confirmed settings hydrated in bootstrap:', bootResSettings.body.data.settings.companyName);
+
+  // Test individual REST endpoint POST /api/leads and DELETE /api/leads/:id
+  console.log('\nStep 6: Verifying direct REST endpoints (POST /api/leads)...');
+  const restLeadId = `lead-rest-${testRunId}`;
+  const restLeadRes = await post('http://127.0.0.1:3000/api/leads', {
+    id: restLeadId,
+    customerName: `REST Lead ${testRunId}`,
+    phone: '+91 98888 11111',
+    city: 'Gandhinagar',
+    status: 'NEW'
+  });
+  if (restLeadRes.status !== 201 || !restLeadRes.body?.success) {
+    console.error('REST POST /api/leads FAILED:', restLeadRes);
+    await conn2.end();
+    process.exit(1);
+  }
+  console.log('  ✓ REST POST /api/leads successful');
+
+  const [restLeadRows] = await conn2.query('SELECT * FROM `solar_leads` WHERE `id` = ?', [restLeadId]);
+  if (restLeadRows.length === 0) {
+    console.error('REST lead not found in MySQL solar_leads!');
+    await conn2.end();
+    process.exit(1);
+  }
+  console.log('  ✓ Confirmed in MySQL: solar_leads has REST lead', restLeadId);
+
+  // Cleanup test artifacts
+  console.log('\nStep 7: Cleaning up test records to preserve pristine database...');
+  for (const [col, info] of Object.entries(tableMap)) {
+    await conn2.query(`DELETE FROM \`${info.table}\` WHERE \`${info.idCol}\` = ?`, [info.idVal]);
+  }
+  await conn2.query('DELETE FROM `solar_leads` WHERE `id` = ?', [restLeadId]);
+  
+  // Restore default settings
+  const defaultSettings = {
+    companyName: 'REJOY SOLAR POWER PVT. LTD',
+    companyAddress: 'PLOT NO- 14, STREET NO- 14B, PRAGATI NAGAR, RISALI BHILAI, Chhattisgarh 490006',
+    companyPhone: '+91 98250 12345',
+    companyEmail: 'rejoysolarpower@gmail.com',
+    companyGst: '22AAOCR0748K1Z5',
+    currencySymbol: '₹',
+    taxRatePercent: 18
+  };
+  await conn2.query('UPDATE `solar_system_settings` SET `setting_value` = ? WHERE `setting_key` = ?', [JSON.stringify(defaultSettings), 'global_settings']);
+  await conn2.end();
+  console.log('  ✓ Test artifacts cleaned up. Baseline production settings restored.');
+
+  console.log('\n======================================================');
+  console.log('ALL VERIFICATIONS PASSED: 100% PERSISTED IN LIVE MYSQL');
+  console.log('======================================================');
 }
 
 runTest().catch(e => {

@@ -1497,13 +1497,14 @@ class StorageService {
 
   addNotification(notif: Omit<AppNotification, 'id' | 'timestamp' | 'read'>): void {
     const notifications = this.getNotifications();
-    notifications.unshift({
+    const newNotif = {
       ...notif,
       id: `notif-${Date.now()}`,
       timestamp: new Date().toLocaleString(),
       read: false
-    });
-    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications);
+    };
+    notifications.unshift(newNotif);
+    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications, newNotif);
   }
 
   markNotificationAsRead(id: string): void {
@@ -1526,7 +1527,7 @@ class StorageService {
   }
 
   saveSettings(settings: SystemSettings): void {
-    this.set(STORAGE_KEYS.SETTINGS, settings);
+    this.set(STORAGE_KEYS.SETTINGS, settings, settings);
   }
 
   // ==========================================
@@ -2104,7 +2105,7 @@ class StorageService {
   }
 
   saveAclConfig(config: SystemAclConfig): void {
-    this.set(STORAGE_KEYS.ACL_CONFIG, config);
+    this.set(STORAGE_KEYS.ACL_CONFIG, config, config);
   }
 
   updateRolePermissions(

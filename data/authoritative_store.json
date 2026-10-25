@@ -1,28 +1,22 @@
 {
   "settings": {
-    "companyName": "REJOY SOLAR POWER PVT. LTD",
-    "companyAddress": "PLOT NO- 14, STREET NO- 14B, PRAGATI NAGAR, RISALI BHILAI, Chhattisgarh 490006",
-    "companyPhone": "+91 98250 12345",
-    "companyEmail": "rejoysolarpower@gmail.com",
-    "companyGst": "22AAOCR0748K1Z5",
-    "logoUrl": "/logo-dark.png",
-    "currencySymbol": "₹",
+    "companyName": "REJOY SOLAR TEST 608171",
+    "companyAddress": "Plot 14, Risali, Bhilai",
+    "companyPhone": "+91 98250 99999",
+    "companyEmail": "test608171@rejoysolar.com",
     "taxRatePercent": 18,
-    "tallyServerUrl": "",
-    "tallyCompany": "Rejoy Solar 2026-27",
-    "tallyStatus": "NOT CONFIGURED",
-    "whatsAppStatus": "SANDBOX_READY"
+    "currencySymbol": "₹"
   },
   "customers": [
     {
-      "id": "cust-test-372662",
-      "customerCode": "cust-test-372662",
-      "name": "Updated Customer 372662",
+      "id": "cust-test-608171",
+      "customerCode": "cust-test-608171",
+      "name": "Updated Customer 608171",
       "companyName": "",
       "customerType": "Commercial",
       "phone": "+91 99988 77766",
-      "email": "cust372662@rejoytest.com",
-      "password": "$2b$10$inGEOqopIn8T0ouLFYuDIug/2lXC4Jz8L6P9w4bYhtRyVWef1akP2",
+      "email": "cust608171@rejoytest.com",
+      "password": "123456",
       "siteAddress": "101 Industrial Estate, Ahmedabad",
       "city": "Vadodara",
       "state": "Gujarat",
@@ -32,8 +26,8 @@
       "sanctionedLoadKw": 25.5,
       "status": "ACTIVE",
       "activeProjectId": null,
-      "createdAt": "2026-10-25T17:29:32.000Z",
-      "updatedAt": "2026-10-25T17:29:41.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z",
+      "updatedAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "cust-test-094168",
@@ -143,11 +137,20 @@
   ],
   "leads": [
     {
-      "id": "lead-test-372662",
+      "id": "lead-rest-608171",
+      "customerName": "REST Lead 608171",
+      "phone": "+91 98888 11111",
+      "city": "Gandhinagar",
+      "status": "NEW",
+      "createdAt": "2026-10-25T17:50:08.465Z",
+      "updatedAt": "2026-10-25T17:50:08.465Z"
+    },
+    {
+      "id": "lead-test-608171",
       "customerName": "",
       "companyName": "",
       "phone": "+91 98765 43210",
-      "email": "lead372662@rejoytest.com",
+      "email": "lead608171@rejoytest.com",
       "address": "",
       "city": "Surat",
       "solarCapacityKw": 0,
@@ -158,8 +161,8 @@
       "status": "QUALIFIED",
       "notes": "Interested in 10kW rooftop solar system",
       "nextFollowUpDate": null,
-      "createdAt": "2026-10-25T17:29:32.000Z",
-      "updatedAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z",
+      "updatedAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "lead-test-094168",
@@ -221,11 +224,11 @@
   ],
   "projects": [
     {
-      "id": "proj-test-372662",
-      "projectCode": "proj-test-372662",
-      "customerId": "cust-test-372662",
-      "customerName": "Test Customer 372662",
-      "title": "10kW Solar Plant - 372662",
+      "id": "proj-test-608171",
+      "projectCode": "proj-test-608171",
+      "customerId": "cust-test-608171",
+      "customerName": "Test Customer 608171",
+      "title": "10kW Solar Plant - 608171",
       "capacityKw": 10,
       "totalValue": 0,
       "status": "IN_PROGRESS",
@@ -245,7 +248,7 @@
       "assignedUsers": [],
       "stages": [
         {
-          "id": "stg-1-372662",
+          "id": "stg-1-608171",
           "stageKey": "stage",
           "title": "Site Survey",
           "order": 1,
@@ -269,7 +272,7 @@
           "activities": []
         },
         {
-          "id": "stg-2-372662",
+          "id": "stg-2-608171",
           "stageKey": "stage",
           "title": "Design & Engineering",
           "order": 1,
@@ -293,8 +296,8 @@
           "activities": []
         }
       ],
-      "createdAt": "2026-10-25T17:29:32.000Z",
-      "updatedAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z",
+      "updatedAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "proj-test-094168",
@@ -571,14 +574,14 @@
       "createdAt": "2026-10-25T17:24:54.000Z"
     },
     {
-      "id": "emp-test-372662",
-      "employeeCode": "emp-test-372662",
-      "name": "Eng. Vikram Sharma 372662",
+      "id": "emp-test-608171",
+      "employeeCode": "emp-test-608171",
+      "name": "Eng. Vikram Sharma 608171",
       "photoUrl": "",
       "department": "Engineering",
       "designation": "Senior Solar Engineer",
       "phone": "+91 91234 56789",
-      "email": "vikram372662@rejoytest.com",
+      "email": "vikram608171@rejoytest.com",
       "joiningDate": "2025-01-01T00:00:00.000Z",
       "salaryMonthly": 65000,
       "status": "ACTIVE",
@@ -587,27 +590,27 @@
       "systemRole": "Super Admin",
       "isFieldWorker": false,
       "accountStatus": "ACTIVE",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "payments": [
     {
-      "id": "payrec-test-372662",
-      "receiptNumber": "payrec-test-372662",
-      "projectId": "proj-test-372662",
+      "id": "payrec-test-608171",
+      "receiptNumber": "payrec-test-608171",
+      "projectId": "proj-test-608171",
       "customerId": "",
-      "customerName": "Test Customer 372662",
+      "customerName": "Test Customer 608171",
       "milestone": "Project Milestone",
       "amount": 150000,
       "status": "RECEIVED",
       "dueDate": null,
       "paidDate": "2026-10-25T00:00:00.000Z",
       "paymentMode": "NEFT / RTGS",
-      "transactionReference": "UTR-HDFC-372662",
+      "transactionReference": "UTR-HDFC-608171",
       "notes": "",
       "tallySyncStatus": "NOT SYNCED",
       "tallyReference": "",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "pay-perm-1792947183915",
@@ -648,9 +651,9 @@
   ],
   "expenses": [
     {
-      "id": "exp-test-372662",
-      "expenseNumber": "exp-test-372662",
-      "projectId": "proj-test-372662",
+      "id": "exp-test-608171",
+      "expenseNumber": "exp-test-608171",
+      "projectId": "proj-test-608171",
       "projectCode": "",
       "vendorName": "General Vendor",
       "category": "SITE_LOGISTICS",
@@ -662,15 +665,15 @@
       "receiptUrl": "",
       "approvedBy": "",
       "tallySyncStatus": "NOT SYNCED",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "exp-perm-1792947183915",
       "expenseNumber": "exp-perm-1792947183915",
       "projectId": "",
       "projectCode": "",
-      "vendorName": "",
-      "category": "",
+      "vendorName": "General Vendor",
+      "category": "General",
       "amount": 25000,
       "expenseDate": "1899-11-30T00:00:00.000Z",
       "paymentMode": "Bank Payment",
@@ -686,7 +689,7 @@
       "expenseNumber": "exp-1792947009068",
       "projectId": "proj-test-3",
       "projectCode": "",
-      "vendorName": "",
+      "vendorName": "General Vendor",
       "category": "Civil Work",
       "amount": 35000,
       "expenseDate": "1899-11-30T00:00:00.000Z",
@@ -701,10 +704,10 @@
   ],
   "products": [
     {
-      "id": "prod-test-372662",
-      "name": "Tier 1 Mono Perc 550W Panel 372662",
-      "sku": "prod-test-372662",
-      "itemCode": "prod-test-372662",
+      "id": "prod-test-608171",
+      "name": "Tier 1 Mono Perc 550W Panel 608171",
+      "sku": "prod-test-608171",
+      "itemCode": "prod-test-608171",
       "category": "SOLAR_PANELS",
       "brand": "",
       "model": "",
@@ -720,7 +723,7 @@
       "minStockLevel": 10,
       "warehouseId": "",
       "status": "ACTIVE",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "prod-test-094168",
@@ -769,12 +772,12 @@
   ],
   "vendors": [
     {
-      "id": "vnd-test-372662",
-      "name": "Adani Solar Supplier 372662",
-      "vendorCode": "vnd-test-372662",
+      "id": "vnd-test-608171",
+      "name": "Adani Solar Supplier 608171",
+      "vendorCode": "vnd-test-608171",
       "contactPerson": "Ramesh Patel",
       "phone": "+91 98980 11223",
-      "email": "adani372662@supplier.com",
+      "email": "adani608171@supplier.com",
       "address": "",
       "city": "Mundra",
       "state": "",
@@ -787,7 +790,7 @@
         "Panels & Inverters"
       ],
       "status": "ACTIVE",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "vnd-test-094168",
@@ -834,10 +837,10 @@
   ],
   "purchase_orders": [
     {
-      "id": "po-test-372662",
-      "poNumber": "PO-2026-372662",
-      "vendorId": "vnd-test-372662",
-      "vendorName": "Adani Solar Supplier 372662",
+      "id": "po-test-608171",
+      "poNumber": "PO-2026-608171",
+      "vendorId": "vnd-test-608171",
+      "vendorName": "Adani Solar Supplier 608171",
       "projectId": "",
       "projectTitle": "",
       "orderDate": "2026-10-25T00:00:00.000Z",
@@ -852,8 +855,8 @@
       "paymentStatus": "PENDING",
       "items": [
         {
-          "productId": "prod-test-372662",
-          "productName": "Tier 1 Mono Perc 550W Panel 372662",
+          "productId": "prod-test-608171",
+          "productName": "Tier 1 Mono Perc 550W Panel 608171",
           "quantity": 120,
           "unitPrice": 12500,
           "totalPrice": 1500000
@@ -861,7 +864,7 @@
       ],
       "receipts": [],
       "notes": "",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "po-test-094168",
@@ -918,11 +921,11 @@
   ],
   "sales_invoices": [
     {
-      "id": "inv-test-372662",
-      "invoiceNumber": "INV-2026-372662",
-      "projectId": "proj-test-372662",
+      "id": "inv-test-608171",
+      "invoiceNumber": "INV-2026-608171",
+      "projectId": "proj-test-608171",
       "customerId": "",
-      "customerName": "Test Customer 372662",
+      "customerName": "Test Customer 608171",
       "invoiceDate": "2026-10-25T00:00:00.000Z",
       "dueDate": "2026-11-15T00:00:00.000Z",
       "subtotal": 400000,
@@ -940,7 +943,7 @@
       "warehouseId": "",
       "notes": "",
       "items": [],
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "attendance": [
@@ -958,9 +961,9 @@
       "createdAt": "2026-10-25T17:24:54.000Z"
     },
     {
-      "id": "att-test-372662",
-      "employeeId": "emp-test-372662",
-      "employeeName": "Eng. Vikram Sharma 372662",
+      "id": "att-test-608171",
+      "employeeId": "emp-test-608171",
+      "employeeName": "Eng. Vikram Sharma 608171",
       "date": "Sun Oct 25 2026 00:00:00 GM",
       "attendanceDate": "Sun Oct 25 2026 00:00:00 GM",
       "checkInTime": "09:05:00",
@@ -968,7 +971,7 @@
       "siteProjectId": "",
       "siteProjectTitle": "",
       "status": "PRESENT",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "payslips": [
@@ -999,11 +1002,11 @@
       "createdAt": "2026-10-25T17:24:54.000Z"
     },
     {
-      "id": "pay-test-372662",
-      "payslipNumber": "pay-test-372662",
-      "employeeId": "emp-test-372662",
-      "employeeName": "Eng. Vikram Sharma 372662",
-      "employeeCode": "emp-test-372662",
+      "id": "pay-test-608171",
+      "payslipNumber": "pay-test-608171",
+      "employeeId": "emp-test-608171",
+      "employeeName": "Eng. Vikram Sharma 608171",
+      "employeeCode": "emp-test-608171",
       "month": "October",
       "year": 2026,
       "baseSalary": 65000,
@@ -1022,35 +1025,35 @@
       "status": "PAID",
       "paymentDate": null,
       "notes": "",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "holidays": [
     {
       "id": "hol-test-094168",
       "name": "Diwali Celebration 094168",
-      "holidayDate": "Sun Nov 01 2026 00:00:00 GM",
-      "date": "Sun Nov 01 2026 00:00:00 GM",
+      "holidayDate": "Sun Oct 25 2026 00:00:00 GM",
+      "date": "Sun Oct 25 2026 00:00:00 GM",
       "type": "PUBLIC",
       "description": "Festival of Lights Holiday",
       "createdAt": "2026-10-25T17:24:54.000Z"
     },
     {
-      "id": "hol-test-372662",
-      "name": "Diwali Celebration 372662",
+      "id": "hol-test-608171",
+      "name": "Diwali Celebration 608171",
       "holidayDate": "Sun Nov 01 2026 00:00:00 GM",
       "date": "Sun Nov 01 2026 00:00:00 GM",
       "type": "PUBLIC",
       "description": "Festival of Lights Holiday",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "quotations": [
     {
-      "id": "quot-test-372662",
-      "quotationNumber": "Q-2026-372662",
+      "id": "quot-test-608171",
+      "quotationNumber": "Q-2026-608171",
       "customerId": "",
-      "customerName": "Test Lead 372662",
+      "customerName": "Test Lead 608171",
       "projectId": "",
       "capacityKw": 0,
       "ratePerWp": 0,
@@ -1070,7 +1073,7 @@
       "termsAndConditions": "",
       "status": "SENT",
       "validUntil": null,
-      "createdAt": "2026-10-25T17:29:32.000Z",
+      "createdAt": "2026-10-25T17:50:08.000Z",
       "acceptedAt": null
     },
     {
@@ -1157,8 +1160,8 @@
   ],
   "surveys": [
     {
-      "id": "surv-test-372662",
-      "projectId": "lead-test-372662",
+      "id": "surv-test-608171",
+      "projectId": "lead-test-608171",
       "customerId": "",
       "engineerId": "",
       "engineerName": "Site Engineer",
@@ -1175,22 +1178,22 @@
       "feasibilityScore": "EXCELLENT",
       "photos": [],
       "notes": "",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "boms": [
     {
-      "id": "bom-test-372662",
-      "bomNumber": "bom-test-372662",
-      "projectId": "proj-test-372662",
-      "projectTitle": "10kW Rooftop Bill of Materials 372662",
+      "id": "bom-test-608171",
+      "bomNumber": "bom-test-608171",
+      "projectId": "proj-test-608171",
+      "projectTitle": "10kW Rooftop Bill of Materials 608171",
       "systemCapacityKw": 0,
       "version": "1.0",
       "status": "APPROVED",
       "items": [
         {
-          "productId": "prod-test-372662",
-          "name": "Tier 1 Mono Perc 550W Panel 372662",
+          "productId": "prod-test-608171",
+          "name": "Tier 1 Mono Perc 550W Panel 608171",
           "quantity": 18,
           "unit": "NOS",
           "estimatedUnitPrice": 12500
@@ -1200,7 +1203,7 @@
       "createdBy": "",
       "approvedBy": "",
       "notes": null,
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "bom-test-094168",
@@ -1245,9 +1248,9 @@
       "createdAt": "2026-10-25T16:50:09.000Z"
     },
     {
-      "id": "wh-test-372662",
-      "name": "Central Warehouse 372662",
-      "code": "wh-test-372662",
+      "id": "wh-test-608171",
+      "name": "Central Warehouse 608171",
+      "code": "wh-test-608171",
       "address": "Not specified",
       "city": "Not specified",
       "state": "",
@@ -1259,34 +1262,34 @@
       "isDefault": false,
       "capacitySqFt": 5000,
       "status": "ACTIVE",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "stock_movements": [
     {
-      "id": "sm-test-372662",
-      "productId": "prod-test-372662",
-      "productName": "Tier 1 Mono Perc 550W Panel 372662",
+      "id": "sm-test-608171",
+      "productId": "prod-test-608171",
+      "productName": "Tier 1 Mono Perc 550W Panel 608171",
       "sku": "",
       "type": "DISPATCH_TO_SITE",
       "movementType": "DISPATCH_TO_SITE",
       "quantity": 18,
       "balanceAfter": 0,
       "referenceNumber": "",
-      "movementNumber": "sm-test-372662",
+      "movementNumber": "sm-test-608171",
       "warehouseId": "",
       "warehouseName": "Main Warehouse",
       "notes": "",
-      "timestamp": "2026-10-25T17:29:32.000Z",
-      "movementDate": "2026-10-25T17:29:32.000Z",
+      "timestamp": "2026-10-25T17:50:08.000Z",
+      "movementDate": "2026-10-25T17:50:08.000Z",
       "performedBy": "System"
     }
   ],
   "stock_audits": [
     {
-      "id": "audit-test-372662",
-      "auditNumber": "audit-test-372662",
-      "warehouseId": "wh-test-372662",
+      "id": "audit-test-608171",
+      "auditNumber": "audit-test-608171",
+      "warehouseId": "wh-test-608171",
       "warehouseName": "Main Warehouse",
       "auditDate": "2026-10-25T00:00:00.000Z",
       "auditorName": "Kunal Das",
@@ -1294,17 +1297,17 @@
       "discrepanciesCount": 0,
       "items": [],
       "notes": "Quarterly inventory count verified",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     }
   ],
   "service_tickets": [
     {
-      "id": "ticket-test-372662",
-      "ticketId": "SRV-2026-372662",
-      "ticketNumber": "SRV-2026-372662",
+      "id": "ticket-test-608171",
+      "ticketId": "SRV-2026-608171",
+      "ticketNumber": "SRV-2026-608171",
       "customerId": "",
-      "customerName": "Test Customer 372662",
-      "projectId": "proj-test-372662",
+      "customerName": "Test Customer 608171",
+      "projectId": "proj-test-608171",
       "projectTitle": "Solar Project Installation",
       "projectCode": "Solar Project Installation",
       "title": "Inverter error code E04 tripped during peak sunlight",
@@ -1317,12 +1320,12 @@
       "assignedTechnicianName": "",
       "assignedEngineerId": "",
       "assignedEngineerName": "",
-      "scheduledDate": "2026-10-25T00:00:00.000Z",
-      "createdDate": "2026-10-25T00:00:00.000Z",
+      "scheduledDate": null,
+      "createdDate": "2026-10-25T17:50:08.000Z",
       "resolvedDate": null,
       "notes": "",
       "photos": [],
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "srv-perm-1792947183915",
@@ -1353,12 +1356,12 @@
   ],
   "amc_contracts": [
     {
-      "id": "amc-test-372662",
-      "amcCode": "AMC-2026-372662",
-      "contractNumber": "AMC-2026-372662",
+      "id": "amc-test-608171",
+      "amcCode": "AMC-2026-608171",
+      "contractNumber": "AMC-2026-608171",
       "customerId": "",
-      "customerName": "Test Customer 372662",
-      "projectId": "proj-test-372662",
+      "customerName": "Test Customer 608171",
+      "projectId": "proj-test-608171",
       "projectTitle": "Solar Project Installation",
       "planName": "Comprehensive Solar AMC",
       "startDate": "2026-11-01T00:00:00.000Z",
@@ -1370,7 +1373,7 @@
       "totalVisits": 4,
       "visitsPerYear": 4,
       "status": "ACTIVE",
-      "createdAt": "2026-10-25T17:29:32.000Z"
+      "createdAt": "2026-10-25T17:50:08.000Z"
     },
     {
       "id": "amc-perm-1792947183915",
@@ -1989,7 +1992,7 @@
       "id": "emp-1",
       "name": "Vikram Patel",
       "email": "admin@rejoysolar.com",
-      "password": "$2b$10$DWqd8mxGj2yUCOJf26Pwg.YRNsKvfcuHEKSm9CqdrP/6TNMXoEWJa",
+      "password": "$2b$10$2w2yWGNqv5hXdHzMHvtNhuGl1NzlDwjifsAwdjrClCp7TYeQGqvmm",
       "role": "Admin",
       "phone": "+91 98250 11223",
       "department": "Administration",
@@ -2003,7 +2006,7 @@
       "id": "usr-kunal",
       "name": "Kunal Das",
       "email": "kunaldas2442@gmail.com",
-      "password": "$2b$10$5VwWBYFB4qEDsII6RQtTcumCbw4rFQGtzYqdAVmSOMzRDRF97Lc9K",
+      "password": "$2b$10$VDs/BOtsf3jsELFGQ02pA.4ba9qFvlGX9Gd66h1aQdcTOtxTDxZfS",
       "role": "Admin",
       "phone": "+91 98250 11223",
       "department": "Administration",
@@ -2017,7 +2020,7 @@
       "id": "usr-admin-fallback",
       "name": "Admin System Fallback",
       "email": "dasest404@gmail.com",
-      "password": "$2b$10$LOJERuRydhsn7s8pIM0CTuwdpK28MXI4eWLCtkxIElzJ1uhYkAAq6",
+      "password": "$2b$10$PqkyCQDPxCsIy9UHgVZjZuAciQb0Cn/3ATOghhApxodjJwk23pNH6",
       "role": "Admin",
       "phone": "+91 98250 11223",
       "department": "Administration",

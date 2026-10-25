@@ -163,20 +163,24 @@ export const UserManagementView: React.FC = () => {
     const isCurrentlyActive = emp.accountStatus !== 'DISABLED' && emp.status !== 'INACTIVE';
     const newStatus = isCurrentlyActive ? 'DISABLED' : 'ACTIVE';
 
+    let updatedEmp: Employee | null = null;
     const updated = employees.map(e => {
       if (e.id === emp.id) {
-        return {
+        updatedEmp = {
           ...e,
           accountStatus: newStatus as any,
           loginEnabled: !isCurrentlyActive,
           status: isCurrentlyActive ? ('INACTIVE' as any) : ('ACTIVE' as any),
           updatedAt: new Date().toISOString()
         };
+        return updatedEmp;
       }
       return e;
     });
 
-    storageService.saveEmployees(updated);
+    if (updatedEmp) {
+      storageService.saveEmployee(updatedEmp);
+    }
     setEmployees(updated);
     triggerRefresh();
     showToast(
@@ -286,9 +290,10 @@ export const UserManagementView: React.FC = () => {
 
     if (editingEmployee) {
       // Update existing record
+      let updatedEmp: Employee | null = null;
       const updated = employees.map(emp => {
         if (emp.id === editingEmployee.id) {
-          return {
+          updatedEmp = {
             ...emp,
             name: cleanName,
             email: cleanEmail,
@@ -304,11 +309,16 @@ export const UserManagementView: React.FC = () => {
             accountStatus: formData.status === 'ACTIVE' ? ('ACTIVE' as const) : ('DISABLED' as const),
             updatedAt: new Date().toISOString()
           };
+          return updatedEmp;
         }
         return emp;
       });
 
-      storageService.saveEmployees(updated);
+      if (updatedEmp) {
+        storageService.saveEmployee(updatedEmp);
+      } else {
+        storageService.saveEmployees(updated);
+      }
       setEmployees(updated);
       showToast(`Employee ${cleanName} updated successfully`, 'success');
     } else {
@@ -334,9 +344,8 @@ export const UserManagementView: React.FC = () => {
         createdAt: new Date().toISOString()
       };
 
-      const updated = [newEmp, ...employees];
-      storageService.saveEmployees(updated);
-      setEmployees(updated);
+      storageService.saveEmployee(newEmp);
+      setEmployees([newEmp, ...employees]);
       showToast(`Employee ${newEmp.name} created successfully`, 'success');
     }
 
