@@ -86,6 +86,20 @@ export const UserManagementView: React.FC = () => {
     setEmployees(storageService.getEmployees());
   };
 
+  React.useEffect(() => {
+    // Initial fetch from backend to ensure latest MySQL records
+    storageService.hydrateFromBackend().catch(() => {});
+
+    const handleStorageUpdate = () => {
+      setEmployees(storageService.getEmployees());
+    };
+
+    window.addEventListener('solarpulse_storage_updated', handleStorageUpdate);
+    return () => {
+      window.removeEventListener('solarpulse_storage_updated', handleStorageUpdate);
+    };
+  }, []);
+
   // Filtered employees (internal staff / system users)
   const filteredUsers = useMemo(() => {
     return employees.filter(emp => {
@@ -357,7 +371,6 @@ export const UserManagementView: React.FC = () => {
       });
 
       if (updatedEmp) {
-        storageService.saveEmployee(updatedEmp);
         try {
           await apiClient.updateUser(editingEmployee.id, {
             name: cleanName,
@@ -373,14 +386,19 @@ export const UserManagementView: React.FC = () => {
           if (formData.tempPassword && formData.tempPassword.trim().length >= 6) {
             await apiClient.updateUserPassword(editingEmployee.id, formData.tempPassword.trim());
           }
+          storageService.saveEmployee(updatedEmp);
+          setEmployees(updated);
+          showToast(`Employee ${cleanName} updated successfully in MySQL`, 'success');
+          storageService.hydrateFromBackend().catch(() => {});
         } catch (err: any) {
-          console.warn('[UserManagement] API updateUser notice:', err);
+          console.error('[UserManagement] API updateUser error:', err);
+          showToast(err.message || 'Failed to update user in MySQL database.', 'error');
+          return;
         }
       } else {
         storageService.saveEmployees(updated);
+        setEmployees(updated);
       }
-      setEmployees(updated);
-      showToast(`Employee ${cleanName} updated successfully in MySQL`, 'success');
     } else {
       // Create new record
       const newEmpId = `emp-${Date.now()}`;
@@ -405,7 +423,6 @@ export const UserManagementView: React.FC = () => {
         createdAt: new Date().toISOString()
       };
 
-      storageService.saveEmployee(newEmp);
       try {
         await apiClient.saveUser({
           id: newEmpId,
@@ -420,11 +437,15 @@ export const UserManagementView: React.FC = () => {
           employee_id: cleanCode,
           login_enabled: formData.loginEnabled ? 1 : 0
         });
+        storageService.saveEmployee(newEmp);
+        setEmployees([newEmp, ...employees]);
+        showToast(`Employee ${newEmp.name} created and saved to MySQL successfully`, 'success');
+        storageService.hydrateFromBackend().catch(() => {});
       } catch (err: any) {
-        console.warn('[UserManagement] API saveUser notice:', err);
+        console.error('[UserManagement] API saveUser error:', err);
+        showToast(err.message || 'Failed to create user in MySQL database.', 'error');
+        return;
       }
-      setEmployees([newEmp, ...employees]);
-      showToast(`Employee ${newEmp.name} created and saved to MySQL successfully`, 'success');
     }
 
     triggerRefresh();

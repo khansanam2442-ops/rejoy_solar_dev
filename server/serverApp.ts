@@ -84,10 +84,8 @@ function getPusherServer(): Pusher | null {
 // Trigger initial server check & log diagnostics on startup
 getPusherServer();
 
-async function startServer() {
+async function createServerApp() {
   const app = express();
-  const rawPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const PORT = rawPort === 8080 ? 3000 : (rawPort || 3000);
 
   try {
     await dbManager.init();
@@ -846,10 +844,10 @@ async function startServer() {
     });
   });
 
-  // Create Employee Login Account endpoint
+  // Create Employee Login Account endpoint (Persisted to MySQL solar_users and solar_employees)
   app.post(['/api/admin/create-employee-account', '/api/admin/create-user'], async (req, res) => {
     try {
-      const { email, password, displayName, systemRole, employeeCode } = req.body || {};
+      const { email, password, displayName, systemRole, employeeCode, phone, department, designation } = req.body || {};
 
       if (!email || typeof email !== 'string' || !email.includes('@')) {
         res.status(400).json({ success: false, message: 'A valid email address is required.' });
@@ -861,13 +859,51 @@ async function startServer() {
         return;
       }
 
-      const uid = `usr-${employeeCode ? String(employeeCode).toLowerCase() : Date.now()}`;
-      res.json({
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanName = (displayName || cleanEmail.split('@')[0] || 'Solar Employee').trim();
+      const cleanRole = systemRole || 'Site Survey Engineer';
+      const cleanCode = employeeCode ? String(employeeCode).trim() : `EMP-${Math.floor(100 + Math.random() * 900)}`;
+      const uid = `usr-${employeeCode ? String(employeeCode).toLowerCase().replace(/[^a-z0-9_-]/g, '') : Date.now()}`;
+
+      // Save user record to MySQL with bcrypt password hashing
+      const savedUser = await dbManager.saveUser({
+        id: uid,
+        name: cleanName,
+        email: cleanEmail,
+        password: password.trim(),
+        role: cleanRole,
+        employee_id: cleanCode,
+        phone: phone || '',
+        department: department || 'Operations',
+        designation: designation || cleanRole,
+        status: 'ACTIVE'
+      });
+
+      // Save corresponding employee record to MySQL
+      await dbManager.saveEmployee({
+        id: uid,
+        employee_code: cleanCode,
+        employeeCode: cleanCode,
+        name: cleanName,
+        email: cleanEmail,
+        phone: phone || '',
+        department: department || 'Operations',
+        designation: designation || cleanRole,
+        system_role: cleanRole,
+        systemRole: cleanRole,
+        login_enabled: 1,
+        loginEnabled: true,
+        account_status: 'ACTIVE',
+        status: 'ACTIVE'
+      });
+
+      res.status(201).json({
         success: true,
-        uid,
-        message: 'Account provisioned successfully in local ERP directory.'
+        uid: savedUser.id || uid,
+        message: 'Account provisioned and securely saved to MySQL.'
       });
     } catch (err: any) {
+      console.error('[Create Employee Account Error]:', err?.message || err);
       res.status(400).json({
         success: false,
         message: err?.message || 'Failed to create user account.'
@@ -875,22 +911,41 @@ async function startServer() {
     }
   });
 
-  // Update Employee Login Account endpoint
+  // Update Employee Login Account endpoint (Persisted to MySQL)
   app.post(['/api/admin/update-employee-account', '/api/admin/update-user'], async (req, res) => {
     try {
-      const { uid } = req.body || {};
+      const { uid, password, disabled, name, displayName, systemRole, role, phone, department, designation, employeeCode } = req.body || {};
 
       if (!uid || typeof uid !== 'string') {
         res.status(400).json({ success: false, message: 'Employee Auth UID is required.' });
         return;
       }
 
+      // If password update requested, update via bcrypt
+      if (password && typeof password === 'string' && password.trim().length >= 6) {
+        await dbManager.updateUserPassword(uid, password.trim());
+      }
+
+      const statusValue = typeof disabled === 'boolean' ? (disabled ? 'DISABLED' : 'ACTIVE') : undefined;
+
+      const userUpdates: any = { id: uid };
+      if (name || displayName) userUpdates.name = (displayName || name).trim();
+      if (systemRole || role) userUpdates.role = systemRole || role;
+      if (phone) userUpdates.phone = phone.trim();
+      if (department) userUpdates.department = department.trim();
+      if (designation) userUpdates.designation = designation.trim();
+      if (employeeCode) userUpdates.employee_id = employeeCode.trim();
+      if (statusValue) userUpdates.status = statusValue;
+
+      await dbManager.saveUser(userUpdates);
+
       res.json({
         success: true,
         uid,
-        message: 'Account updated successfully.'
+        message: 'Account updated successfully in MySQL.'
       });
     } catch (err: any) {
+      console.error('[Update Employee Account Error]:', err?.message || err);
       res.status(400).json({
         success: false,
         message: err?.message || 'Failed to update employee account.'
@@ -1009,12 +1064,19 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createServerApp();
+  const rawPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const PORT = rawPort === 8080 ? 3000 : (rawPort || 3000);
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-export { startServer };
+export { createServerApp, startServer };
 
 // If executed directly as a standalone script (e.g., node dist/server.cjs)
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {

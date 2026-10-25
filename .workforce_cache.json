@@ -7,9 +7,9 @@
     "role": "Admin",
     "updatedAt": "2026-10-25T18:22:31.154Z",
     "lastSeenAt": "2026-10-25T18:22:31.154Z",
-    "isOnline": true,
+    "isOnline": false,
     "isSharingLocation": false,
     "hasLocation": false,
-    "status": "online"
+    "status": "offline"
   }
 ]

@@ -125,7 +125,7 @@ class MySqlDatabaseManager {
       const defaultUsers: any[] = [
         {
           id: 'usr-admin',
-          name: 'System Administrator',
+          name: 'Vikram Patel',
           email: 'admin@rejoysolar.com',
           password: '123456',
           role: 'Admin',
@@ -161,6 +161,123 @@ class MySqlDatabaseManager {
           employeeId: 'EMP-ADM-404',
           isFieldWorker: false,
           status: 'ACTIVE'
+        },
+        {
+          id: 'emp-2',
+          name: 'Amit Sharma',
+          email: 'projectmanager@rejoysolar.com',
+          password: '123456',
+          role: 'Project Manager',
+          phone: '+91 98250 22334',
+          department: 'Operations',
+          designation: 'Senior Project Manager',
+          employeeId: 'EMP002',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-3',
+          name: 'Rajesh Kumar',
+          email: 'survey@rejoysolar.com',
+          password: '123456',
+          role: 'Site Survey Engineer',
+          phone: '+91 98250 33445',
+          department: 'Engineering',
+          designation: 'Site Survey Engineer',
+          employeeId: 'EMP003',
+          isFieldWorker: true,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-4',
+          name: 'Priya Verma',
+          email: 'salesmanager@rejoysolar.com',
+          password: '123456',
+          role: 'Sales Manager',
+          phone: '+91 98250 44556',
+          department: 'Sales',
+          designation: 'Sales Manager',
+          employeeId: 'EMP004',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-5',
+          name: 'Rahul Mehta',
+          email: 'sales@rejoysolar.com',
+          password: '123456',
+          role: 'Sales Executive',
+          phone: '+91 98250 55667',
+          department: 'Sales',
+          designation: 'Senior Sales Executive',
+          employeeId: 'EMP005',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-10',
+          name: 'Sneha Kulkarni',
+          email: 'accountant@rejoysolar.com',
+          password: '123456',
+          role: 'Accountant',
+          phone: '+91 98250 66778',
+          department: 'Finance',
+          designation: 'Chief Accountant',
+          employeeId: 'EMP010',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-11',
+          name: 'Neha Gupta',
+          email: 'hr@rejoysolar.com',
+          password: '123456',
+          role: 'HR Manager',
+          phone: '+91 98250 77889',
+          department: 'HR',
+          designation: 'HR & Payroll Lead',
+          employeeId: 'EMP011',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-12',
+          name: 'Rohit Verma',
+          email: 'service@rejoysolar.com',
+          password: '123456',
+          role: 'Service Manager',
+          phone: '+91 98250 88990',
+          department: 'Service',
+          designation: 'Operations & Service Head',
+          employeeId: 'EMP012',
+          isFieldWorker: false,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-13',
+          name: 'Ketan Solanki',
+          email: 'technician@rejoysolar.com',
+          password: '123456',
+          role: 'Technician',
+          phone: '+91 98250 99001',
+          department: 'Service',
+          designation: 'Solar O&M Technician',
+          employeeId: 'EMP013',
+          isFieldWorker: true,
+          status: 'ACTIVE'
+        },
+        {
+          id: 'emp-14',
+          name: 'Suresh Patel',
+          email: 'civil@rejoysolar.com',
+          password: '123456',
+          role: 'Civil Team',
+          phone: '+91 98251 00112',
+          department: 'Civil',
+          designation: 'Civil Engineer',
+          employeeId: 'EMP014',
+          isFieldWorker: true,
+          status: 'ACTIVE'
         }
       ];
 
@@ -168,6 +285,33 @@ class MySqlDatabaseManager {
 
       // Load authoritative records from persistent disk storage
       this.loadDiskSnapshot();
+
+      // Ensure customer demo account exists if not loaded
+      const customers = this.getFallbackItems('customers');
+      if (!customers.some(c => c && c.email && c.email.toLowerCase() === 'customer@rejoysolar.com')) {
+        customers.push({
+          id: 'cust-demo-rejoy',
+          customerCode: 'CUST-REJOY-01',
+          name: 'ABC Industries Ltd.',
+          companyName: 'ABC Industries Ltd.',
+          customerType: 'Commercial',
+          phone: '+91 98250 12345',
+          email: 'customer@rejoysolar.com',
+          password: '123456',
+          siteAddress: 'Plot 42, GIDC Industrial Estate',
+          city: 'Ahmedabad',
+          state: 'Gujarat',
+          pincode: '382445',
+          gstNumber: '24AAACA0000A1Z5',
+          electricityConsumerNo: 'UGVCL-889922',
+          sanctionedLoadKw: 50,
+          status: 'ACTIVE',
+          activeProjectId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        this.setFallbackItems('customers', customers);
+      }
     } catch (e) {
       console.warn('[DB Manager] Notice loading initial collections:', e);
     }
@@ -179,7 +323,13 @@ class MySqlDatabaseManager {
     const isLocalHost = this.config.host === '127.0.0.1' || this.config.host === 'localhost' || this.config.host === '::1' || !this.config.host;
     if (isLocalHost) {
       console.log('[MySQL] Target host is local. Ensuring local MySQL/MariaDB daemon is running...');
-      await ensureLocalMySqlRunning(this.config.host || '127.0.0.1', this.config.port);
+      const isRunning = await ensureLocalMySqlRunning(this.config.host || '127.0.0.1', this.config.port);
+      if (!isRunning) {
+        this.isConnected = false;
+        this.pool = this.createDummyPool();
+        console.warn(`[MySQL] Standby mode active (${this.config.host}:${this.config.port} unreachable) — using persistent disk snapshot persistence: data/authoritative_store.json`);
+        return { connected: false, error: 'Local MySQL daemon is not running' };
+      }
     }
 
     try {
@@ -2768,13 +2918,30 @@ class MySqlDatabaseManager {
 
   public async saveUser(item: any): Promise<any> {
     this.assertDbConnected();
-    const existing = await this.getExistingRow('solar_users', item.id);
+    const cleanEmail = (item.email || '').toLowerCase().trim();
+
+    // Find existing user by ID OR email
+    let existing: any = null;
+    if (this.pool) {
+      const [rows]: any = await this.pool.query(
+        'SELECT * FROM `solar_users` WHERE `id` = ? OR (LOWER(`email`) = ? AND `email` != "") LIMIT 1',
+        [item.id, cleanEmail]
+      );
+      if (Array.isArray(rows) && rows.length > 0) existing = rows[0];
+    } else {
+      existing = (this.getFallbackItems('users') || []).find(
+        (u: any) => u.id === item.id || (u.email && cleanEmail && u.email.toLowerCase() === cleanEmail)
+      );
+    }
+
+    const canonicalId = existing?.id || item.id;
     const name = item.name ?? existing?.name ?? 'Solar User';
-    const email = (item.email ?? existing?.email ?? `${item.id}@rejoysolar.com`).toLowerCase().trim();
-    
+    const email = cleanEmail || existing?.email || `${canonicalId}@rejoysolar.com`;
+
     // Strict Argon2id / bcrypt password handling: NEVER store plaintext or revert to plaintext
     let password = existing?.password;
     const rawPass = item.password || item.tempPassword;
+    let hasNewPassword = false;
     if (rawPass && typeof rawPass === 'string' && rawPass.trim().length >= 6) {
       const cleanPass = rawPass.trim();
       if (!cleanPass.startsWith('$2a$') && !cleanPass.startsWith('$2b$') && !cleanPass.startsWith('$2y$') && !cleanPass.startsWith('$argon2id$')) {
@@ -2782,8 +2949,10 @@ class MySqlDatabaseManager {
       } else {
         password = cleanPass;
       }
+      hasNewPassword = true;
     } else if (!password) {
       password = await bcrypt.hash('User@12345', 10);
+      hasNewPassword = true;
     }
 
     const role = item.role ?? existing?.role ?? 'Super Admin';
@@ -2801,14 +2970,18 @@ class MySqlDatabaseManager {
           \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
-          \`name\` = VALUES(\`name\`), \`password\` = VALUES(\`password\`),
-          \`role\` = VALUES(\`role\`), \`phone\` = VALUES(\`phone\`),
-          \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
-          \`employee_id\` = VALUES(\`employee_id\`), \`is_field_worker\` = VALUES(\`is_field_worker\`),
+          \`name\` = VALUES(\`name\`),
+          \`role\` = VALUES(\`role\`),
+          \`phone\` = VALUES(\`phone\`),
+          \`department\` = VALUES(\`department\`),
+          \`designation\` = VALUES(\`designation\`),
+          \`employee_id\` = VALUES(\`employee_id\`),
+          \`is_field_worker\` = VALUES(\`is_field_worker\`),
           \`status\` = VALUES(\`status\`)
+          ${hasNewPassword ? ', `password` = VALUES(`password`)' : ''}
       `;
       await this.pool.query(sql, [
-        item.id,
+        canonicalId,
         name,
         email,
         password,
@@ -2823,7 +2996,7 @@ class MySqlDatabaseManager {
 
       // Synchronize employee directory in MySQL
       try {
-        const empCode = employeeId || `EMP-${item.id.replace(/[^0-9]/g, '').slice(-3) || '001'}`;
+        const empCode = employeeId || `EMP-${canonicalId.replace(/[^0-9]/g, '').slice(-3) || '001'}`;
         await this.pool.query(`
           INSERT INTO \`solar_employees\` (
             \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
@@ -2842,14 +3015,14 @@ class MySqlDatabaseManager {
             \`status\` = VALUES(\`status\`),
             \`account_status\` = VALUES(\`account_status\`)
         `, [
-          item.id,
+          canonicalId,
           empCode,
           name,
           department,
           designation,
           phone,
           email,
-          status,
+          status === 'DISABLED' ? 'INACTIVE' : 'ACTIVE',
           role,
           isFieldWorker,
           status === 'DISABLED' ? 'DISABLED' : 'ACTIVE'
@@ -2860,7 +3033,7 @@ class MySqlDatabaseManager {
     }
 
     const sanitizedUser = {
-      id: item.id,
+      id: canonicalId,
       name,
       email,
       role,
@@ -2873,7 +3046,7 @@ class MySqlDatabaseManager {
     };
 
     const items = this.getFallbackItems('users');
-    const idx = items.findIndex(u => u.id === item.id);
+    const idx = items.findIndex(u => u.id === canonicalId);
     if (idx >= 0) items[idx] = { ...items[idx], ...sanitizedUser };
     else items.push(sanitizedUser);
     this.setFallbackItems('users', items);
@@ -2883,8 +3056,8 @@ class MySqlDatabaseManager {
   public async deleteUser(id: string): Promise<boolean> {
     this.assertDbConnected();
     if (this.pool) {
-      await this.pool.query('DELETE FROM \`solar_users\` WHERE \`id\` = ?', [id]);
-      await this.pool.query('DELETE FROM \`solar_employees\` WHERE \`id\` = ?', [id]).catch(() => {});
+      await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]);
+      await this.pool.query('DELETE FROM `solar_employees` WHERE `id` = ?', [id]).catch(() => {});
     }
     const items = this.getFallbackItems('users').filter(u => u.id !== id);
     this.setFallbackItems('users', items);
@@ -2896,17 +3069,19 @@ class MySqlDatabaseManager {
     if (!newPass || typeof newPass !== 'string' || newPass.trim().length < 6) {
       throw new Error('Password must be at least 6 characters long.');
     }
-    const hashed = await bcrypt.hash(newPass.trim(), 10);
+    const cleanPass = newPass.trim();
+    const cleanId = id.trim();
+    const hashed = await bcrypt.hash(cleanPass, 10);
     this.assertDbConnected();
     if (this.pool) {
       const [res]: any = await this.pool.query(
-        'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?',
-        [hashed, id]
+        'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ? OR LOWER(`email`) = ?',
+        [hashed, cleanId, cleanId.toLowerCase()]
       );
       return res?.affectedRows > 0;
     }
     const items = this.getFallbackItems('users');
-    const user = items.find(u => u.id === id);
+    const user = items.find(u => u.id === cleanId || (u.email && u.email.toLowerCase() === cleanId.toLowerCase()));
     if (user) {
       user.password = hashed;
       this.setFallbackItems('users', items);
@@ -3398,6 +3573,10 @@ class MySqlDatabaseManager {
     return sanitized;
   }
 
+  public async verifyCredentials(email: string, pass: string): Promise<any | null> {
+    return this.authenticateUser(email, pass);
+  }
+
   public async authenticateUser(email: string, pass: string): Promise<any | null> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = pass.trim();
@@ -3449,6 +3628,22 @@ class MySqlDatabaseManager {
             isFieldWorker: false
           };
         }
+      }
+
+      const employees = this.getFallbackItems('employees');
+      const emp = employees.find((x: any) => x && x.email && String(x.email).trim().toLowerCase() === cleanEmail);
+      if (emp && cleanPass === '123456') {
+        return {
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          role: emp.systemRole || emp.designation || 'Technician',
+          phone: emp.phone,
+          department: emp.department,
+          designation: emp.designation,
+          employeeId: emp.employeeCode || emp.id,
+          isFieldWorker: Boolean(emp.isFieldWorker)
+        };
       }
 
       return null;
@@ -3556,6 +3751,22 @@ class MySqlDatabaseManager {
           designation: 'Customer',
           isFieldWorker: false,
           status: 'ACTIVE'
+        };
+      }
+      const employees = this.getFallbackItems('employees');
+      const emp = employees.find((x: any) => x && (x.id === idOrEmail || (x.email && String(x.email).trim().toLowerCase() === clean)));
+      if (emp) {
+        return {
+          id: emp.id,
+          name: emp.name,
+          email: emp.email,
+          role: emp.systemRole || emp.designation || 'Technician',
+          phone: emp.phone,
+          department: emp.department,
+          designation: emp.designation,
+          employeeId: emp.employeeCode || emp.id,
+          isFieldWorker: Boolean(emp.isFieldWorker),
+          status: emp.status || 'ACTIVE'
         };
       }
       return null;
