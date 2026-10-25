@@ -89,6 +89,12 @@ async function startServer() {
   const rawPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const PORT = rawPort === 8080 ? 3000 : (rawPort || 3000);
 
+  try {
+    await dbManager.init();
+  } catch (dbInitErr: any) {
+    console.error('[Server Startup] MySQL database initialization notice:', dbInitErr?.message || dbInitErr);
+  }
+
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use('/api', apiRouter);

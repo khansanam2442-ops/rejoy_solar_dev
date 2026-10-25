@@ -2,6 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { execSync } from 'child_process';
+import { ensureLocalMySqlRunning } from './server/mysqlDaemon';
+
+// Ensure local MySQL / MariaDB daemon is active before server starts
+try {
+  await ensureLocalMySqlRunning();
+} catch (daemonErr) {
+  console.warn('[Server Runner] MySQL daemon startup notice:', daemonErr);
+}
 
 // Resolve the pre-bundled production server path
 const distDir = path.resolve(process.cwd(), 'dist');
@@ -11,7 +19,11 @@ const distIndexPath = path.resolve(distDir, 'index.html');
 // Determine if running under Vite development mode or production
 const isRunningInDev = Boolean(
   process.env.VITE_DEV === 'true' ||
-  process.env.npm_lifecycle_event === 'dev'
+  process.env.npm_lifecycle_event === 'dev' ||
+  (process.env.NODE_ENV !== 'production' && !process.env.npm_lifecycle_event?.includes('start')) ||
+  process.argv.some(a => a.includes('tsx')) ||
+  process.execPath.includes('tsx') ||
+  process.env._?.includes('tsx')
 );
 
 if (!isRunningInDev) {

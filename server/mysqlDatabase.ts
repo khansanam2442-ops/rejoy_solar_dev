@@ -5,6 +5,7 @@ import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import { ensureLocalMySqlRunning } from './mysqlDaemon';
 
 export interface DbConfig {
   host: string;
@@ -175,11 +176,10 @@ class MySqlDatabaseManager {
   public async init(): Promise<{ connected: boolean; error?: string }> {
     this.config = getDbConfigFromEnv();
 
-    if (!this.config.host) {
-      this.isConnected = false;
-      this.pool = this.createDummyPool();
-      console.log('[MySQL] Standby in-memory mock store active (DB_HOST not specified in environment).');
-      return { connected: false, error: 'DB_HOST not specified in environment.' };
+    const isLocalHost = this.config.host === '127.0.0.1' || this.config.host === 'localhost' || this.config.host === '::1' || !this.config.host;
+    if (isLocalHost) {
+      console.log('[MySQL] Target host is local. Ensuring local MySQL/MariaDB daemon is running...');
+      await ensureLocalMySqlRunning(this.config.host || '127.0.0.1', this.config.port);
     }
 
     try {
@@ -190,11 +190,13 @@ class MySqlDatabaseManager {
           port: this.config.port,
           user: this.config.user,
           password: this.config.password,
-          connectTimeout: 4000
+          connectTimeout: 5000
         });
         await adminConn.query(`CREATE DATABASE IF NOT EXISTS \`${this.config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
         await adminConn.end();
-      } catch {}
+      } catch (adminErr: any) {
+        console.warn('[MySQL] Notice during database creation check:', adminErr?.message || adminErr);
+      }
 
       this.pool = mysql.createPool({
         host: this.config.host,
@@ -405,7 +407,7 @@ class MySqlDatabaseManager {
 
   private assertDbConnected(): void {
     if (!this.isConnected || !this.pool) {
-      return;
+      throw new Error('Live MySQL database connection is not active. Production database is unavailable.');
     }
   }
 
@@ -1112,14 +1114,14 @@ class MySqlDatabaseManager {
       item.receiptNumber || item.receiptNo || item.id,
       item.projectId || '',
       item.customerId || '',
-      item.customerName || '',
-      item.milestone || '',
+      item.customerName || 'Solar Customer',
+      item.milestone || 'Project Milestone',
       Number(item.amount) || 0,
       item.status || 'PENDING',
       item.dueDate ? String(item.dueDate).split('T')[0] : null,
-      item.paidDate ? String(item.paidDate).split('T')[0] : null,
-      item.paymentMode || 'Bank NEFT/RTGS',
-      item.transactionReference || item.transactionRef || '',
+      (item.paidDate || item.paymentDate) ? String(item.paidDate || item.paymentDate).split('T')[0] : null,
+      item.paymentMode || item.paymentMethod || 'Bank NEFT/RTGS',
+      item.transactionReference || item.transactionRef || item.referenceNumber || '',
       item.notes || '',
       item.tallySyncStatus || 'NOT SYNCED',
       item.tallyReference || ''
@@ -1189,12 +1191,12 @@ class MySqlDatabaseManager {
       item.expenseNumber || item.expenseNo || item.id,
       item.projectId || '',
       item.projectCode || '',
-      item.vendorName || '',
-      item.category || '',
+      item.vendorName || item.vendor || 'General Vendor',
+      item.category || item.expenseCategory || 'General',
       Number(item.amount) || 0,
       item.expenseDate ? String(item.expenseDate).split('T')[0] : new Date().toISOString().split('T')[0],
-      item.paymentMode || 'Bank Payment',
-      item.referenceNo || '',
+      item.paymentMode || item.paymentMethod || 'Bank Payment',
+      item.referenceNo || item.referenceNumber || '',
       item.notes || '',
       item.receiptUrl || '',
       item.approvedBy || '',
@@ -1560,7 +1562,7 @@ class MySqlDatabaseManager {
     const existing = await this.getExistingRow('solar_boms', item.id);
     const bomNumber = item.bomNumber ?? item.bom_number ?? existing?.bom_number ?? item.id;
     const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
-    const projectTitle = item.projectTitle ?? item.project_title ?? existing?.project_title ?? '';
+    const projectTitle = item.projectTitle ?? item.project_title ?? item.title ?? existing?.project_title ?? 'Solar Project Installation';
     const systemCapacityKw = Number(item.systemCapacityKw ?? item.capacityKw ?? item.system_capacity_kw ?? existing?.system_capacity_kw) || 0;
     const version = item.version ?? existing?.version ?? '1.0';
     const status = item.status ?? existing?.status ?? 'APPROVED';
@@ -1648,7 +1650,7 @@ class MySqlDatabaseManager {
     const invoiceNumber = item.invoiceNumber ?? item.invoice_number ?? existing?.invoice_number ?? item.id;
     const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
     const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Solar Customer';
     const rawInvDate = item.invoiceDate ?? item.invoice_date ?? existing?.invoice_date;
     const invoiceDate = this.toSqlDate(rawInvDate) ?? new Date().toISOString().split('T')[0];
     const rawDueDate = item.dueDate ?? item.due_date ?? existing?.due_date;
@@ -2348,20 +2350,20 @@ class MySqlDatabaseManager {
     `;
     await this.pool!.query(sql, [
       item.id,
-      item.projectId || '',
+      item.projectId || item.leadId || '',
       item.customerId || '',
       item.engineerId || '',
-      item.engineerName,
+      item.engineerName || item.engineer_name || 'Site Engineer',
       item.surveyDate ? String(item.surveyDate).split('T')[0] : new Date().toISOString().split('T')[0],
       item.status || 'APPROVED',
-      item.siteAddress || '',
+      item.siteAddress || item.address || 'Site Address',
       item.latitude || null,
       item.longitude || null,
-      item.locationName || '',
+      item.locationName || item.city || '',
       item.roofType || 'RCC Flat',
-      Number(item.roofAreaSqft) || 0,
-      Number(item.shadowFreeAreaSqft) || 0,
-      Number(item.recommendedCapacityKw) || 0,
+      Number(item.roofAreaSqft || item.roofAreaSqFt) || 0,
+      Number(item.shadowFreeAreaSqft || item.shadowFreeAreaSqFt) || 0,
+      Number(item.recommendedCapacityKw || item.proposedCapacityKw) || 0,
       item.feasibilityScore || 'EXCELLENT',
       JSON.stringify(item.photos || []),
       item.notes || ''
@@ -2429,9 +2431,9 @@ class MySqlDatabaseManager {
     const ticketId = item.ticketId ?? item.ticket_id ?? item.ticketNumber ?? item.ticket_number ?? existing?.ticket_id ?? item.id;
     const ticketNumber = item.ticketNumber ?? item.ticket_number ?? ticketId;
     const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Solar Customer';
     const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
-    const projectTitle = item.projectTitle ?? item.project_title ?? item.projectCode ?? existing?.project_title ?? '';
+    const projectTitle = item.projectTitle ?? item.project_title ?? item.projectCode ?? existing?.project_title ?? 'Solar Project Installation';
     const issue = item.issue ?? item.title ?? item.description ?? existing?.issue ?? 'Service Ticket Alert';
     const title = item.title ?? item.issue ?? existing?.title ?? 'Service Ticket Alert';
     const description = item.description ?? item.notes ?? item.issue ?? existing?.description ?? '';
@@ -2536,9 +2538,9 @@ class MySqlDatabaseManager {
     const amcCode = item.amcCode ?? item.amc_code ?? item.contractNumber ?? item.contract_number ?? existing?.amc_code ?? item.id;
     const contractNumber = item.contractNumber ?? item.contract_number ?? amcCode;
     const customerId = item.customerId ?? item.customer_id ?? existing?.customer_id ?? '';
-    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
+    const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? 'Solar Customer';
     const projectId = item.projectId ?? item.project_id ?? existing?.project_id ?? '';
-    const projectTitle = item.projectTitle ?? item.project_title ?? existing?.project_title ?? '';
+    const projectTitle = item.projectTitle ?? item.project_title ?? existing?.project_title ?? 'Solar Project Installation';
     const planName = item.planName ?? item.plan_name ?? existing?.plan_name ?? 'Comprehensive Solar AMC';
     const rawStart = item.startDate ?? item.start_date ?? existing?.start_date;
     const startDate = this.toSqlDate(rawStart) ?? new Date().toISOString().split('T')[0];
@@ -2873,9 +2875,7 @@ class MySqlDatabaseManager {
       throw new Error(`Invalid item payload for collection ${collection}`);
     }
 
-    if (!this.isConnected || !this.pool) {
-      return this.upsertFallback(collection, item);
-    }
+    this.assertDbConnected();
 
     switch (collection) {
       case 'customers': return this.saveCustomer(item);
@@ -2905,17 +2905,14 @@ class MySqlDatabaseManager {
       case 'acl_config': return this.saveAclConfig(item);
       case 'acl_audit_logs': return this.addAclAuditLog(item);
       default: {
-        return this.upsertFallback(collection, item);
+        throw new Error(`Collection "${collection}" is not supported for MySQL persistence.`);
       }
     }
   }
 
   public async deleteItem(collection: string, id: string): Promise<boolean> {
     if (!id) return false;
-
-    if (!this.isConnected || !this.pool) {
-      return this.deleteFallback(collection, id);
-    }
+    this.assertDbConnected();
 
     switch (collection) {
       case 'customers': return this.deleteCustomer(id);
@@ -2942,7 +2939,7 @@ class MySqlDatabaseManager {
       case 'notifications': return this.deleteNotification(id);
       case 'users': return this.deleteUser(id);
       default: {
-        return this.deleteFallback(collection, id);
+        throw new Error(`Collection "${collection}" is not supported for MySQL deletion.`);
       }
     }
   }
@@ -3525,17 +3522,35 @@ class MySqlDatabaseManager {
   // BOOTSTRAP EXPORT: AUTHORITATIVE DATA FROM MYSQL
   // ==========================================================
   public async getAllData(): Promise<Record<string, any>> {
-    if (!this.isConnected) {
-      const result: Record<string, any> = {
-        settings: this.settingsStore
-      };
-      this.collections.forEach((val, key) => {
-        result[key] = val;
-      });
-      return result;
-    }
     this.assertDbConnected();
-    await Promise.all([
+    const [
+      customers,
+      leads,
+      projects,
+      employees,
+      payments,
+      expenses,
+      products,
+      vendors,
+      purchase_orders,
+      sales_invoices,
+      attendance,
+      payslips,
+      holidays,
+      quotations,
+      surveys,
+      boms,
+      warehouses,
+      stock_movements,
+      stock_audits,
+      service_tickets,
+      amc_contracts,
+      notifications,
+      users,
+      settings,
+      acl_config,
+      acl_audit_logs
+    ] = await Promise.all([
       this.getCustomers(),
       this.getLeads(),
       this.getProjects(),
@@ -3564,14 +3579,34 @@ class MySqlDatabaseManager {
       this.getAclAuditLogs()
     ]);
 
-    const result: Record<string, any> = {
-      settings: this.settingsStore
+    return {
+      customers,
+      leads,
+      projects,
+      employees,
+      payments,
+      expenses,
+      products,
+      vendors,
+      purchase_orders,
+      sales_invoices,
+      attendance,
+      payslips,
+      holidays,
+      quotations,
+      surveys,
+      boms,
+      warehouses,
+      stock_movements,
+      stock_audits,
+      service_tickets,
+      amc_contracts,
+      notifications,
+      users,
+      settings,
+      acl_config,
+      acl_audit_logs
     };
-    this.collections.forEach((val, key) => {
-      result[key] = val;
-    });
-    this.saveDiskSnapshot();
-    return result;
   }
 }
 
