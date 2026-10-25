@@ -164,30 +164,40 @@ const KEY_TO_COLLECTION: Record<string, string> = {
 
 class StorageService {
   private memStore = new Map<string, any>();
-  private isHydrated: boolean = false;
+  public isHydrated: boolean = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
       try {
-        const obsoleteKeys = [
+        // Clean only legacy v1 keys, strictly preserving all v2 authoritative keys
+        const legacyV1Keys = [
           'solar_erp_leads', 'solar_erp_customers', 'solar_erp_projects', 'solar_erp_payments',
           'solar_erp_expenses', 'solar_erp_employees', 'solar_erp_attendance', 'solar_erp_payslips',
           'solar_erp_holidays', 'solar_erp_service_tickets', 'solar_erp_amc_contracts', 'solar_erp_notifications',
           'solar_erp_surveys', 'solar_erp_quotations', 'solar_erp_products', 'solar_erp_vendors',
           'solar_erp_purchase_orders', 'solar_erp_boms', 'solar_erp_sales_invoices', 'solar_erp_stock_movements',
-          'solar_erp_warehouses', 'solar_erp_stock_audits', 'solar_erp_acl_audit_logs', 'solar_erp_settings',
-          'solar_erp_leads_v2', 'solar_erp_customers_v2', 'solar_erp_projects_v2', 'solar_erp_payments_v2',
-          'solar_erp_expenses_v2', 'solar_erp_employees_v2', 'solar_erp_attendance_v2', 'solar_erp_payslips_v2',
-          'solar_erp_holidays_v2', 'solar_erp_service_tickets_v2', 'solar_erp_amc_contracts_v2', 'solar_erp_notifications_v2',
-          'solar_erp_surveys_v2', 'solar_erp_quotations_v2', 'solar_erp_products_v2', 'solar_erp_vendors_v2',
-          'solar_erp_purchase_orders_v2', 'solar_erp_boms_v2', 'solar_erp_sales_invoices_v2', 'solar_erp_stock_movements_v2',
-          'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2', 'solar_erp_settings_v2'
+          'solar_erp_warehouses', 'solar_erp_stock_audits', 'solar_erp_acl_audit_logs', 'solar_erp_settings'
         ];
-        obsoleteKeys.forEach(k => {
+        legacyV1Keys.forEach(k => {
           safeStorage.removeItem(k);
           safeSessionStorage.removeItem(k);
         });
+
+        // Pre-populate memStore immediately from safeStorage for instant render without white screens or blank lists
+        Object.values(STORAGE_KEYS).forEach(k => {
+          const cached = safeStorage.getItem(k);
+          if (cached) {
+            try {
+              const parsed = JSON.parse(cached);
+              if (parsed !== undefined && parsed !== null) {
+                this.memStore.set(k, parsed);
+              }
+            } catch {}
+          }
+        });
       } catch {}
+
+      // Asynchronously hydrate authoritative data from backend MySQL
       this.hydrateFromBackend();
     }
   }
@@ -203,18 +213,17 @@ class StorageService {
             const backendItems = json.data[collectionKey];
             if (backendItems !== undefined && backendItems !== null) {
               if (Array.isArray(backendItems)) {
-                this.memStore.set(storageKey, backendItems.filter(Boolean));
-              } else if (collectionKey === 'acl_config' && typeof backendItems === 'object') {
-                this.memStore.set(storageKey, backendItems);
+                const cleaned = backendItems.filter(Boolean);
+                this.memStore.set(storageKey, cleaned);
+                safeStorage.setItem(storageKey, JSON.stringify(cleaned));
               } else {
                 this.memStore.set(storageKey, backendItems);
+                safeStorage.setItem(storageKey, JSON.stringify(backendItems));
               }
             }
           });
           this.isHydrated = true;
-          setTimeout(() => {
-            window.dispatchEvent(new Event('solarpulse_storage_updated'));
-          }, 0);
+          window.dispatchEvent(new Event('solarpulse_storage_updated'));
         }
       }
     } catch (e) {
@@ -232,38 +241,56 @@ class StorageService {
         return val as T;
       }
     }
+    // Check safeStorage fallback
+    if (typeof window !== 'undefined') {
+      const stored = safeStorage.getItem(key);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed !== undefined && parsed !== null) {
+            this.memStore.set(key, parsed);
+            return parsed as T;
+          }
+        } catch {}
+      }
+    }
     this.memStore.set(key, defaultValue);
     return defaultValue;
   }
 
   private set<T>(key: string, data: T, singleItem?: any): void {
     this.memStore.set(key, data);
-    const collection = KEY_TO_COLLECTION[key];
-    if (collection && typeof window !== 'undefined') {
-      fetch('/api/sync/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collection, item: singleItem, items: singleItem ? undefined : data })
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, err.error || err.message || res.statusText);
-            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error || err.message || res.statusText } }));
-          }
+    if (typeof window !== 'undefined') {
+      safeStorage.setItem(key, JSON.stringify(data));
+      const collection = KEY_TO_COLLECTION[key];
+      if (collection) {
+        fetch('/api/sync/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collection, item: singleItem, items: singleItem ? undefined : data })
         })
-        .catch((e) => {
-          console.error(`[MySQL Network Error] Failed to sync ${collection}:`, e);
-          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: e.message } }));
-        });
-      setTimeout(() => {
+          .then(async (res) => {
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, err.error || err.message || res.statusText);
+              window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error || err.message || res.statusText } }));
+            }
+          })
+          .catch((e) => {
+            console.error(`[MySQL Network Error] Failed to sync ${collection}:`, e);
+            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: e.message } }));
+          });
         window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }, 0);
+      }
     }
   }
 
   private deleteSync(collection: string, id: string): void {
     if (typeof window !== 'undefined') {
+      const storageKey = Object.entries(KEY_TO_COLLECTION).find(([, col]) => col === collection)?.[0];
+      if (storageKey && this.memStore.has(storageKey)) {
+        safeStorage.setItem(storageKey, JSON.stringify(this.memStore.get(storageKey)));
+      }
       fetch('/api/sync/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -281,6 +308,7 @@ class StorageService {
           console.error(`[MySQL Network Error] Failed to sync delete for ${collection}:`, e);
           this.hydrateFromBackend();
         });
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
     }
   }
 

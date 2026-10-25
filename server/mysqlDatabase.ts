@@ -15,7 +15,7 @@ export interface DbConfig {
 }
 
 export function getDbConfigFromEnv(): DbConfig {
-  const host = (process.env.DB_HOST || '').trim();
+  const host = (process.env.DB_HOST || '127.0.0.1').trim();
   return {
     host,
     port: Number(process.env.DB_PORT) || 3306,
@@ -31,6 +31,49 @@ class MySqlDatabaseManager {
   private collections: Map<string, any[]> = new Map();
   private settingsStore: Record<string, any> = {};
   private config: DbConfig;
+  private snapshotFilePath = path.join(process.cwd(), 'data', 'authoritative_store.json');
+
+  private loadDiskSnapshot(): void {
+    try {
+      if (fs.existsSync(this.snapshotFilePath)) {
+        const raw = fs.readFileSync(this.snapshotFilePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.settings && typeof parsed.settings === 'object') {
+            this.settingsStore = { ...this.settingsStore, ...parsed.settings };
+          }
+          for (const [key, val] of Object.entries(parsed)) {
+            if (key !== 'settings' && Array.isArray(val)) {
+              this.collections.set(key, val);
+            }
+          }
+          console.log('[DB Manager] Loaded authoritative store from disk:', this.snapshotFilePath);
+        }
+      }
+    } catch (e) {
+      console.warn('[DB Manager] Notice reading disk snapshot:', e);
+    }
+  }
+
+  public saveDiskSnapshot(): void {
+    try {
+      const dataDir = path.dirname(this.snapshotFilePath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      const data: Record<string, any> = {
+        settings: this.settingsStore
+      };
+      this.collections.forEach((val, key) => {
+        data[key] = val;
+      });
+      const tempPath = `${this.snapshotFilePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+      fs.renameSync(tempPath, this.snapshotFilePath);
+    } catch (e) {
+      console.warn('[DB Manager] Notice saving disk snapshot:', e);
+    }
+  }
 
   private createDummyPool(): mysql.Pool {
     return {
@@ -121,6 +164,9 @@ class MySqlDatabaseManager {
       ];
 
       this.collections.set('users', defaultUsers);
+
+      // Load authoritative records from persistent disk storage
+      this.loadDiskSnapshot();
     } catch (e) {
       console.warn('[DB Manager] Notice loading initial collections:', e);
     }
@@ -176,11 +222,36 @@ class MySqlDatabaseManager {
       // Refresh in-memory state with authoritative data from MySQL
       await this.getAllData();
 
+      // If MySQL is newly connected and disk snapshot has records, synchronize to MySQL
+      try {
+        const collections = [
+          'customers', 'leads', 'projects', 'employees', 'payments', 'expenses',
+          'products', 'vendors', 'purchase_orders', 'sales_invoices', 'attendance',
+          'payslips', 'holidays', 'quotations', 'surveys', 'boms', 'warehouses',
+          'stock_movements', 'stock_audits', 'service_tickets', 'amc_contracts',
+          'notifications'
+        ];
+        for (const col of collections) {
+          const items = this.getFallbackItems(col);
+          if (Array.isArray(items) && items.length > 0) {
+            for (const it of items) {
+              if (it && it.id) {
+                try {
+                  await this.saveItem(col, it);
+                } catch {}
+              }
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.warn('[DB Manager] Notice sync from snapshot to MySQL:', syncErr);
+      }
+
       return { connected: true };
     } catch (err: any) {
       this.isConnected = false;
       this.pool = this.createDummyPool();
-      console.warn(`[MySQL] Standby mode active (${this.config.host}:${this.config.port} unreachable) — using in-memory mock persistence:`, err?.message || err);
+      console.warn(`[MySQL] Standby mode active (${this.config.host}:${this.config.port} unreachable) — using persistent disk snapshot persistence:`, err?.message || err);
       return { connected: false, error: err.message };
     }
   }
@@ -217,36 +288,6 @@ class MySqlDatabaseManager {
         const sql = fs.readFileSync(dumpPath, 'utf-8');
         await this.pool.query(sql);
         console.log('[MySQL] Schema and production baseline verified in MySQL database.');
-        // Purge dummy demo records from MySQL business tables
-        try {
-          await this.pool.query(`
-            DELETE FROM \`solar_customers\` WHERE \`id\` IN ('cust-manohar', 'cust-1', 'cust-2', 'cust-3', 'cust-4', 'cust-5');
-            DELETE FROM \`solar_leads\` WHERE \`id\` LIKE 'lead-%' AND \`customer_name\` IN ('Shree Ram Plastics', 'Kalyan Packaging Solutions', 'Silver Oak Elite Villas Society', 'Navkar Diamond Tools', 'Balaji Cold Chain Logistics');
-            DELETE FROM \`solar_projects\` WHERE \`id\` IN ('proj-manohar', 'proj-1', 'proj-2', 'proj-3', 'proj-4', 'proj-5');
-            DELETE FROM \`solar_project_stages\` WHERE \`project_id\` IN ('proj-manohar', 'proj-1', 'proj-2', 'proj-3', 'proj-4', 'proj-5');
-            DELETE FROM \`solar_payments\` WHERE \`id\` IN ('pay-1', 'pay-2', 'pay-3', 'pay-4', 'pay-5', 'pay-6');
-            DELETE FROM \`solar_expenses\` WHERE \`id\` IN ('exp-1', 'exp-2', 'exp-3', 'exp-4', 'exp-5', 'exp-6');
-            DELETE FROM \`solar_employees\` WHERE \`id\` LIKE 'emp-%' AND \`email\` LIKE '%@rejoysolar.com' AND \`email\` != 'admin@rejoysolar.com';
-            DELETE FROM \`solar_attendance\` WHERE \`id\` LIKE 'att-%';
-            DELETE FROM \`solar_payslips\` WHERE \`id\` LIKE 'ps-%';
-            DELETE FROM \`solar_holidays\` WHERE \`id\` LIKE 'hol-%';
-            DELETE FROM \`solar_products\` WHERE \`id\` LIKE 'prod-%';
-            DELETE FROM \`solar_vendors\` WHERE \`id\` LIKE 'vnd-%';
-            DELETE FROM \`solar_purchase_orders\` WHERE \`id\` LIKE 'po-%';
-            DELETE FROM \`solar_boms\` WHERE \`id\` LIKE 'bom-%';
-            DELETE FROM \`solar_sales_invoices\` WHERE \`id\` LIKE 'inv-%';
-            DELETE FROM \`solar_warehouses\` WHERE \`id\` IN ('wh-bhl-01', 'wh-1', 'wh-2', 'wh-3');
-            DELETE FROM \`solar_stock_movements\` WHERE \`id\` LIKE 'sm-%';
-            DELETE FROM \`solar_stock_audits\` WHERE \`id\` LIKE 'audit-%';
-            DELETE FROM \`solar_service_tickets\` WHERE \`id\` LIKE 'srv-%';
-            DELETE FROM \`solar_amc_contracts\` WHERE \`id\` LIKE 'amc-%';
-            DELETE FROM \`solar_notifications\` WHERE \`id\` LIKE 'notif-%';
-            DELETE FROM \`solar_quotations\` WHERE \`id\` IN ('quote-waaree-5kw-ref', 'quote-1');
-            DELETE FROM \`solar_site_surveys\` WHERE \`id\` IN ('surv-1');
-            DELETE FROM \`solar_users\` WHERE \`id\` LIKE 'demo-usr-%';
-          `);
-        } catch {}
-  
       }
 
       // Check and migrate columns on solar_customers if table already existed with older schema
@@ -374,6 +415,7 @@ class MySqlDatabaseManager {
 
   public setFallbackItems(collection: string, items: any[]): void {
     this.collections.set(collection, items);
+    this.saveDiskSnapshot();
   }
 
   public upsertFallback(collection: string, item: any): any {
@@ -874,11 +916,11 @@ class MySqlDatabaseManager {
             \`rejection_reason\` = VALUES(\`rejection_reason\`)
         `;
         await this.pool!.query(stageSql, [
-          s.id || `${item.id}-${s.stageKey}`,
+          s.id || `${item.id}-${s.stageKey || s.key || 'stage'}`,
           item.id,
-          s.stageKey,
-          s.title,
-          Number(s.order) || 1,
+          s.stageKey || s.key || 'stage',
+          s.title || s.name || 'Stage',
+          Number(s.order ?? s.stageOrder) || 1,
           s.department || 'Operations',
           s.assignedRole || 'Technician',
           s.assignedEmployeeId || '',
@@ -3528,6 +3570,7 @@ class MySqlDatabaseManager {
     this.collections.forEach((val, key) => {
       result[key] = val;
     });
+    this.saveDiskSnapshot();
     return result;
   }
 }
