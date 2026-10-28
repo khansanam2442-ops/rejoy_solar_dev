@@ -13,6 +13,7 @@ import { PayslipViewModal } from '../hrms/PayslipViewModal';
 import { HolidayModal } from '../hrms/HolidayModal';
 import { HolidayCalendarView } from '../hrms/HolidayCalendarView';
 import { HolidayManagementView } from '../hrms/HolidayManagementView';
+import { getCurrentSalaryMonth, getYearGroupedSalaryPeriods } from '../../utils/payrollPeriods';
 import {
   MapPin,
   Clock,
@@ -70,8 +71,9 @@ export const HrmsView: React.FC = () => {
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
   const [attendanceToEdit, setAttendanceToEdit] = useState<AttendanceRecord | null>(null);
 
-  // Payslip states
-  const [selectedCycle, setSelectedCycle] = useState<string>('September 2026');
+  // Payslip states (defaults dynamically to current month and year, e.g. October 2026)
+  const [selectedCycle, setSelectedCycle] = useState<string>(() => getCurrentSalaryMonth());
+  const payrollYearGroups = useMemo(() => getYearGroupedSalaryPeriods(), []);
   const [payrollStatusFilter, setPayrollStatusFilter] = useState<'ALL' | 'GENERATED' | 'PENDING'>('ALL');
   const [isPayslipModalOpen, setIsPayslipModalOpen] = useState(false);
   const [employeeForPayslip, setEmployeeForPayslip] = useState<Employee | null>(null);
@@ -942,15 +944,20 @@ export const HrmsView: React.FC = () => {
               <div className="flex items-center gap-2 pt-1 sm:pt-0">
                 <span className="text-xs font-bold text-slate-500">Period:</span>
                 <select
+                  aria-label="Filter by Payroll Period"
                   value={selectedCycle}
                   onChange={e => setSelectedCycle(e.target.value)}
-                  className="text-xs font-bold border border-slate-200 rounded-xl px-3 py-1.5 bg-slate-50 focus:ring-2 focus:ring-amber-500 text-slate-800"
+                  className="text-xs font-bold border border-slate-200 rounded-xl px-3 py-1.5 bg-slate-50 focus:ring-2 focus:ring-amber-500 text-slate-800 cursor-pointer shadow-2xs"
                 >
-                  <option value="September 2026">September 2026</option>
-                  <option value="October 2026">October 2026</option>
-                  <option value="August 2026">August 2026</option>
-                  <option value="July 2026">July 2026</option>
-                  <option value="June 2026">June 2026</option>
+                  {payrollYearGroups.map(group => (
+                    <optgroup key={group.year} label={group.groupLabel}>
+                      {group.options.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
             </div>
@@ -1332,6 +1339,7 @@ export const HrmsView: React.FC = () => {
           employee={employeeForPayslip}
           existingPayslip={payslipToEdit}
           allEmployees={employees}
+          initialMonth={selectedCycle}
         />
       )}
 

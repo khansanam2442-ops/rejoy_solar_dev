@@ -24,8 +24,17 @@ import {
   Gauge,
   ChevronDown,
   ChevronUp,
+  RotateCcw,
   Image as ImageIcon
 } from 'lucide-react';
+import {
+  MONTH_NAMES,
+  getCurrentSalaryMonth,
+  getYearGroupedSalaryPeriods,
+  getAvailableYears,
+  parseSalaryMonth,
+  formatSalaryMonth
+} from '../../utils/payrollPeriods';
 
 interface PayslipGeneratorModalProps {
   isOpen: boolean;
@@ -34,6 +43,7 @@ interface PayslipGeneratorModalProps {
   employee: Employee | null;
   existingPayslip?: Payslip | null;
   allEmployees: Employee[];
+  initialMonth?: string;
 }
 
 interface EditableExpenseItem {
@@ -66,24 +76,17 @@ const COMMON_DEDUCTION_PRESETS = [
   'Loan Recovery'
 ];
 
-const MONTH_OPTIONS = [
-  'September 2026',
-  'October 2026',
-  'August 2026',
-  'July 2026',
-  'June 2026',
-  'May 2026'
-];
-
 export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
   isOpen,
   onClose,
   onSave,
   employee: initialEmployee,
   existingPayslip,
-  allEmployees
+  allEmployees,
+  initialMonth
 }) => {
   const isEditing = Boolean(existingPayslip);
+  const defaultCurrentMonth = useMemo(() => getCurrentSalaryMonth(), []);
 
   // Settings
   const settings = storageService.getSettings();
@@ -98,12 +101,19 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
     return allEmployees.find(e => e.id === selectedEmployeeId) || initialEmployee || allEmployees[0];
   }, [allEmployees, selectedEmployeeId, initialEmployee]);
 
-  // Form states
-  const [salaryMonth, setSalaryMonth] = useState<string>('September 2026');
+  // Form states: defaults to dynamic current month and year (e.g. October 2026) or existing payslip / initialMonth
+  const [salaryMonth, setSalaryMonth] = useState<string>(
+    existingPayslip?.month || initialMonth || defaultCurrentMonth
+  );
   const [status, setStatus] = useState<Payslip['status']>('GENERATED');
   const [paymentMode, setPaymentMode] = useState<Payslip['paymentMode']>('NEFT/RTGS Bank Transfer');
   const [bankReferenceNo, setBankReferenceNo] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+
+  // Payroll period calculations & multi-year options (all 12 months & previous/current/future years)
+  const parsedPeriod = useMemo(() => parseSalaryMonth(salaryMonth), [salaryMonth]);
+  const yearGroups = useMemo(() => getYearGroupedSalaryPeriods(), []);
+  const availableYears = useMemo(() => getAvailableYears(), []);
 
   // Overtime states (store as number | string to allow fluid decimal typing)
   const [overtimeType, setOvertimeType] = useState<'CALCULATED' | 'DIRECT'>('CALCULATED');
@@ -133,27 +143,10 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
     initialEmpId?: string;
   }>({ isOpen: false });
 
-  // Month attendance logs matching currentEmployee and salaryMonth
-  const monthNameToNumber: Record<string, string> = useMemo(() => ({
-    january: '01',
-    february: '02',
-    march: '03',
-    april: '04',
-    may: '05',
-    june: '06',
-    july: '07',
-    august: '08',
-    september: '09',
-    october: '10',
-    november: '11',
-    december: '12'
-  }), []);
-
+  // Month attendance logs matching currentEmployee and salaryMonth (matches YYYY-MM)
   const monthAttendanceLogs = useMemo(() => {
     if (!currentEmployee || !salaryMonth) return [];
-    const [mName, year] = salaryMonth.split(' ');
-    const monthNum = monthNameToNumber[mName?.toLowerCase() || ''];
-    const prefix = monthNum && year ? `${year}-${monthNum}` : '';
+    const prefix = parsedPeriod.prefix;
 
     const allAttendance = storageService.getAttendance();
     return allAttendance.filter(a => {
@@ -161,7 +154,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
       const isMonth = prefix ? a.date.startsWith(prefix) : true;
       return isEmp && isMonth;
     });
-  }, [currentEmployee, salaryMonth, monthNameToNumber, isOpen]);
+  }, [currentEmployee, salaryMonth, parsedPeriod.prefix, isOpen]);
 
   const fuelAttendanceRecords = useMemo(() => {
     return monthAttendanceLogs.filter(a => a.fuelExpense && (a.fuelExpense.totalKmDriven || 0) > 0);
@@ -215,7 +208,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
 
       if (existingPayslip) {
         setSelectedEmployeeId(existingPayslip.employeeId);
-        setSalaryMonth(existingPayslip.month || 'September 2026');
+        setSalaryMonth(existingPayslip.month || initialMonth || defaultCurrentMonth);
         setStatus(existingPayslip.status || 'GENERATED');
         setPaymentMode(existingPayslip.paymentMode || 'NEFT/RTGS Bank Transfer');
         setBankReferenceNo(existingPayslip.bankReferenceNo || '');
@@ -245,7 +238,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
         const defaultEmp = initialEmployee || allEmployees[0];
         const targetEmpId = defaultEmp?.id || '';
         setSelectedEmployeeId(targetEmpId);
-        setSalaryMonth('September 2026');
+        setSalaryMonth(initialMonth || defaultCurrentMonth);
         setStatus('GENERATED');
         setPaymentMode('NEFT/RTGS Bank Transfer');
         setBankReferenceNo('');
@@ -574,9 +567,9 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
               {/* Employee Selection */}
-              <div className="sm:col-span-2">
+              <div className="lg:col-span-6">
                 <label htmlFor="employee-select" className="block text-[11px] font-bold text-slate-700 mb-1">
                   Employee Details
                 </label>
@@ -614,23 +607,89 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                 )}
               </div>
 
-              {/* Salary Month */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Salary Period / Month <span className="text-rose-500">*</span></span>
+              {/* Salary Period / Month */}
+              <div className="lg:col-span-6 space-y-1.5">
+                <label htmlFor="salary-period-select" className="block text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Select Salary Period / Month <span className="text-rose-500">*</span></span>
+                  </span>
+                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-300">
+                    Selected: {salaryMonth}
+                  </span>
                 </label>
+
+                {/* Primary All-12-Months & Multi-Year Dropdown */}
                 <select
+                  id="salary-period-select"
+                  aria-label="Select Salary Period / Month"
                   value={salaryMonth}
                   onChange={e => setSalaryMonth(e.target.value)}
-                  className="w-full text-xs font-semibold border border-slate-200 rounded-xl p-2.5 bg-white focus:ring-2 focus:ring-amber-500"
+                  className="w-full text-xs font-bold border border-slate-300 rounded-xl p-2.5 bg-white text-slate-800 focus:ring-2 focus:ring-amber-500 shadow-2xs cursor-pointer"
                 >
-                  {MONTH_OPTIONS.map(m => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
+                  {yearGroups.map(group => (
+                    <optgroup key={group.year} label={group.groupLabel}>
+                      {group.options.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
+
+                {/* Secondary Quick Month (Jan–Dec) & Year Combinator */}
+                <div className="p-2 bg-slate-100/80 rounded-xl border border-slate-200 grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label htmlFor="quick-month-select" className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                      Month (Jan–Dec)
+                    </label>
+                    <select
+                      id="quick-month-select"
+                      aria-label="Quick Select Month"
+                      value={parsedPeriod.month}
+                      onChange={e => setSalaryMonth(formatSalaryMonth(e.target.value, parsedPeriod.year))}
+                      className="w-full text-xs font-semibold border border-slate-300 rounded-lg py-1.5 px-2 bg-white text-slate-800 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                    >
+                      {MONTH_NAMES.map(m => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="quick-year-select" className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                      Year (Previous, Current, Future)
+                    </label>
+                    <select
+                      id="quick-year-select"
+                      aria-label="Quick Select Year"
+                      value={parsedPeriod.year}
+                      onChange={e => setSalaryMonth(formatSalaryMonth(parsedPeriod.month, Number(e.target.value)))}
+                      className="w-full text-xs font-semibold border border-slate-300 rounded-lg py-1.5 px-2 bg-white text-slate-800 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                    >
+                      {availableYears.map(y => (
+                        <option key={y} value={y}>
+                          {y}{y === new Date().getFullYear() ? ' (Current)' : y > new Date().getFullYear() ? ' (Future)' : ' (Previous)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {salaryMonth !== defaultCurrentMonth && (
+                  <div className="flex justify-end pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setSalaryMonth(defaultCurrentMonth)}
+                      className="text-[10px] font-semibold text-amber-700 hover:text-amber-800 underline inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>Reset to current month ({defaultCurrentMonth})</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

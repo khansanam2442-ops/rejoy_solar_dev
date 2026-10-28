@@ -41,6 +41,7 @@ import { SystemAclConfig, AclAuditLogEntry } from '../types/acl';
 import { DEFAULT_SYSTEM_ACL_CONFIG } from './aclDefaults';
 import { safeStorage, safeSessionStorage } from './safeStorage';
 import { buildStandardWorkflowStages, WorkflowProgressLevel } from './workflowStages';
+import { getCurrentSalaryMonth } from '../utils/payrollPeriods';
 import {
   validateCustomer,
   validateProduct,
@@ -1389,7 +1390,7 @@ class StorageService {
         employeeName: p.employeeName || 'Employee',
         department: p.department || 'Operations',
         designation: p.designation || 'Specialist',
-        month: p.month || 'September 2026',
+        month: p.month || getCurrentSalaryMonth(),
         generatedDate: p.generatedDate || new Date().toISOString().slice(0, 10),
         baseSalary,
         overtimeType: p.overtimeType || 'DIRECT',
