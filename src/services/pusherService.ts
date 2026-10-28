@@ -5,6 +5,7 @@ import {
   PusherConnectionState,
   RealtimeTransportState
 } from '../types/tracking';
+import { apiClient } from './apiClient';
 
 const DEFAULT_CHANNEL_NAME = 'my-channel';
 const DEFAULT_LOCATION_EVENT = 'location.updated';
@@ -79,7 +80,9 @@ class PusherService {
       // 2. Fetch live runtime config from backend /api/pusher/config
       // This guarantees production connects even if frontend was built before .env was configured
       try {
-        const res = await fetch('/api/pusher/config');
+        const res = await fetch(`${apiClient.getBaseUrl()}/pusher/config`, {
+          headers: apiClient.getAuthHeaders()
+        });
         if (res.ok) {
           const config = await res.json();
           const serverKey = cleanConfigVal(config.key);
@@ -186,8 +189,9 @@ class PusherService {
     if (this.sseSource || typeof window === 'undefined') return;
 
     try {
-      console.info('[Pusher] Starting SSE fallback (/api/workforce/stream)...');
-      this.sseSource = new EventSource('/api/workforce/stream');
+      const sseUrl = `${apiClient.getBaseUrl()}/workforce/stream`;
+      console.info(`[Pusher] Starting SSE fallback (${sseUrl})...`);
+      this.sseSource = new EventSource(sseUrl);
 
       this.sseSource.onopen = () => {
         console.log('[Pusher] SSE fallback connected successfully');
@@ -290,12 +294,13 @@ class PusherService {
 
     // 2. Transmit to backend endpoint
     try {
-      const res = await fetch('/api/update-location', {
+      const url = `${apiClient.getBaseUrl()}/update-location`;
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {
+        headers: apiClient.getAuthHeaders({
           'Content-Type': 'application/json',
           'x-user-id': payload.userId
-        },
+        }),
         body: JSON.stringify(payload)
       });
       return res.ok;
@@ -317,13 +322,14 @@ class PusherService {
     isSharingLocation: boolean;
   }): Promise<boolean> {
     try {
-      const res = await fetch('/api/presence/heartbeat', {
+      const url = `${apiClient.getBaseUrl()}/presence/heartbeat`;
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {
+        headers: apiClient.getAuthHeaders({
           'Content-Type': 'application/json',
           'x-user-id': data.userId,
           'x-user-role': data.role || ''
-        },
+        }),
         body: JSON.stringify(data)
       });
       return res.ok;
@@ -340,12 +346,13 @@ class PusherService {
     try {
       const payload = { userId, email, employeeCode };
       const body = JSON.stringify(payload);
+      const url = `${apiClient.getBaseUrl()}/presence/offline`;
 
       // If sendBeacon is available during window unload/pagehide, use it
       if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
         try {
           const blob = new Blob([body], { type: 'application/json' });
-          if (navigator.sendBeacon('/api/presence/offline', blob)) {
+          if (navigator.sendBeacon(url, blob)) {
             return true;
           }
         } catch {
@@ -353,12 +360,12 @@ class PusherService {
         }
       }
 
-      const res = await fetch('/api/presence/offline', {
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {
+        headers: apiClient.getAuthHeaders({
           'Content-Type': 'application/json',
           'x-user-id': userId
-        },
+        }),
         body,
         keepalive: true
       });

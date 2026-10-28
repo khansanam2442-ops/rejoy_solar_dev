@@ -184,39 +184,30 @@ async function createServerApp() {
     return [];
   }
 
-  // Deduplicate and resolve canonical employee ID (e.g. emp-1 vs admin@rejoysolar.com)
+  // Deduplicate and resolve canonical employee ID
   function resolveCanonicalWorkforceKey(id: string, email?: string, employeeCode?: string, name?: string): string {
     const cleanId = (id || '').trim();
     const cleanEmail = (email || (cleanId.includes('@') ? cleanId : '')).trim().toLowerCase();
     const cleanCode = (employeeCode || '').trim().toUpperCase();
     const cleanName = (name || '').trim().toLowerCase();
 
-    // If ID is already a standard employee code (e.g. emp-1, EMP001), prefer it
-    if (cleanId.startsWith('emp-') || cleanId.startsWith('EMP')) {
+    // If ID is valid and not an email, preserve it directly (e.g. emp-1, emp-1792954919064, usr-kunal, demo-usr-2)
+    if (cleanId && !cleanId.includes('@')) {
       return cleanId;
     }
 
     // Check if any existing record in memory matches email or code
     for (const [key, rec] of workforceState.entries()) {
-      if (key.startsWith('emp-') || key.startsWith('EMP')) {
-        if (cleanEmail && rec.email && rec.email.trim().toLowerCase() === cleanEmail) {
-          return key;
-        }
-        if (cleanCode && rec.employeeCode && rec.employeeCode.trim().toUpperCase() === cleanCode) {
-          return key;
-        }
-        if (cleanName && rec.name && rec.name.trim().toLowerCase() === cleanName) {
-          return key;
-        }
+      if (cleanEmail && rec.email && rec.email.trim().toLowerCase() === cleanEmail) {
+        return key;
+      }
+      if (cleanCode && rec.employeeCode && rec.employeeCode.trim().toUpperCase() === cleanCode) {
+        return key;
+      }
+      if (cleanName && rec.name && rec.name.trim().toLowerCase() === cleanName) {
+        return key;
       }
     }
-
-    // Known canonical system mappings
-    if (cleanEmail === 'admin@rejoysolar.com' || cleanName === 'vikram patel') return 'emp-1';
-    if (cleanEmail === 'projectmanager@rejoysolar.com' || cleanName === 'amit sharma') return 'emp-2';
-    if (cleanEmail === 'survey@rejoysolar.com' || cleanName === 'rajesh kumar' || cleanId === 'test-engineer-1') return 'emp-3';
-    if (cleanEmail === 'salesmanager@rejoysolar.com' || cleanName === 'priya verma') return 'emp-4';
-    if (cleanEmail === 'civil@rejoysolar.com' || cleanName === 'suresh patel') return 'emp-14';
 
     return cleanId || cleanEmail || cleanCode || 'unknown-user';
   }
@@ -456,69 +447,58 @@ async function createServerApp() {
   }
 
   // Admin Initial Load: Fetch All Field Employees' Latest Known Locations & Presence
-  app.get(['/api/workforce/locations', '/api/workforce/status', '/api/locations'], (req, res) => {
+  // Admin Initial Load: Fetch All Field Employees' Latest Known Locations & Presence
+  app.get(['/api/workforce/locations', '/api/workforce/status', '/api/locations'], async (req, res) => {
     if (isCustomerRequest(req)) {
       res.status(403).json({ success: false, error: 'Customer accounts cannot access workforce tracking.' });
       return;
     }
 
-    syncWorkforceState();
-    const now = Date.now();
+    try {
+      // 1. Fetch persistent MySQL records as single source of truth
+      const dbRecords = await dbManager.getWorkforceLocations();
 
-    // Deduplicate by canonical user key
-    const deduplicated = new Map<string, WorkforceRecord>();
-    for (const [key, rec] of workforceState.entries()) {
-      const canonicalKey = resolveCanonicalWorkforceKey(rec.userId, rec.email, rec.employeeCode, rec.name);
-      const existing = deduplicated.get(canonicalKey);
-      if (!existing) {
-        deduplicated.set(canonicalKey, { ...rec, userId: canonicalKey });
-      } else {
-        const recTime = rec.lastSeenAt ? new Date(rec.lastSeenAt).getTime() : 0;
-        const exTime = existing.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
-        if (recTime >= exTime) {
-          deduplicated.set(canonicalKey, {
-            ...existing,
-            ...rec,
-            userId: canonicalKey,
-            latitude: rec.latitude !== undefined ? rec.latitude : existing.latitude,
-            longitude: rec.longitude !== undefined ? rec.longitude : existing.longitude,
-            hasLocation: Boolean(rec.latitude !== undefined || existing.latitude !== undefined)
-          });
+      // 2. Synchronize with in-memory workforceState
+      dbRecords.forEach((rec) => {
+        if (rec && rec.userId) {
+          const canonicalKey = resolveCanonicalWorkforceKey(rec.userId, rec.email, rec.employeeCode, rec.name);
+          const existing = workforceState.get(canonicalKey);
+          if (!existing) {
+            workforceState.set(canonicalKey, { ...rec, userId: canonicalKey });
+          } else {
+            const dbTime = rec.lastSeenAt ? new Date(rec.lastSeenAt).getTime() : 0;
+            const memTime = existing.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
+            if (dbTime >= memTime) {
+              workforceState.set(canonicalKey, {
+                ...existing,
+                ...rec,
+                userId: canonicalKey
+              });
+            }
+          }
         }
-      }
+      });
 
-      // If key in memory was an alias, remove it
-      if (key !== canonicalKey) {
-        workforceState.delete(key);
-      }
+      const records = dbRecords && dbRecords.length > 0 ? dbRecords : Array.from(workforceState.values());
+
+      res.json({
+        success: true,
+        count: records.length,
+        locations: records,
+        workforce: records,
+        users: records
+      });
+    } catch (err: any) {
+      console.error('[Workforce Locations] Error:', err);
+      const fallbackList = Array.from(workforceState.values());
+      res.json({
+        success: true,
+        count: fallbackList.length,
+        locations: fallbackList,
+        workforce: fallbackList,
+        users: fallbackList
+      });
     }
-
-    // Re-align workforceState with deduplicated records
-    deduplicated.forEach((val, key) => {
-      workforceState.set(key, val);
-    });
-
-    const records = Array.from(deduplicated.values()).map((rec) => {
-      const lastSeen = rec.lastSeenAt ? new Date(rec.lastSeenAt).getTime() : 0;
-      const isOnline = Boolean(rec.isOnline) && (Math.abs(now - lastSeen) < PRESENCE_TIMEOUT_MS);
-      return {
-        ...rec,
-        isOnline,
-        status: !isOnline
-          ? 'offline'
-          : rec.hasLocation && typeof rec.latitude === 'number' && typeof rec.longitude === 'number'
-          ? (rec.speed && rec.speed > 3 ? 'moving' : 'idle')
-          : 'online'
-      };
-    });
-
-    res.json({
-      success: true,
-      count: records.length,
-      locations: records,
-      workforce: records,
-      users: records
-    });
   });
 
   // Realtime Workforce Server-Sent Events (SSE) Stream
@@ -602,11 +582,21 @@ async function createServerApp() {
 
       workforceState.set(targetId, updated);
       
-      // CRITICAL REQUIREMENT 4: Verify that heartbeat data is actually persisted BEFORE returning success
-      const persisted = persistWorkforceState();
-      if (!persisted) {
-        console.warn(`[Presence] Warning: Persistence returned false for ${targetId}`);
+      // Persist to MySQL as authoritative store
+      try {
+        await dbManager.saveWorkforceHeartbeat({
+          userId: targetId,
+          employeeCode: updated.employeeCode,
+          name: updated.name,
+          email: updated.email,
+          role: updated.role,
+          isSharingLocation: updated.isSharingLocation
+        });
+      } catch (dbErr) {
+        console.warn('[Presence] MySQL save heartbeat error:', dbErr);
       }
+
+      persistWorkforceState();
       console.log(`[Presence] workforce state updated & persisted ${targetId}`);
 
       // Broadcast presence update with full metadata
@@ -668,6 +658,12 @@ async function createServerApp() {
         existing.lastSeenAt = timestamp;
         workforceState.set(existing.userId, existing);
         persistWorkforceState();
+      }
+
+      try {
+        await dbManager.setWorkforceOffline(targetId);
+      } catch (dbErr) {
+        console.warn('[Presence] MySQL setWorkforceOffline error:', dbErr);
       }
 
       await broadcastWorkforceEvent('presence.updated', {
@@ -769,6 +765,26 @@ async function createServerApp() {
 
       workforceState.set(targetId, updatedRecord);
       persistWorkforceState();
+
+      // Persist to MySQL as authoritative store
+      try {
+        await dbManager.saveWorkforceLocation({
+          userId: targetId,
+          employeeCode: updatedRecord.employeeCode,
+          name: updatedRecord.name,
+          email: existing?.email,
+          role: updatedRecord.role,
+          latitude: numLat,
+          longitude: numLng,
+          accuracy: payload.accuracy,
+          heading: payload.heading,
+          speed: numSpeed,
+          batteryLevel: payload.batteryLevel,
+          activity: payload.activity
+        });
+      } catch (dbErr) {
+        console.warn('[Location Update] MySQL save location error:', dbErr);
+      }
 
       payload.userId = targetId;
 

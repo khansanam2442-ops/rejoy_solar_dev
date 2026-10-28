@@ -72,6 +72,7 @@ export const AdminDashboard: React.FC = () => {
   );
 
   useEffect(() => {
+    liveLocationService.fetchServerLocations();
     const unsub = liveLocationService.subscribe((locs) => {
       setLiveLocations(locs);
     });

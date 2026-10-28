@@ -2874,6 +2874,364 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
     exit;
 }
 
+// ==========================================================
+// 28. WORKFORCE LIVE TRACKING & FIELD PRESENCE ENDPOINTS
+// ==========================================================
+
+function isCustomerRequestPhp() {
+    $role = $_SERVER['HTTP_X_USER_ROLE'] ?? $_GET['role'] ?? '';
+    if (empty($role) && !empty($GLOBALS['body']['role'])) {
+        $role = $GLOBALS['body']['role'];
+    }
+    return strtolower(trim($role)) === 'customer';
+}
+
+// GET /api/workforce/locations - All Active & Historic Workforce Locations (Admin & Internal Staff Only)
+if ($method === 'GET' && in_array($cleanPath, ['/workforce/locations', '/workforce/status', '/locations', '/workforce/locations/', '/workforce/status/', '/locations/'])) {
+    if (isCustomerRequestPhp()) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Customer accounts cannot access workforce tracking.']);
+        exit;
+    }
+
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $records = [];
+    try {
+        $sql = "
+            SELECT
+                user_id, employee_code, name, email, role,
+                latitude, longitude, accuracy, heading, speed, battery_level, activity,
+                is_online, is_sharing_location, status,
+                DATE_FORMAT(last_seen_at, '%Y-%m-%dT%H:%i:%s.000Z') as last_seen_at_iso,
+                DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%s.000Z') as updated_at_iso,
+                TIMESTAMPDIFF(SECOND, last_seen_at, NOW()) as seconds_since_seen
+            FROM `solar_workforce_locations`
+            ORDER BY last_seen_at DESC
+        ";
+        $stmt = $pdo->query($sql);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $nowIso = gmdate('Y-m-d\TH:i:s.000\Z');
+
+        foreach ($rows as $r) {
+            $sec = ($r['seconds_since_seen'] !== null) ? intval($r['seconds_since_seen']) : 999999;
+            $isOnline = (intval($r['is_online']) === 1) && ($sec <= 120);
+            $hasCoords = ($r['latitude'] !== null) && ($r['longitude'] !== null) && ($r['latitude'] !== '') && ($r['longitude'] !== '');
+            $speed = ($r['speed'] !== null) ? floatval($r['speed']) : 0;
+
+            $status = $r['status'] ?: 'offline';
+            if (!$isOnline) {
+                $status = 'offline';
+            } elseif ($hasCoords) {
+                $status = ($speed > 3) ? 'moving' : 'idle';
+            } else {
+                $status = 'online';
+            }
+
+            $activity = $r['activity'] ?: ($isOnline ? ($hasCoords ? (($speed > 3) ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline');
+
+            $records[] = [
+                'userId' => $r['user_id'],
+                'employeeCode' => $r['employee_code'] ?: $r['user_id'],
+                'name' => $r['name'] ?: ('Field Worker (' . $r['user_id'] . ')'),
+                'email' => $r['email'] ?: '',
+                'role' => $r['role'] ?: 'Field Engineer',
+                'latitude' => $hasCoords ? floatval($r['latitude']) : null,
+                'longitude' => $hasCoords ? floatval($r['longitude']) : null,
+                'accuracy' => ($r['accuracy'] !== null) ? floatval($r['accuracy']) : null,
+                'heading' => ($r['heading'] !== null) ? floatval($r['heading']) : null,
+                'speed' => ($r['speed'] !== null) ? floatval($r['speed']) : null,
+                'batteryLevel' => ($r['battery_level'] !== null) ? intval($r['battery_level']) : null,
+                'activity' => $activity,
+                'isOnline' => $isOnline,
+                'isSharingLocation' => (bool)intval($r['is_sharing_location']),
+                'hasLocation' => $hasCoords,
+                'status' => $status,
+                'lastSeenAt' => $r['last_seen_at_iso'] ?: $nowIso,
+                'updatedAt' => $r['updated_at_iso'] ?: $nowIso
+            ];
+        }
+    } catch (Exception $e) {
+        error_log('Error querying workforce locations in PHP gateway: ' . $e->getMessage());
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'count' => count($records),
+        'locations' => $records,
+        'workforce' => $records,
+        'users' => $records
+    ]);
+    exit;
+}
+
+// POST /api/update-location - Live GPS Update Submission
+if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/update', '/location', '/update-location/', '/location/update/', '/location/'])) {
+    if (isCustomerRequestPhp()) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Customer accounts cannot submit GPS coordinates.']);
+        exit;
+    }
+
+    $callerUserId = $_SERVER['HTTP_X_USER_ID'] ?? ($body['userId'] ?? '');
+    $lat = isset($body['latitude']) ? floatval($body['latitude']) : null;
+    $lng = isset($body['longitude']) ? floatval($body['longitude']) : null;
+
+    if (empty($callerUserId) || $lat === null || $lng === null) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Missing required location fields: userId, latitude, longitude.']);
+        exit;
+    }
+
+    $userId = trim($callerUserId);
+    $employeeCode = trim($body['employeeCode'] ?? '');
+    $name = trim($body['name'] ?? '');
+    $role = trim($body['role'] ?? '');
+    $email = trim($body['email'] ?? '');
+    $accuracy = isset($body['accuracy']) ? floatval($body['accuracy']) : null;
+    $heading = isset($body['heading']) ? floatval($body['heading']) : null;
+    $speed = isset($body['speed']) ? floatval($body['speed']) : null;
+    $batteryLevel = isset($body['batteryLevel']) ? intval($body['batteryLevel']) : null;
+    $isMoving = ($speed !== null && $speed > 3);
+    $activity = trim($body['activity'] ?? ($isMoving ? 'In Transit / Moving' : 'On Site / Active'));
+    $status = $isMoving ? 'moving' : 'idle';
+
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    // If name or role or employeeCode empty, look up in solar_users
+    if (empty($name) || empty($role) || empty($employeeCode)) {
+        try {
+            $uStmt = $pdo->prepare("SELECT name, role, email, employee_id FROM `solar_users` WHERE id = ? OR email = ? LIMIT 1");
+            $uStmt->execute([$userId, $email ?: $userId]);
+            $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+            if ($uRow) {
+                if (empty($name)) $name = $uRow['name'] ?? '';
+                if (empty($role)) $role = $uRow['role'] ?? '';
+                if (empty($email)) $email = $uRow['email'] ?? '';
+                if (empty($employeeCode)) $employeeCode = $uRow['employee_id'] ?? '';
+            }
+        } catch (Exception $e) {}
+    }
+
+    $stmt = $pdo->prepare("
+        INSERT INTO `solar_workforce_locations` (
+            `user_id`, `employee_code`, `name`, `email`, `role`,
+            `latitude`, `longitude`, `accuracy`, `heading`, `speed`,
+            `battery_level`, `activity`, `is_online`, `is_sharing_location`,
+            `status`, `last_seen_at`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+            `employee_code` = COALESCE(NULLIF(VALUES(`employee_code`), ''), `employee_code`),
+            `name` = COALESCE(NULLIF(VALUES(`name`), ''), `name`),
+            `email` = COALESCE(NULLIF(VALUES(`email`), ''), `email`),
+            `role` = COALESCE(NULLIF(VALUES(`role`), ''), `role`),
+            `latitude` = VALUES(`latitude`),
+            `longitude` = VALUES(`longitude`),
+            `accuracy` = VALUES(`accuracy`),
+            `heading` = VALUES(`heading`),
+            `speed` = VALUES(`speed`),
+            `battery_level` = COALESCE(VALUES(`battery_level`), `battery_level`),
+            `activity` = VALUES(`activity`),
+            `is_online` = 1,
+            `is_sharing_location` = 1,
+            `status` = VALUES(`status`),
+            `last_seen_at` = NOW()
+    ");
+
+    $stmt->execute([
+        $userId,
+        $employeeCode ?: null,
+        $name ?: null,
+        $email ?: null,
+        $role ?: null,
+        $lat,
+        $lng,
+        $accuracy,
+        $heading,
+        $speed,
+        $batteryLevel,
+        $activity,
+        $status
+    ]);
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'broadcasted' => true,
+        'payload' => [
+            'userId' => $userId,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'accuracy' => $accuracy,
+            'heading' => $heading,
+            'speed' => $speed,
+            'batteryLevel' => $batteryLevel,
+            'activity' => $activity,
+            'status' => $status,
+            'timestamp' => gmdate('Y-m-d\TH:i:s.000\Z')
+        ]
+    ]);
+    exit;
+}
+
+// POST /api/presence/heartbeat - Field Worker Presence Heartbeat
+if ($method === 'POST' && in_array($cleanPath, ['/presence/heartbeat', '/presence', '/presence/heartbeat/', '/presence/'])) {
+    if (isCustomerRequestPhp()) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Customer accounts cannot register field presence.']);
+        exit;
+    }
+
+    $callerUserId = $_SERVER['HTTP_X_USER_ID'] ?? ($body['userId'] ?? '');
+    $email = trim($body['email'] ?? '');
+    $employeeCode = trim($body['employeeCode'] ?? '');
+    $name = trim($body['name'] ?? '');
+    $role = trim($body['role'] ?? '');
+    $isSharing = isset($body['isSharingLocation']) ? (bool)$body['isSharingLocation'] : false;
+
+    if (empty($callerUserId) && empty($email) && empty($employeeCode)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Missing userId in heartbeat payload.']);
+        exit;
+    }
+
+    $userId = trim($callerUserId ?: ($employeeCode ?: $email));
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    // Look up missing user details in solar_users
+    if (empty($name) || empty($role) || empty($employeeCode)) {
+        try {
+            $uStmt = $pdo->prepare("SELECT name, role, email, employee_id FROM `solar_users` WHERE id = ? OR email = ? LIMIT 1");
+            $uStmt->execute([$userId, $email ?: $userId]);
+            $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+            if ($uRow) {
+                if (empty($name)) $name = $uRow['name'] ?? '';
+                if (empty($role)) $role = $uRow['role'] ?? '';
+                if (empty($email)) $email = $uRow['email'] ?? '';
+                if (empty($employeeCode)) $employeeCode = $uRow['employee_id'] ?? '';
+            }
+        } catch (Exception $e) {}
+    }
+
+    $stmt = $pdo->prepare("
+        INSERT INTO `solar_workforce_locations` (
+            `user_id`, `employee_code`, `name`, `email`, `role`,
+            `is_online`, `is_sharing_location`, `status`, `last_seen_at`
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, 'online', NOW())
+        ON DUPLICATE KEY UPDATE
+            `employee_code` = COALESCE(NULLIF(VALUES(`employee_code`), ''), `employee_code`),
+            `name` = COALESCE(NULLIF(VALUES(`name`), ''), `name`),
+            `email` = COALESCE(NULLIF(VALUES(`email`), ''), `email`),
+            `role` = COALESCE(NULLIF(VALUES(`role`), ''), `role`),
+            `is_online` = 1,
+            `is_sharing_location` = VALUES(`is_sharing_location`),
+            `status` = CASE
+                WHEN `latitude` IS NOT NULL AND `longitude` IS NOT NULL THEN (
+                    CASE WHEN `speed` IS NOT NULL AND `speed` > 3 THEN 'moving' ELSE 'idle' END
+                )
+                ELSE 'online'
+            END,
+            `last_seen_at` = NOW()
+    ");
+
+    $stmt->execute([
+        $userId,
+        $employeeCode ?: null,
+        $name ?: null,
+        $email ?: null,
+        $role ?: null,
+        $isSharing ? 1 : 0
+    ]);
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'online' => true,
+        'isOnline' => true,
+        'userId' => $userId,
+        'timestamp' => gmdate('Y-m-d\TH:i:s.000\Z')
+    ]);
+    exit;
+}
+
+// POST /api/presence/offline - Field Worker Logout or Explicit Disconnect
+if ($method === 'POST' && in_array($cleanPath, ['/presence/offline', '/presence/offline/'])) {
+    $callerUserId = $_SERVER['HTTP_X_USER_ID'] ?? ($body['userId'] ?? '');
+    $email = trim($body['email'] ?? '');
+    $employeeCode = trim($body['employeeCode'] ?? '');
+
+    $userId = trim($callerUserId ?: ($employeeCode ?: $email));
+    if (!empty($userId)) {
+        $pdo = getDbConnection($dbConfig);
+        ensureRequiredTables($pdo);
+        try {
+            $stmt = $pdo->prepare("
+                UPDATE `solar_workforce_locations`
+                SET `is_online` = 0, `is_sharing_location` = 0, `status` = 'offline', `last_seen_at` = NOW()
+                WHERE `user_id` = ? OR `email` = ? OR `employee_code` = ?
+            ");
+            $stmt->execute([$userId, $userId, $userId]);
+        } catch (Exception $e) {}
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'online' => false,
+        'isOnline' => false,
+        'message' => 'User presence set to offline.'
+    ]);
+    exit;
+}
+
+// GET /api/pusher/config & status
+if ($method === 'GET' && in_array($cleanPath, ['/pusher/config', '/pusher/config/'])) {
+    $key = getenv('PUSHER_APP_KEY') ?: getenv('VITE_PUSHER_APP_KEY') ?: null;
+    $cluster = getenv('PUSHER_APP_CLUSTER') ?: getenv('VITE_PUSHER_APP_CLUSTER') ?: 'ap2';
+    if ($key) {
+        http_response_code(200);
+        echo json_encode([
+            'configured' => true,
+            'key' => $key,
+            'cluster' => $cluster,
+            'channel' => 'my-channel',
+            'event' => 'location.updated'
+        ]);
+    } else {
+        http_response_code(200);
+        echo json_encode([
+            'configured' => false,
+            'key' => null,
+            'cluster' => null,
+            'channel' => 'my-channel',
+            'event' => 'location.updated',
+            'error' => 'Pusher public configuration is missing on the server.'
+        ]);
+    }
+    exit;
+}
+
+if ($method === 'GET' && in_array($cleanPath, ['/pusher/status', '/pusher/status/'])) {
+    $key = getenv('PUSHER_APP_KEY') ?: getenv('VITE_PUSHER_APP_KEY') ?: null;
+    $cluster = getenv('PUSHER_APP_CLUSTER') ?: getenv('VITE_PUSHER_APP_CLUSTER') ?: 'ap2';
+    http_response_code(200);
+    echo json_encode([
+        'serverConfigured' => false,
+        'publicKeyConfigured' => (bool)$key,
+        'clusterConfigured' => (bool)$cluster,
+        'cluster' => $cluster ?: null,
+        'channel' => 'my-channel',
+        'locationEvent' => 'location.updated',
+        'presenceEvent' => 'presence.updated'
+    ]);
+    exit;
+}
+
 // Default 404 for unhandled API routes (Always returns JSON, NEVER index.html)
 http_response_code(404);
 echo json_encode([

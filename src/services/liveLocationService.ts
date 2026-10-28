@@ -1,5 +1,6 @@
 import { storageService } from './storage';
 import { pusherService } from './pusherService';
+import { apiClient } from './apiClient';
 import {
   LiveEmployeeLocation,
   WorkforceLiveStatus,
@@ -83,6 +84,11 @@ class LiveLocationService {
 
       // Perform initial load from server
       this.fetchServerLocations();
+
+      // Recurring background polling every 8s ensures admin console and map auto-sync with MySQL
+      setInterval(() => {
+        this.fetchServerLocations();
+      }, 8000);
     }
   }
 
@@ -167,7 +173,7 @@ class LiveLocationService {
       }
     }
 
-    // Search storageService employees for canonical mapping
+    // Search storageService employees and users for canonical mapping
     try {
       const allEmployees = storageService.getEmployees();
       for (const emp of allEmployees) {
@@ -187,6 +193,23 @@ class LiveLocationService {
           return empId;
         }
       }
+
+      const allUsers = storageService.getUsers();
+      for (const u of allUsers) {
+        const uId = u.id;
+        const matchEmail = cleanEmail && u.email && u.email.trim().toLowerCase() === cleanEmail;
+        const matchCode = cleanCode && u.employeeId && u.employeeId.trim().toLowerCase() === cleanCode;
+        const matchId = (cleanId && u.id && u.id.trim().toLowerCase() === cleanId) ||
+                        (cleanAlt && u.id && u.id.trim().toLowerCase() === cleanAlt);
+
+        if (matchEmail || matchCode || matchId) {
+          if (cleanId) this.alternateIdMap.set(cleanId, uId);
+          if (cleanAlt) this.alternateIdMap.set(cleanAlt, uId);
+          if (cleanEmail) this.alternateIdMap.set(cleanEmail, uId);
+          if (cleanCode) this.alternateIdMap.set(cleanCode, uId);
+          return uId;
+        }
+      }
     } catch {
       // Non-blocking
     }
@@ -195,8 +218,31 @@ class LiveLocationService {
   }
 
   private initializeFieldWorkers() {
-    const allEmployees = storageService.getEmployees();
+    const allEmployees = [...storageService.getEmployees()];
     const allProjects = storageService.getProjects();
+
+    try {
+      const allUsers = storageService.getUsers();
+      allUsers.forEach((u) => {
+        if (u.role !== 'Customer' && !allEmployees.some(e => e.id === u.id || (e.email && u.email && e.email.toLowerCase() === u.email.toLowerCase()))) {
+          allEmployees.push({
+            id: u.id,
+            employeeCode: u.employeeId || u.id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone || '+91 98250 00000',
+            department: u.department || 'Operations',
+            designation: u.designation || u.role,
+            systemRole: u.role,
+            status: 'ACTIVE',
+            joiningDate: new Date().toISOString(),
+            salaryMonthly: 0,
+            currentSiteLocation: '',
+            loginEnabled: true
+          } as any);
+        }
+      });
+    } catch {}
 
     // Map alternate IDs for all workforce members first for universal resolution
     allEmployees.forEach((emp) => {
@@ -290,7 +336,10 @@ class LiveLocationService {
    */
   async fetchServerLocations(): Promise<void> {
     try {
-      const res = await fetch('/api/workforce/locations');
+      const url = `${apiClient.getBaseUrl()}/workforce/locations`;
+      const res = await fetch(url, {
+        headers: apiClient.getAuthHeaders()
+      });
       if (!res.ok) return;
 
       const data = await res.json();

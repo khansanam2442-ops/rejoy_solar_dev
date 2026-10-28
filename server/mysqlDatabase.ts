@@ -3984,6 +3984,297 @@ class MySqlDatabaseManager {
   }
 
   // ==========================================================
+  // WORKFORCE LIVE TRACKING & PRESENCE (PERSISTED IN MYSQL)
+  // ==========================================================
+  public async getWorkforceLocations(): Promise<any[]> {
+    if (!this.isConnected) {
+      return this.getFallbackItems('workforce_locations');
+    }
+    this.assertDbConnected();
+
+    const query = `
+      SELECT
+        w.user_id AS userId,
+        w.employee_code AS employeeCode,
+        w.name AS name,
+        w.email AS email,
+        w.role AS role,
+        CAST(w.latitude AS DOUBLE) AS latitude,
+        CAST(w.longitude AS DOUBLE) AS longitude,
+        CAST(w.accuracy AS DOUBLE) AS accuracy,
+        CAST(w.heading AS DOUBLE) AS heading,
+        CAST(w.speed AS DOUBLE) AS speed,
+        w.battery_level AS batteryLevel,
+        w.activity AS activity,
+        CASE
+          WHEN w.last_seen_at IS NOT NULL AND w.last_seen_at >= DATE_SUB(NOW(), INTERVAL 120 SECOND) AND w.is_online = 1 THEN 1
+          ELSE 0
+        END AS isOnline,
+        w.is_sharing_location AS isSharingLocation,
+        w.status AS status,
+        DATE_FORMAT(w.last_seen_at, '%Y-%m-%dT%H:%i:%s.000Z') AS lastSeenAt,
+        DATE_FORMAT(w.updated_at, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt
+      FROM \`solar_workforce_locations\` w
+      ORDER BY isOnline DESC, w.last_seen_at DESC
+    `;
+
+    try {
+      const [rows]: any = await this.pool!.query(query);
+      const records = (Array.isArray(rows) ? rows : []).map((r: any) => {
+        const isOnline = Boolean(r.isOnline);
+        const hasCoords = typeof r.latitude === 'number' && typeof r.longitude === 'number' && !isNaN(r.latitude) && !isNaN(r.longitude);
+        const speed = typeof r.speed === 'number' ? r.speed : 0;
+        let effectiveStatus: string = r.status || 'offline';
+        if (!isOnline) {
+          effectiveStatus = 'offline';
+        } else if (hasCoords) {
+          effectiveStatus = speed > 3 ? 'moving' : 'idle';
+        } else {
+          effectiveStatus = 'online';
+        }
+
+        return {
+          userId: r.userId,
+          employeeCode: r.employeeCode || r.userId,
+          name: r.name || `Field Worker (${r.userId})`,
+          email: r.email || '',
+          role: r.role || 'Field Engineer',
+          latitude: hasCoords ? r.latitude : undefined,
+          longitude: hasCoords ? r.longitude : undefined,
+          accuracy: typeof r.accuracy === 'number' ? r.accuracy : undefined,
+          heading: typeof r.heading === 'number' ? r.heading : undefined,
+          speed: typeof r.speed === 'number' ? r.speed : undefined,
+          batteryLevel: r.batteryLevel !== null && r.batteryLevel !== undefined ? Number(r.batteryLevel) : undefined,
+          activity: r.activity || (isOnline ? (hasCoords ? (speed > 3 ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline'),
+          isOnline,
+          isSharingLocation: Boolean(r.isSharingLocation),
+          hasLocation: hasCoords,
+          status: effectiveStatus,
+          lastSeenAt: r.lastSeenAt || new Date().toISOString(),
+          updatedAt: r.updatedAt || new Date().toISOString()
+        };
+      });
+
+      return records;
+    } catch (err) {
+      console.error('[DB Manager] Error querying workforce locations:', err);
+      return this.getFallbackItems('workforce_locations');
+    }
+  }
+
+  public async saveWorkforceLocation(data: {
+    userId: string;
+    employeeCode?: string;
+    name?: string;
+    email?: string;
+    role?: string;
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    heading?: number;
+    speed?: number;
+    batteryLevel?: number;
+    activity?: string;
+  }): Promise<boolean> {
+    const userId = String(data.userId).trim();
+    if (!userId) return false;
+
+    const lat = Number(data.latitude);
+    const lng = Number(data.longitude);
+    const speed = data.speed !== undefined ? Number(data.speed) : null;
+    const isMoving = speed !== null && speed > 3;
+    const status = isMoving ? 'moving' : 'idle';
+    const activity = data.activity || (isMoving ? 'In Transit / Moving' : 'On Site / Active');
+
+    if (!this.isConnected) {
+      const list = this.getFallbackItems('workforce_locations');
+      const idx = list.findIndex((item: any) => item.userId === userId);
+      const rec = {
+        userId,
+        employeeCode: data.employeeCode || userId,
+        name: data.name || `Field Worker (${userId})`,
+        email: data.email || '',
+        role: data.role || 'Field Engineer',
+        latitude: lat,
+        longitude: lng,
+        accuracy: data.accuracy,
+        heading: data.heading,
+        speed,
+        batteryLevel: data.batteryLevel,
+        activity,
+        isOnline: true,
+        isSharingLocation: true,
+        hasLocation: true,
+        status,
+        lastSeenAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      if (idx >= 0) list[idx] = rec;
+      else list.push(rec);
+      this.setFallbackItems('workforce_locations', list);
+      return true;
+    }
+
+    this.assertDbConnected();
+    const sql = `
+      INSERT INTO \`solar_workforce_locations\` (
+        \`user_id\`, \`employee_code\`, \`name\`, \`email\`, \`role\`,
+        \`latitude\`, \`longitude\`, \`accuracy\`, \`heading\`, \`speed\`,
+        \`battery_level\`, \`activity\`, \`is_online\`, \`is_sharing_location\`,
+        \`status\`, \`last_seen_at\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        \`employee_code\` = COALESCE(VALUES(\`employee_code\`), \`employee_code\`),
+        \`name\` = COALESCE(VALUES(\`name\`), \`name\`),
+        \`email\` = COALESCE(VALUES(\`email\`), \`email\`),
+        \`role\` = COALESCE(VALUES(\`role\`), \`role\`),
+        \`latitude\` = VALUES(\`latitude\`),
+        \`longitude\` = VALUES(\`longitude\`),
+        \`accuracy\` = VALUES(\`accuracy\`),
+        \`heading\` = VALUES(\`heading\`),
+        \`speed\` = VALUES(\`speed\`),
+        \`battery_level\` = COALESCE(VALUES(\`battery_level\`), \`battery_level\`),
+        \`activity\` = VALUES(\`activity\`),
+        \`is_online\` = 1,
+        \`is_sharing_location\` = 1,
+        \`status\` = VALUES(\`status\`),
+        \`last_seen_at\` = NOW()
+    `;
+
+    try {
+      await this.pool!.query(sql, [
+        userId,
+        data.employeeCode || null,
+        data.name || null,
+        data.email || null,
+        data.role || null,
+        lat,
+        lng,
+        data.accuracy !== undefined ? Number(data.accuracy) : null,
+        data.heading !== undefined ? Number(data.heading) : null,
+        speed,
+        data.batteryLevel !== undefined ? Number(data.batteryLevel) : null,
+        activity,
+        status
+      ]);
+      return true;
+    } catch (err) {
+      console.error('[DB Manager] Error saving workforce location to MySQL:', err);
+      return false;
+    }
+  }
+
+  public async saveWorkforceHeartbeat(data: {
+    userId: string;
+    employeeCode?: string;
+    name?: string;
+    email?: string;
+    role?: string;
+    isSharingLocation?: boolean;
+  }): Promise<boolean> {
+    const userId = String(data.userId).trim();
+    if (!userId) return false;
+
+    const isSharing = Boolean(data.isSharingLocation);
+
+    if (!this.isConnected) {
+      const list = this.getFallbackItems('workforce_locations');
+      const idx = list.findIndex((item: any) => item.userId === userId);
+      if (idx >= 0) {
+        list[idx].isOnline = true;
+        list[idx].isSharingLocation = isSharing;
+        list[idx].lastSeenAt = new Date().toISOString();
+        if (list[idx].status === 'offline') {
+          list[idx].status = list[idx].hasLocation ? 'idle' : 'online';
+        }
+      } else {
+        list.push({
+          userId,
+          employeeCode: data.employeeCode || userId,
+          name: data.name || `Field Worker (${userId})`,
+          email: data.email || '',
+          role: data.role || 'Field Engineer',
+          isOnline: true,
+          isSharingLocation: isSharing,
+          hasLocation: false,
+          status: 'online',
+          lastSeenAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      this.setFallbackItems('workforce_locations', list);
+      return true;
+    }
+
+    this.assertDbConnected();
+    const sql = `
+      INSERT INTO \`solar_workforce_locations\` (
+        \`user_id\`, \`employee_code\`, \`name\`, \`email\`, \`role\`,
+        \`is_online\`, \`is_sharing_location\`, \`status\`, \`last_seen_at\`
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, 'online', NOW())
+      ON DUPLICATE KEY UPDATE
+        \`employee_code\` = COALESCE(VALUES(\`employee_code\`), \`employee_code\`),
+        \`name\` = COALESCE(VALUES(\`name\`), \`name\`),
+        \`email\` = COALESCE(VALUES(\`email\`), \`email\`),
+        \`role\` = COALESCE(VALUES(\`role\`), \`role\`),
+        \`is_online\` = 1,
+        \`is_sharing_location\` = VALUES(\`is_sharing_location\`),
+        \`status\` = CASE
+          WHEN \`latitude\` IS NOT NULL AND \`longitude\` IS NOT NULL THEN (
+            CASE WHEN \`speed\` IS NOT NULL AND \`speed\` > 3 THEN 'moving' ELSE 'idle' END
+          )
+          ELSE 'online'
+        END,
+        \`last_seen_at\` = NOW()
+    `;
+
+    try {
+      await this.pool!.query(sql, [
+        userId,
+        data.employeeCode || null,
+        data.name || null,
+        data.email || null,
+        data.role || null,
+        isSharing ? 1 : 0
+      ]);
+      return true;
+    } catch (err) {
+      console.error('[DB Manager] Error saving workforce heartbeat to MySQL:', err);
+      return false;
+    }
+  }
+
+  public async setWorkforceOffline(userId: string): Promise<boolean> {
+    const cleanId = String(userId).trim();
+    if (!cleanId) return false;
+
+    if (!this.isConnected) {
+      const list = this.getFallbackItems('workforce_locations');
+      const idx = list.findIndex((item: any) => item.userId === cleanId);
+      if (idx >= 0) {
+        list[idx].isOnline = false;
+        list[idx].isSharingLocation = false;
+        list[idx].status = 'offline';
+        list[idx].lastSeenAt = new Date().toISOString();
+      }
+      this.setFallbackItems('workforce_locations', list);
+      return true;
+    }
+
+    this.assertDbConnected();
+    try {
+      await this.pool!.query(
+        'UPDATE `solar_workforce_locations` SET `is_online` = 0, `is_sharing_location` = 0, `status` = \'offline\' WHERE `user_id` = ?',
+        [cleanId]
+      );
+      return true;
+    } catch (err) {
+      console.error('[DB Manager] Error setting workforce offline in MySQL:', err);
+      return false;
+    }
+  }
+
+  // ==========================================================
   // BOOTSTRAP EXPORT: AUTHORITATIVE DATA FROM MYSQL
   // ==========================================================
   public async getAllData(): Promise<Record<string, any>> {
