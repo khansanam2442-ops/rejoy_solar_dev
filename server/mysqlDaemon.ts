@@ -53,7 +53,15 @@ export async function ensureLocalMySqlRunning(host: string = '127.0.0.1', port: 
     if (!fs.existsSync('/run/mysqld')) {
       fs.mkdirSync('/run/mysqld', { recursive: true });
     }
-    execSync('chown -R mysql:mysql /run/mysqld /var/lib/mysql', { stdio: 'ignore' });
+    if (!fs.existsSync(datadir)) {
+      fs.mkdirSync(datadir, { recursive: true });
+    }
+    try {
+      execSync('chown -R mysql:mysql /run/mysqld /var/lib/mysql', { stdio: 'ignore' });
+    } catch {
+      try { execSync('useradd -r -s /bin/false mysql', { stdio: 'ignore' }); } catch {}
+      try { execSync('chown -R mysql:mysql /run/mysqld /var/lib/mysql', { stdio: 'ignore' }); } catch {}
+    }
   } catch {}
 
   if (!fs.existsSync(path.join(datadir, 'mysql'))) {

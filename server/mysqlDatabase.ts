@@ -1117,24 +1117,59 @@ class MySqlDatabaseManager {
     if (!this.isConnected) return this.getFallbackItems('employees');
     this.assertDbConnected();
     const [rows] = await this.pool!.query('SELECT * FROM `solar_employees` ORDER BY `created_at` ASC');
+    const existingIds = new Set((rows as any[]).map(r => r.id));
+    const existingEmails = new Set((rows as any[]).map(r => (r.email || '').toLowerCase()).filter(Boolean));
+
+    try {
+      const [userRows]: any = await this.pool!.query("SELECT * FROM `solar_users` WHERE `role` != 'Customer'");
+      if (Array.isArray(userRows)) {
+        for (const u of userRows) {
+          const uEmail = (u.email || '').toLowerCase().trim();
+          if (!existingIds.has(u.id) && (!uEmail || !existingEmails.has(uEmail))) {
+            (rows as any[]).push({
+              id: u.id,
+              employee_code: u.employee_id || `EMP-${u.id.slice(-4).toUpperCase()}`,
+              name: u.name,
+              photo_url: '',
+              department: u.department || 'Operations',
+              designation: u.designation || u.role || 'Staff Member',
+              phone: u.phone || '',
+              email: u.email,
+              joining_date: u.created_at ? String(u.created_at).slice(0, 10) : null,
+              salary_monthly: 0,
+              status: u.status || 'ACTIVE',
+              current_site_location: '',
+              login_enabled: u.status !== 'DISABLED',
+              system_role: u.role || 'Admin',
+              is_field_worker: Boolean(u.is_field_worker),
+              account_status: u.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
+              created_at: u.created_at
+            });
+            existingIds.add(u.id);
+            if (uEmail) existingEmails.add(uEmail);
+          }
+        }
+      }
+    } catch {}
+
     const mapped = (rows as any[]).map(r => ({
       id: r.id,
-      employeeCode: r.employee_code,
+      employeeCode: r.employee_code || r.employeeCode || `EMP-${r.id.slice(-4).toUpperCase()}`,
       name: r.name,
-      photoUrl: r.photo_url,
-      department: r.department,
-      designation: r.designation,
-      phone: r.phone,
+      photoUrl: r.photo_url || r.photoUrl || '',
+      department: r.department || 'Operations',
+      designation: r.designation || 'Staff',
+      phone: r.phone || '',
       email: r.email,
-      joiningDate: r.joining_date,
-      salaryMonthly: Number(r.salary_monthly) || 0,
-      status: r.status,
-      currentSiteLocation: r.current_site_location,
-      loginEnabled: Boolean(r.login_enabled),
-      systemRole: r.system_role,
-      isFieldWorker: Boolean(r.is_field_worker),
-      accountStatus: r.account_status,
-      createdAt: r.created_at
+      joiningDate: r.joining_date || r.joiningDate || null,
+      salaryMonthly: Number(r.salary_monthly ?? r.salaryMonthly) || 0,
+      status: r.status || 'ACTIVE',
+      currentSiteLocation: r.current_site_location || r.currentSiteLocation || '',
+      loginEnabled: Boolean(r.login_enabled ?? r.loginEnabled ?? true),
+      systemRole: r.system_role || r.systemRole || 'Staff',
+      isFieldWorker: Boolean(r.is_field_worker ?? r.isFieldWorker),
+      accountStatus: r.account_status || r.accountStatus || 'ACTIVE',
+      createdAt: r.created_at || r.createdAt
     }));
     this.setFallbackItems('employees', mapped);
     return mapped;

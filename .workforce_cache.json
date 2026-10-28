@@ -2,14 +2,14 @@
   {
     "userId": "emp-1",
     "employeeCode": "EMP001",
-    "name": "Vikram Patel",
+    "name": "Admin Demo",
     "email": "admin@rejoysolar.com",
     "role": "Admin",
-    "updatedAt": "2026-10-25T18:22:31.154Z",
-    "lastSeenAt": "2026-10-25T18:22:31.154Z",
-    "isOnline": false,
+    "updatedAt": "2026-10-28T07:59:43.603Z",
+    "lastSeenAt": "2026-10-28T07:59:43.603Z",
+    "isOnline": true,
     "isSharingLocation": false,
     "hasLocation": false,
-    "status": "offline"
+    "status": "online"
   }
 ]

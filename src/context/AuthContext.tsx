@@ -331,6 +331,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (isMounted) {
             saveUserProfile(verifiedProfile, verifyRes.token || savedToken || undefined);
+            storageService.hydrateFromBackend().catch(() => {});
           }
         } else if (
           verifyRes.message &&
@@ -429,6 +430,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       saveUserProfile(authenticatedProfile, data.token);
+      await storageService.hydrateFromBackend().catch(() => {});
     } catch (err: any) {
       throw new Error(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
@@ -504,6 +506,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       saveUserProfile(newProfile, data.token);
+      await storageService.hydrateFromBackend().catch(() => {});
     } catch (err: any) {
       throw new Error(err?.message || 'Registration failed.');
     } finally {

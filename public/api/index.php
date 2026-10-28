@@ -2257,6 +2257,44 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
     try {
         $stmt = $pdo->query('SELECT * FROM `solar_employees` ORDER BY `created_at` ASC');
         $rows = $stmt->fetchAll();
+        $existingEmpIds = [];
+        $existingEmpEmails = [];
+        foreach ($rows as $er) {
+            $existingEmpIds[$er['id']] = true;
+            if (!empty($er['email'])) $existingEmpEmails[strtolower($er['email'])] = true;
+        }
+
+        // Merge users who are staff members from solar_users
+        try {
+            $uStmt = $pdo->query("SELECT * FROM `solar_users` WHERE `role` != 'Customer'");
+            while ($u = $uStmt->fetch()) {
+                $uEmail = strtolower($u['email'] ?? '');
+                if (empty($existingEmpIds[$u['id']]) && (empty($uEmail) || empty($existingEmpEmails[$uEmail]))) {
+                    $rows[] = [
+                        'id' => $u['id'],
+                        'employee_code' => $u['employee_id'] ?: ('EMP-' . substr($u['id'], -4)),
+                        'name' => $u['name'],
+                        'photo_url' => '',
+                        'department' => $u['department'] ?: 'Operations',
+                        'designation' => $u['designation'] ?: ($u['role'] ?: 'Staff Member'),
+                        'phone' => $u['phone'] ?: '',
+                        'email' => $u['email'],
+                        'joining_date' => $u['created_at'],
+                        'salary_monthly' => 0.00,
+                        'status' => $u['status'] ?: 'ACTIVE',
+                        'current_site_location' => '',
+                        'login_enabled' => ($u['status'] !== 'DISABLED') ? 1 : 0,
+                        'system_role' => $u['role'] ?: 'Admin',
+                        'is_field_worker' => $u['is_field_worker'] ?? 0,
+                        'account_status' => ($u['status'] === 'DISABLED') ? 'DISABLED' : 'ACTIVE',
+                        'created_at' => $u['created_at']
+                    ];
+                    $existingEmpIds[$u['id']] = true;
+                    if (!empty($uEmail)) $existingEmpEmails[$uEmail] = true;
+                }
+            }
+        } catch (Exception $ue) {}
+
         $data['employees'] = array_map(function ($r) {
             return [
                 'id' => $r['id'],
@@ -2481,6 +2519,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'employeeId' => $r['employee_id'],
                 'employeeName' => $r['employee_name'],
                 'attendanceDate' => $r['attendance_date'],
+                'date' => $r['attendance_date'],
                 'checkInTime' => $r['check_in_time'],
                 'checkOutTime' => $r['check_out_time'],
                 'checkInGps' => json_decode($r['check_in_gps_json'] ?? 'null', true),
@@ -2562,6 +2601,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'termsAndConditions' => $r['terms_and_conditions'] ?? '',
                 'status' => $r['status'] ?? 'DRAFT',
                 'validUntil' => $r['valid_until'],
+                'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);

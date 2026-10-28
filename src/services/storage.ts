@@ -207,7 +207,28 @@ class StorageService {
   public async hydrateFromBackend(): Promise<void> {
     if (typeof window === 'undefined') return;
     try {
-      const res = await fetch('/api/bootstrap');
+      const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+        ? (window as any).__SOLAR_API_URL__
+        : ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
+          ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
+          : '/api');
+
+      const authToken = safeStorage.getItem('rejoysolar_auth_token');
+      const headers: Record<string, string> = {};
+      if (authToken) {
+        headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
+        headers['x-auth-token'] = authToken;
+      }
+      try {
+        const raw = safeStorage.getItem('rejoysolar_active_session');
+        if (raw) {
+          const u = JSON.parse(raw);
+          if (u?.id) headers['x-user-id'] = u.id;
+          if (u?.role) headers['x-user-role'] = u.role;
+        }
+      } catch {}
+
+      const res = await fetch(`${apiUrl}/bootstrap`, { headers });
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
@@ -215,7 +236,19 @@ class StorageService {
             const backendItems = json.data[collectionKey];
             if (backendItems !== undefined && backendItems !== null) {
               if (Array.isArray(backendItems)) {
-                const cleaned = backendItems.filter(Boolean);
+                let cleaned = backendItems.filter(Boolean);
+                if (collectionKey === 'attendance') {
+                  cleaned = cleaned.map((a: any) => ({
+                    ...a,
+                    date: a.date || a.attendanceDate || (a.createdAt ? String(a.createdAt).slice(0, 10) : ''),
+                    attendanceDate: a.attendanceDate || a.date
+                  }));
+                } else if (collectionKey === 'quotations') {
+                  cleaned = cleaned.map((q: any) => ({
+                    ...q,
+                    quotationDate: q.quotationDate || (q.createdAt ? String(q.createdAt).slice(0, 10) : '')
+                  }));
+                }
                 this.memStore.set(storageKey, cleaned);
                 safeStorage.setItem(storageKey, JSON.stringify(cleaned));
               } else {
@@ -1183,7 +1216,9 @@ class StorageService {
       'emp-14': 'demo-usr-7'
     };
 
-    return safeList.filter(Boolean).map(emp => {
+    const employeeMap = new Map<string, Employee>();
+
+    safeList.filter(Boolean).forEach(emp => {
       const defaultAuthUid = emp?.id ? DEFAULT_AUTH_MAP[emp.id] : undefined;
       const authUid = emp.authUid || defaultAuthUid;
       const salaryMonthly = Number(emp.salaryMonthly ?? (emp as any).salary_monthly ?? (emp as any).salary) || 0;
@@ -1197,10 +1232,55 @@ class StorageService {
         authUid,
         loginEnabled: typeof emp.loginEnabled === 'boolean' ? emp.loginEnabled : true,
         systemRole: emp.systemRole || emp.assignedRole || 'Project Manager',
-        accountStatus: (emp.status === 'TERMINATED' ? 'DISABLED' : 'ACTIVE') as Employee['accountStatus']
+        accountStatus: (emp.status === 'TERMINATED' ? 'DISABLED' : (emp.accountStatus || 'ACTIVE')) as Employee['accountStatus']
       };
-      return safeEmp;
+      employeeMap.set(safeEmp.id, safeEmp);
+      if (safeEmp.email) employeeMap.set(safeEmp.email.toLowerCase(), safeEmp);
     });
+
+    // Merge in users from STORAGE_KEYS.USERS who are staff members (not Customer)
+    const users = this.get<any[]>(STORAGE_KEYS.USERS, []);
+    (users || []).filter(Boolean).forEach(u => {
+      if (u.role === 'Customer') return;
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const existingByEmail = uEmail ? employeeMap.get(uEmail) : null;
+      const existingById = employeeMap.get(u.id);
+      if (!existingByEmail && !existingById) {
+        const isFw = Boolean(u.isFieldWorker || [
+          'Site Survey Engineer', 'Site Inspector', 'Civil Team',
+          'Structure Team', 'Installation Team', 'Electrical Team', 'Technician'
+        ].includes(u.role));
+        const syntheticEmp: Employee = {
+          id: u.id,
+          employeeCode: u.employeeId || u.employeeCode || `EMP-${u.id.slice(-4).toUpperCase()}`,
+          name: u.name || 'Staff Member',
+          email: u.email,
+          phone: u.phone || '+91 98250 11223',
+          department: u.department || 'Operations',
+          designation: u.designation || u.role || 'Solar Specialist',
+          systemRole: u.role || 'Project Manager',
+          salaryMonthly: 0,
+          status: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'INACTIVE' : 'ACTIVE',
+          accountStatus: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'DISABLED' : 'ACTIVE',
+          loginEnabled: u.status !== 'DISABLED',
+          isFieldWorker: isFw,
+          currentSiteLocation: '',
+          joiningDate: u.createdAt ? String(u.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10)
+        };
+        employeeMap.set(u.id, syntheticEmp);
+        if (uEmail) employeeMap.set(uEmail, syntheticEmp);
+      }
+    });
+
+    const result: Employee[] = [];
+    const seenIds = new Set<string>();
+    employeeMap.forEach(emp => {
+      if (!seenIds.has(emp.id)) {
+        seenIds.add(emp.id);
+        result.push(emp);
+      }
+    });
+    return result;
   }
 
   saveEmployee(emp: Employee): void {
@@ -1258,7 +1338,13 @@ class StorageService {
 
   // --- Attendance ---
   getAttendance(): AttendanceRecord[] {
-    return this.get<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, initialAttendance);
+    const list = this.get<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, initialAttendance);
+    const safeList = Array.isArray(list) ? list : initialAttendance;
+    return safeList.filter(Boolean).map(a => ({
+      ...a,
+      date: a.date || (a as any).attendanceDate || ((a as any).createdAt ? String((a as any).createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10)),
+      attendanceDate: (a as any).attendanceDate || a.date
+    }));
   }
 
   saveAttendanceRecord(record: AttendanceRecord): void {
@@ -1472,7 +1558,12 @@ class StorageService {
 
   // --- Quotations ---
   getQuotations(): Quotation[] {
-    return this.get<Quotation[]>(STORAGE_KEYS.QUOTATIONS, initialQuotations);
+    const list = this.get<Quotation[]>(STORAGE_KEYS.QUOTATIONS, initialQuotations);
+    const safeList = Array.isArray(list) ? list : initialQuotations;
+    return safeList.filter(Boolean).map(q => ({
+      ...q,
+      quotationDate: q.quotationDate || (q as any).quotation_date || (q.createdAt ? String(q.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10))
+    }));
   }
 
   getQuotationById(id: string): Quotation | undefined {
