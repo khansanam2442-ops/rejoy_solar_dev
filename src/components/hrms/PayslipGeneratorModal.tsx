@@ -143,29 +143,78 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
     initialEmpId?: string;
   }>({ isOpen: false });
 
-  // Month attendance logs matching currentEmployee and salaryMonth (matches YYYY-MM)
+  // Month attendance logs matching currentEmployee and salaryMonth (robustly matches YYYY-MM across all date formats)
   const monthAttendanceLogs = useMemo(() => {
     if (!currentEmployee || !salaryMonth) return [];
-    const prefix = parsedPeriod.prefix;
+    const prefix = parsedPeriod.prefix; // e.g. "2026-10"
 
     const allAttendance = storageService.getAttendance();
     return allAttendance.filter(a => {
       const isEmp = attendanceBelongsToEmployee(a, currentEmployee);
-      const isMonth = prefix ? a.date.startsWith(prefix) : true;
-      return isEmp && isMonth;
+      if (!isEmp) return false;
+      if (!prefix) return true;
+
+      const rawDate = a.date || (a as any).attendanceDate || (a as any).createdAt || '';
+      const iso = String(rawDate).split('T')[0];
+      if (iso.startsWith(prefix)) return true;
+
+      try {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          if (`${y}-${m}` === prefix) return true;
+        }
+      } catch {}
+
+      return false;
     });
   }, [currentEmployee, salaryMonth, parsedPeriod.prefix, isOpen]);
 
   const fuelAttendanceRecords = useMemo(() => {
-    return monthAttendanceLogs.filter(a => a.fuelExpense && (a.fuelExpense.totalKmDriven || 0) > 0);
+    return monthAttendanceLogs.filter(a => {
+      if (!a.fuelExpense) return false;
+      const km = Number(a.fuelExpense.totalKmDriven) || 0;
+      if (km <= 0) return false;
+      if ((a.fuelExpense as any).approvalStatus === 'REJECTED') return false;
+      return true;
+    });
   }, [monthAttendanceLogs]);
 
   const totalFuelKmInMonth = useMemo(() => {
-    return fuelAttendanceRecords.reduce(
-      (sum, a) => sum + (a.fuelExpense?.totalKmDriven || 0),
-      0
-    );
+    return Math.round(
+      fuelAttendanceRecords.reduce(
+        (sum, a) => sum + (Number(a.fuelExpense?.totalKmDriven) || 0),
+        0
+      ) * 10
+    ) / 10;
   }, [fuelAttendanceRecords]);
+
+  // Duplicate reimbursement detection: check if another payslip for this employee and month already exists and reimbursed fuel
+  const duplicateReimbursementInfo = useMemo(() => {
+    if (!currentEmployee || !salaryMonth) return null;
+    const allPayslips = storageService.getPayslips();
+    const otherPayslip = allPayslips.find(p =>
+      p &&
+      p.id !== existingPayslip?.id &&
+      p.employeeId === currentEmployee.id &&
+      (p.month || '').trim().toLowerCase() === salaryMonth.trim().toLowerCase()
+    );
+
+    if (otherPayslip) {
+      const fuelItem = (otherPayslip.additionalExpenses || []).find(e =>
+        e.description.toLowerCase().includes('fuel') || e.description.toLowerCase().includes('mileage')
+      );
+      return {
+        hasOtherPayslip: true,
+        alreadyReimbursedInOther: Boolean(fuelItem),
+        otherPayslipNumber: otherPayslip.payslipNumber || otherPayslip.id,
+        otherPayslipStatus: otherPayslip.status,
+        reimbursedAmount: fuelItem ? fuelItem.amount : 0
+      };
+    }
+    return null;
+  }, [currentEmployee, salaryMonth, existingPayslip, isOpen]);
 
   // Suggested default hourly rate based on base salary: base / 26 working days / 8 hours
   const suggestedHourlyRate = useMemo(() => {
@@ -262,6 +311,56 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
       setErrors({});
     }
   }, [isOpen, existingPayslip, initialEmployee, allEmployees]);
+
+  // Automatically sync verified daily fuel logs into additionalExpenses whenever available
+  useEffect(() => {
+    if (!isOpen || !currentEmployee) return;
+
+    if (totalFuelKmInMonth > 0 && !duplicateReimbursementInfo?.alreadyReimbursedInOther) {
+      const rateNum = parseFloat(String(reimbursementRatePerKm)) || 5.0;
+      const autoAmount = Math.round(totalFuelKmInMonth * rateNum * 100) / 100;
+      const autoDesc = `Daily Fuel & Mileage Reimbursement (${totalFuelKmInMonth} km @ ${currencySymbol}${rateNum}/km)`;
+
+      setAdditionalExpenses(prev => {
+        const fuelIdx = prev.findIndex(item =>
+          item.description.toLowerCase().includes('fuel') ||
+          item.description.toLowerCase().includes('mileage') ||
+          item.id.includes('fuel')
+        );
+
+        if (fuelIdx >= 0) {
+          const existing = prev[fuelIdx];
+          if (existing.description !== autoDesc || Number(existing.amount) !== autoAmount) {
+            const next = [...prev];
+            next[fuelIdx] = {
+              ...existing,
+              description: autoDesc,
+              amount: autoAmount
+            };
+            return next;
+          }
+          return prev;
+        } else {
+          return [
+            ...prev,
+            {
+              id: `exp-fuel-auto-${currentEmployee.id}`,
+              description: autoDesc,
+              amount: autoAmount
+            }
+          ];
+        }
+      });
+    }
+  }, [
+    totalFuelKmInMonth,
+    reimbursementRatePerKm,
+    currentEmployee?.id,
+    salaryMonth,
+    isOpen,
+    duplicateReimbursementInfo?.alreadyReimbursedInOther,
+    currencySymbol
+  ]);
 
   // Real-time calculations with support for exact float / decimal values
   const fixedBaseSalary = currentEmployee ? (Number(currentEmployee.salaryMonthly) || 0) : 0;
@@ -894,6 +993,12 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
                         {totalFuelKmInMonth} km Logged
                       </span>
+                      {totalFuelKmInMonth > 0 && !duplicateReimbursementInfo?.alreadyReimbursedInOther && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                          <span>Auto-Applied</span>
+                        </span>
+                      )}
                     </h5>
                     <p className="text-[10px] text-slate-500">
                       Calculated from daily field odometer readings submitted by {currentEmployee.name} for {salaryMonth}.
@@ -919,10 +1024,40 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:pointer-events-none rounded-xl shadow-2xs transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Apply {currencySymbol}{formatCurrency(Math.round(totalFuelKmInMonth * (parseFloat(String(reimbursementRatePerKm)) || 0) * 100) / 100)} to Payslip</span>
+                    <span>Re-apply {currencySymbol}{formatCurrency(Math.round(totalFuelKmInMonth * (parseFloat(String(reimbursementRatePerKm)) || 0) * 100) / 100)}</span>
                   </button>
                 </div>
               </div>
+
+              {/* Duplicate Reimbursement Warning Banner */}
+              {duplicateReimbursementInfo?.alreadyReimbursedInOther && (
+                <div className="p-3 bg-amber-100/70 rounded-xl border border-amber-300 flex items-start gap-2.5 text-xs text-amber-950">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <span className="font-bold block">Duplicate Reimbursement Notice</span>
+                    <span className="text-[11px]">
+                      Fuel expenses ({totalFuelKmInMonth} km) for {currentEmployee.name} in {salaryMonth} were already reimbursed in Payslip #{duplicateReimbursementInfo.otherPayslipNumber} ({duplicateReimbursementInfo.otherPayslipStatus} • {currencySymbol}{formatCurrency(duplicateReimbursementInfo.reimbursedAmount)}). Auto-reimbursement was prevented to avoid double payment.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSyncFuelReimbursement}
+                    className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-white hover:bg-amber-50 border border-amber-400 rounded-lg shrink-0 cursor-pointer shadow-2xs"
+                  >
+                    Add Anyway
+                  </button>
+                </div>
+              )}
+
+              {/* Auto Applied Success Note */}
+              {totalFuelKmInMonth > 0 && !duplicateReimbursementInfo?.alreadyReimbursedInOther && (
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>
+                    <strong>{totalFuelKmInMonth} km</strong> logged across {fuelAttendanceRecords.length} trip{fuelAttendanceRecords.length !== 1 ? 's' : ''} automatically added as a reimbursement line item below: <strong>{currencySymbol}{formatCurrency(Math.round(totalFuelKmInMonth * (parseFloat(String(reimbursementRatePerKm)) || 0) * 100) / 100)}</strong> ({currencySymbol}{reimbursementRatePerKm}/km).
+                  </span>
+                </div>
+              )}
 
               {/* Rate Configuration & Quick Metrics */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-amber-200/70 text-xs">

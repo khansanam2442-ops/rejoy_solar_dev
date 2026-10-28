@@ -142,6 +142,32 @@ function ensureRequiredTables($pdo) {
         }
     }
 
+    // Auto-migrate missing columns on solar_attendance
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM `solar_attendance` LIKE 'fuel_expense_json'")->fetchAll();
+        if (empty($cols)) {
+            $pdo->exec("ALTER TABLE `solar_attendance` ADD COLUMN `fuel_expense_json` LONGTEXT DEFAULT NULL");
+        }
+    } catch (Exception $e) {}
+
+    // Auto-migrate missing columns on solar_payslips
+    try {
+        $neededCols = [
+            'additional_expenses_json' => 'LONGTEXT DEFAULT NULL',
+            'deductions_json' => 'LONGTEXT DEFAULT NULL',
+            'overtime_hours' => 'DECIMAL(6,2) DEFAULT 0.00',
+            'overtime_rate' => 'DECIMAL(10,2) DEFAULT 0.00',
+            'payment_mode' => "VARCHAR(64) DEFAULT 'NEFT/RTGS Bank Transfer'",
+            'bank_reference_no' => "VARCHAR(128) DEFAULT ''"
+        ];
+        foreach ($neededCols as $c => $def) {
+            $check = $pdo->query("SHOW COLUMNS FROM `solar_payslips` LIKE '$c'")->fetchAll();
+            if (empty($check)) {
+                $pdo->exec("ALTER TABLE `solar_payslips` ADD COLUMN `$c` $def");
+            }
+        }
+    } catch (Exception $e) {}
+
     $tablesVerified = true;
 }
 
@@ -834,26 +860,31 @@ function saveAttendanceToDb($pdo, $item) {
     $projId = $item['siteProjectId'] ?? $item['site_project_id'] ?? '';
     $projTitle = $item['siteProjectTitle'] ?? $item['site_project_title'] ?? '';
     $status = $item['status'] ?? 'PRESENT';
+    $fuelExpense = $item['fuelExpense'] ?? $item['fuel_expense'] ?? $item['fuel_expense_json'] ?? null;
+    $fuelExpenseJson = $fuelExpense ? (is_string($fuelExpense) ? $fuelExpense : json_encode($fuelExpense)) : null;
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_attendance` (
             `id`, `employee_id`, `employee_name`, `attendance_date`, `check_in_time`,
             `check_out_time`, `check_in_gps_json`, `check_out_gps_json`, `site_project_id`,
-            `site_project_title`, `status`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `site_project_title`, `status`, `fuel_expense_json`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `employee_name` = VALUES(`employee_name`),
+            `attendance_date` = VALUES(`attendance_date`),
+            `check_in_time` = VALUES(`check_in_time`),
             `check_out_time` = VALUES(`check_out_time`),
             `check_in_gps_json` = VALUES(`check_in_gps_json`),
             `check_out_gps_json` = VALUES(`check_out_gps_json`),
             `site_project_id` = VALUES(`site_project_id`),
             `site_project_title` = VALUES(`site_project_title`),
-            `status` = VALUES(`status`)
+            `status` = VALUES(`status`),
+            `fuel_expense_json` = VALUES(`fuel_expense_json`)
     ");
     $stmt->execute([
         $item['id'], $empId, $empName, $attDate, $checkInTime,
         $checkOutTime, $checkInGpsJson, $checkOutGpsJson, $projId,
-        $projTitle, $status
+        $projTitle, $status, $fuelExpenseJson
     ]);
     return $item;
 }
@@ -865,34 +896,55 @@ function savePayslipToDb($pdo, $item) {
     $empName = $item['employeeName'] ?? $item['employee_name'] ?? 'Employee';
     $month = $item['month'] ?? date('F');
     $year = intval($item['year'] ?? date('Y'));
-    $basic = floatval($item['basicSalary'] ?? $item['basic_salary'] ?? 0);
-    $allow = floatval($item['allowances'] ?? 0);
-    $ded = floatval($item['deductions'] ?? 0);
-    $net = floatval($item['netSalary'] ?? $item['net_salary'] ?? ($basic + $allow - $ded));
-    $status = $item['paymentStatus'] ?? $item['payment_status'] ?? 'PAID';
+    $basic = floatval($item['baseSalary'] ?? $item['basicSalary'] ?? $item['basic_salary'] ?? 0);
+    $allow = floatval($item['overtimeAmount'] ?? $item['allowances'] ?? 0);
+    $additionalExpenses = $item['additionalExpenses'] ?? $item['additional_expenses'] ?? [];
+    $additionalExpensesJson = is_string($additionalExpenses) ? $additionalExpenses : json_encode($additionalExpenses);
+    $totalExpenses = floatval($item['totalAdditionalExpenses'] ?? (is_array($additionalExpenses) ? array_reduce($additionalExpenses, fn($carry, $x) => $carry + floatval($x['amount'] ?? 0), 0) : 0));
+    $dedList = $item['deductions'] ?? [];
+    $deductionsJson = is_array($dedList) ? json_encode($dedList) : (is_string($dedList) ? $dedList : '[]');
+    $ded = floatval($item['totalDeductions'] ?? (is_array($dedList) ? array_reduce($dedList, fn($carry, $x) => $carry + floatval($x['amount'] ?? 0), 0) : floatval($item['deductions'] ?? 0)));
+    $net = floatval($item['netPay'] ?? $item['netSalary'] ?? $item['net_salary'] ?? max(0, $basic + $allow + $totalExpenses - $ded));
+    $status = $item['status'] ?? $item['paymentStatus'] ?? $item['payment_status'] ?? 'PAID';
     $payDate = !empty($item['paymentDate'] ?? $item['payment_date']) ? substr($item['paymentDate'] ?? $item['payment_date'], 0, 10) : date('Y-m-d');
     $notes = $item['notes'] ?? '';
+    $overtimeHours = floatval($item['overtimeHours'] ?? $item['overtime_hours'] ?? 0);
+    $overtimeRate = floatval($item['overtimeRatePerHour'] ?? $item['overtime_rate'] ?? 0);
+    $paymentMode = $item['paymentMode'] ?? $item['payment_mode'] ?? 'NEFT/RTGS Bank Transfer';
+    $bankRefNo = $item['bankReferenceNo'] ?? $item['bank_reference_no'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_payslips` (
             `id`, `employee_id`, `employee_name`, `month`, `year`,
             `basic_salary`, `allowances`, `deductions`, `net_salary`,
-            `payment_status`, `payment_date`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `payment_status`, `payment_date`, `notes`,
+            `additional_expenses_json`, `deductions_json`, `overtime_hours`, `overtime_rate`,
+            `payment_mode`, `bank_reference_no`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `employee_name` = VALUES(`employee_name`),
+            `month` = VALUES(`month`),
+            `year` = VALUES(`year`),
             `basic_salary` = VALUES(`basic_salary`),
             `allowances` = VALUES(`allowances`),
             `deductions` = VALUES(`deductions`),
             `net_salary` = VALUES(`net_salary`),
             `payment_status` = VALUES(`payment_status`),
             `payment_date` = VALUES(`payment_date`),
-            `notes` = VALUES(`notes`)
+            `notes` = VALUES(`notes`),
+            `additional_expenses_json` = VALUES(`additional_expenses_json`),
+            `deductions_json` = VALUES(`deductions_json`),
+            `overtime_hours` = VALUES(`overtime_hours`),
+            `overtime_rate` = VALUES(`overtime_rate`),
+            `payment_mode` = VALUES(`payment_mode`),
+            `bank_reference_no` = VALUES(`bank_reference_no`)
     ");
     $stmt->execute([
         $item['id'], $empId, $empName, $month, $year,
         $basic, $allow, $ded, $net,
-        $status, $payDate, $notes
+        $status, $payDate, $notes,
+        $additionalExpensesJson, $deductionsJson, $overtimeHours, $overtimeRate,
+        $paymentMode, $bankRefNo
     ]);
     return $item;
 }
@@ -2514,6 +2566,10 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_attendance` ORDER BY `attendance_date` DESC');
         $rows = $stmt->fetchAll();
         $data['attendance'] = array_map(function ($r) {
+            $fuelExpense = null;
+            if (!empty($r['fuel_expense_json'])) {
+                $fuelExpense = json_decode($r['fuel_expense_json'], true);
+            }
             return [
                 'id' => $r['id'],
                 'employeeId' => $r['employee_id'],
@@ -2527,6 +2583,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'siteProjectId' => $r['site_project_id'] ?? '',
                 'siteProjectTitle' => $r['site_project_title'] ?? '',
                 'status' => $r['status'] ?? 'PRESENT',
+                'fuelExpense' => $fuelExpense,
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);
@@ -2537,18 +2594,43 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_payslips` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['payslips'] = array_map(function ($r) {
+            $addExpenses = json_decode($r['additional_expenses_json'] ?? '[]', true) ?: [];
+            $dedList = json_decode($r['deductions_json'] ?? '[]', true) ?: [];
+            $totalExpenses = is_array($addExpenses) ? array_reduce($addExpenses, fn($s, $x) => $s + floatval($x['amount'] ?? 0), 0) : 0;
+            $totalDeductions = !empty($dedList) && is_array($dedList)
+                ? array_reduce($dedList, fn($s, $x) => $s + floatval($x['amount'] ?? 0), 0)
+                : floatval($r['deductions'] ?? 0);
+            $basic = floatval($r['basic_salary'] ?? 0);
+            $overtimeAmt = floatval($r['allowances'] ?? 0);
+            $net = floatval($r['net_salary'] ?? ($basic + $overtimeAmt + $totalExpenses - $totalDeductions));
+
             return [
                 'id' => $r['id'],
+                'payslipNumber' => $r['id'],
                 'employeeId' => $r['employee_id'],
                 'employeeName' => $r['employee_name'],
+                'employeeCode' => $r['employee_id'],
                 'month' => $r['month'],
                 'year' => intval($r['year']),
-                'basicSalary' => floatval($r['basic_salary'] ?? 0),
-                'allowances' => floatval($r['allowances'] ?? 0),
-                'deductions' => floatval($r['deductions'] ?? 0),
-                'netSalary' => floatval($r['net_salary'] ?? 0),
+                'baseSalary' => $basic,
+                'basicSalary' => $basic,
+                'allowances' => $overtimeAmt,
+                'overtimeAmount' => $overtimeAmt,
+                'overtimeType' => (!empty($r['overtime_hours']) && floatval($r['overtime_hours']) > 0) ? 'CALCULATED' : 'DIRECT',
+                'overtimeHours' => floatval($r['overtime_hours'] ?? 0),
+                'overtimeRatePerHour' => floatval($r['overtime_rate'] ?? 0),
+                'additionalExpenses' => $addExpenses,
+                'totalAdditionalExpenses' => $totalExpenses,
+                'deductions' => $dedList,
+                'totalDeductions' => $totalDeductions,
+                'grossEarnings' => $basic + $overtimeAmt + $totalExpenses,
+                'netPay' => $net,
+                'netSalary' => $net,
                 'paymentStatus' => $r['payment_status'] ?? 'PAID',
+                'status' => $r['payment_status'] === 'PAID' ? 'PAID' : ($r['payment_status'] ?? 'GENERATED'),
                 'paymentDate' => $r['payment_date'],
+                'paymentMode' => $r['payment_mode'] ?? 'NEFT/RTGS Bank Transfer',
+                'bankReferenceNo' => $r['bank_reference_no'] ?? '',
                 'notes' => $r['notes'] ?? '',
                 'createdAt' => $r['created_at']
             ];

@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS `solar_attendance` (
   `site_project_id` VARCHAR(64) DEFAULT '',
   `site_project_title` VARCHAR(255) DEFAULT '',
   `status` VARCHAR(32) DEFAULT 'PRESENT',
+  `fuel_expense_json` LONGTEXT DEFAULT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_attendance_emp_date` (`employee_id`, `attendance_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -322,6 +323,12 @@ CREATE TABLE IF NOT EXISTS `solar_payslips` (
   `payment_status` VARCHAR(32) DEFAULT 'PAID',
   `payment_date` DATE DEFAULT NULL,
   `notes` TEXT,
+  `additional_expenses_json` LONGTEXT DEFAULT NULL,
+  `deductions_json` LONGTEXT DEFAULT NULL,
+  `overtime_hours` DECIMAL(6,2) DEFAULT 0.00,
+  `overtime_rate` DECIMAL(10,2) DEFAULT 0.00,
+  `payment_mode` VARCHAR(64) DEFAULT 'NEFT/RTGS Bank Transfer',
+  `bank_reference_no` VARCHAR(128) DEFAULT '',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_payslips_emp` (`employee_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

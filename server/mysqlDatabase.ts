@@ -469,6 +469,38 @@ class MySqlDatabaseManager {
         }
       } catch {}
 
+      // Check and migrate columns on solar_attendance
+      try {
+        const [cols]: any = await this.pool.query("SHOW COLUMNS FROM `solar_attendance`");
+        const existing = new Set<string>((cols as any[]).map(c => String(c.Field).toLowerCase()));
+        if (!existing.has('fuel_expense_json')) {
+          try {
+            await this.pool.query("ALTER TABLE `solar_attendance` ADD COLUMN `fuel_expense_json` LONGTEXT DEFAULT NULL");
+          } catch {}
+        }
+      } catch {}
+
+      // Check and migrate columns on solar_payslips
+      try {
+        const [cols]: any = await this.pool.query("SHOW COLUMNS FROM `solar_payslips`");
+        const existing = new Set<string>((cols as any[]).map(c => String(c.Field).toLowerCase()));
+        const neededPayslipCols: Record<string, string> = {
+          additional_expenses_json: "LONGTEXT DEFAULT NULL",
+          deductions_json: "LONGTEXT DEFAULT NULL",
+          overtime_hours: "DECIMAL(6,2) DEFAULT 0.00",
+          overtime_rate: "DECIMAL(10,2) DEFAULT 0.00",
+          payment_mode: "VARCHAR(64) DEFAULT 'NEFT/RTGS Bank Transfer'",
+          bank_reference_no: "VARCHAR(128) DEFAULT ''"
+        };
+        for (const [col, typeDef] of Object.entries(neededPayslipCols)) {
+          if (!existing.has(col.toLowerCase())) {
+            try {
+              await this.pool.query(`ALTER TABLE \`solar_payslips\` ADD COLUMN \`${col}\` ${typeDef}`);
+            } catch {}
+          }
+        }
+      } catch {}
+
       await this.ensureHashedPasswords();
     } catch (err: any) {
       console.error('[MySQL] Schema execution notice:', err?.message || err);
@@ -2226,21 +2258,30 @@ class MySqlDatabaseManager {
     if (!this.isConnected) return this.getFallbackItems('attendance');
     this.assertDbConnected();
     const [rows] = await this.pool!.query('SELECT * FROM `solar_attendance` ORDER BY `attendance_date` DESC, `check_in_time` DESC');
-    const mapped = (rows as any[]).map(r => ({
-      id: r.id,
-      employeeId: r.employee_id,
-      employeeName: r.employee_name,
-      date: r.attendance_date ? String(r.attendance_date).split('T')[0] : '',
-      attendanceDate: r.attendance_date ? String(r.attendance_date).split('T')[0] : '',
-      checkInTime: r.check_in_time,
-      checkOutTime: r.check_out_time,
-      checkInGPS: r.check_in_gps_json ? JSON.parse(r.check_in_gps_json) : undefined,
-      checkOutGPS: r.check_out_gps_json ? JSON.parse(r.check_out_gps_json) : undefined,
-      siteProjectId: r.site_project_id,
-      siteProjectTitle: r.site_project_title,
-      status: r.status,
-      createdAt: r.created_at
-    }));
+    const mapped = (rows as any[]).map(r => {
+      let fuelExpense: any = undefined;
+      if (r.fuel_expense_json) {
+        try {
+          fuelExpense = typeof r.fuel_expense_json === 'string' ? JSON.parse(r.fuel_expense_json) : r.fuel_expense_json;
+        } catch {}
+      }
+      return {
+        id: r.id,
+        employeeId: r.employee_id,
+        employeeName: r.employee_name,
+        date: r.attendance_date ? String(r.attendance_date).split('T')[0] : '',
+        attendanceDate: r.attendance_date ? String(r.attendance_date).split('T')[0] : '',
+        checkInTime: r.check_in_time,
+        checkOutTime: r.check_out_time,
+        checkInGPS: r.check_in_gps_json ? JSON.parse(r.check_in_gps_json) : undefined,
+        checkOutGPS: r.check_out_gps_json ? JSON.parse(r.check_out_gps_json) : undefined,
+        siteProjectId: r.site_project_id,
+        siteProjectTitle: r.site_project_title,
+        status: r.status,
+        fuelExpense,
+        createdAt: r.created_at
+      };
+    });
     this.setFallbackItems('attendance', mapped);
     return mapped;
   }
@@ -2248,15 +2289,27 @@ class MySqlDatabaseManager {
   public async saveAttendance(item: any): Promise<any> {
     this.assertDbConnected();
     const attDate = item.attendanceDate ? String(item.attendanceDate).split('T')[0] : (item.date ? String(item.date).split('T')[0] : new Date().toISOString().split('T')[0]);
+    const fuelExpenseJson = item.fuelExpense
+      ? JSON.stringify(item.fuelExpense)
+      : (item.fuel_expense_json ? (typeof item.fuel_expense_json === 'string' ? item.fuel_expense_json : JSON.stringify(item.fuel_expense_json)) : null);
+
     const sql = `
       INSERT INTO \`solar_attendance\` (
         \`id\`, \`employee_id\`, \`employee_name\`, \`attendance_date\`,
         \`check_in_time\`, \`check_out_time\`, \`check_in_gps_json\`, \`check_out_gps_json\`,
-        \`site_project_id\`, \`site_project_title\`, \`status\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`site_project_id\`, \`site_project_title\`, \`status\`, \`fuel_expense_json\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        \`check_out_time\` = VALUES(\`check_out_time\`), \`status\` = VALUES(\`status\`),
-        \`check_out_gps_json\` = VALUES(\`check_out_gps_json\`)
+        \`employee_name\` = VALUES(\`employee_name\`),
+        \`attendance_date\` = VALUES(\`attendance_date\`),
+        \`check_in_time\` = VALUES(\`check_in_time\`),
+        \`check_out_time\` = VALUES(\`check_out_time\`),
+        \`status\` = VALUES(\`status\`),
+        \`check_in_gps_json\` = VALUES(\`check_in_gps_json\`),
+        \`check_out_gps_json\` = VALUES(\`check_out_gps_json\`),
+        \`site_project_id\` = VALUES(\`site_project_id\`),
+        \`site_project_title\` = VALUES(\`site_project_title\`),
+        \`fuel_expense_json\` = VALUES(\`fuel_expense_json\`)
     `;
     await this.pool!.query(sql, [
       item.id,
@@ -2269,7 +2322,8 @@ class MySqlDatabaseManager {
       item.checkOutGPS ? JSON.stringify(item.checkOutGPS) : null,
       item.siteProjectId || '',
       item.siteProjectTitle || '',
-      item.status || 'PRESENT'
+      item.status || 'PRESENT',
+      fuelExpenseJson
     ]);
 
     const items = this.getFallbackItems('attendance');
@@ -2298,8 +2352,30 @@ class MySqlDatabaseManager {
     const mapped = (rows as any[]).map(r => {
       const basicSalary = Number(r.basic_salary) || 0;
       const allowances = Number(r.allowances) || 0;
-      const deductions = Number(r.deductions) || 0;
       const netSalary = Number(r.net_salary) || 0;
+      let additionalExpenses: any[] = [];
+      try {
+        if (r.additional_expenses_json) {
+          additionalExpenses = typeof r.additional_expenses_json === 'string'
+            ? JSON.parse(r.additional_expenses_json)
+            : r.additional_expenses_json;
+        }
+      } catch {}
+      let deductionsList: any[] = [];
+      try {
+        if (r.deductions_json) {
+          deductionsList = typeof r.deductions_json === 'string'
+            ? JSON.parse(r.deductions_json)
+            : r.deductions_json;
+        }
+      } catch {}
+      const totalAdditionalExpenses = Array.isArray(additionalExpenses)
+        ? additionalExpenses.reduce((s, it) => s + (Number(it.amount) || 0), 0)
+        : 0;
+      const totalDeductions = deductionsList.length > 0
+        ? deductionsList.reduce((s, it) => s + (Number(it.amount) || 0), 0)
+        : (Number(r.deductions) || 0);
+
       return {
         id: r.id,
         payslipNumber: r.id,
@@ -2312,17 +2388,21 @@ class MySqlDatabaseManager {
         basicSalary: basicSalary,
         allowances: allowances,
         overtimeAmount: allowances,
-        overtimeType: 'DIRECT',
-        totalAdditionalExpenses: 0,
-        additionalExpenses: [],
-        deductions: [],
-        totalDeductions: deductions,
-        grossEarnings: basicSalary + allowances,
-        netPay: netSalary,
-        netSalary: netSalary,
+        overtimeType: (r.overtime_hours && Number(r.overtime_hours) > 0) ? 'CALCULATED' : 'DIRECT',
+        overtimeHours: Number(r.overtime_hours) || 0,
+        overtimeRatePerHour: Number(r.overtime_rate) || 0,
+        totalAdditionalExpenses,
+        additionalExpenses: Array.isArray(additionalExpenses) ? additionalExpenses : [],
+        deductions: Array.isArray(deductionsList) ? deductionsList : [],
+        totalDeductions,
+        grossEarnings: basicSalary + allowances + totalAdditionalExpenses,
+        netPay: netSalary || Math.max(0, basicSalary + allowances + totalAdditionalExpenses - totalDeductions),
+        netSalary: netSalary || Math.max(0, basicSalary + allowances + totalAdditionalExpenses - totalDeductions),
         paymentStatus: r.payment_status || 'PAID',
-        status: r.payment_status === 'PAID' ? 'PAID' : 'GENERATED',
+        status: r.payment_status === 'PAID' ? 'PAID' : (r.payment_status || 'GENERATED'),
         paymentDate: r.payment_date,
+        paymentMode: r.payment_mode || 'NEFT/RTGS Bank Transfer',
+        bankReferenceNo: r.bank_reference_no || '',
         notes: r.notes || '',
         createdAt: r.created_at
       };
@@ -2333,20 +2413,44 @@ class MySqlDatabaseManager {
 
   public async savePayslip(item: any): Promise<any> {
     this.assertDbConnected();
+    const basicSalary = Number(item.baseSalary ?? item.basicSalary ?? item.basic_salary) || 0;
+    const allowances = Number(item.overtimeAmount ?? item.allowances) || 0;
+    const deductions = Number(item.totalDeductions ?? (Array.isArray(item.deductions) ? item.deductions.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0) : item.deductions)) || 0;
+    const additionalExpensesJson = item.additionalExpenses ? JSON.stringify(item.additionalExpenses) : (item.additional_expenses_json || '[]');
+    const deductionsJson = item.deductions ? (Array.isArray(item.deductions) ? JSON.stringify(item.deductions) : JSON.stringify([])) : (item.deductions_json || '[]');
+    const totalAdditionalExpenses = Number(item.totalAdditionalExpenses ?? (Array.isArray(item.additionalExpenses) ? item.additionalExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0) : 0)) || 0;
+    const netSalary = Number(item.netPay ?? item.netSalary ?? item.net_salary) || Math.max(0, basicSalary + allowances + totalAdditionalExpenses - deductions);
+    const overtimeHours = Number(item.overtimeHours ?? item.overtime_hours) || 0;
+    const overtimeRate = Number(item.overtimeRatePerHour ?? item.overtime_rate) || 0;
+    const paymentMode = item.paymentMode ?? item.payment_mode ?? 'NEFT/RTGS Bank Transfer';
+    const bankRefNo = item.bankReferenceNo ?? item.bank_reference_no ?? '';
+
     const sql = `
       INSERT INTO \`solar_payslips\` (
         \`id\`, \`employee_id\`, \`employee_name\`, \`month\`, \`year\`,
         \`basic_salary\`, \`allowances\`, \`deductions\`, \`net_salary\`,
-        \`payment_status\`, \`payment_date\`, \`notes\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`payment_status\`, \`payment_date\`, \`notes\`,
+        \`additional_expenses_json\`, \`deductions_json\`, \`overtime_hours\`, \`overtime_rate\`,
+        \`payment_mode\`, \`bank_reference_no\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        \`payment_status\` = VALUES(\`payment_status\`), \`payment_date\` = VALUES(\`payment_date\`),
-        \`net_salary\` = VALUES(\`net_salary\`), \`notes\` = VALUES(\`notes\`)
+        \`employee_name\` = VALUES(\`employee_name\`),
+        \`month\` = VALUES(\`month\`),
+        \`year\` = VALUES(\`year\`),
+        \`basic_salary\` = VALUES(\`basic_salary\`),
+        \`allowances\` = VALUES(\`allowances\`),
+        \`deductions\` = VALUES(\`deductions\`),
+        \`net_salary\` = VALUES(\`net_salary\`),
+        \`payment_status\` = VALUES(\`payment_status\`),
+        \`payment_date\` = VALUES(\`payment_date\`),
+        \`notes\` = VALUES(\`notes\`),
+        \`additional_expenses_json\` = VALUES(\`additional_expenses_json\`),
+        \`deductions_json\` = VALUES(\`deductions_json\`),
+        \`overtime_hours\` = VALUES(\`overtime_hours\`),
+        \`overtime_rate\` = VALUES(\`overtime_rate\`),
+        \`payment_mode\` = VALUES(\`payment_mode\`),
+        \`bank_reference_no\` = VALUES(\`bank_reference_no\`)
     `;
-    const basicSalary = Number(item.baseSalary ?? item.basicSalary ?? item.basic_salary) || 0;
-    const allowances = Number(item.overtimeAmount ?? item.allowances) || 0;
-    const deductions = Number(item.totalDeductions ?? (Array.isArray(item.deductions) ? item.deductions.reduce((s: number, d: any) => s + (Number(d.amount) || 0), 0) : item.deductions)) || 0;
-    const netSalary = Number(item.netPay ?? item.netSalary ?? item.net_salary) || Math.max(0, basicSalary + allowances - deductions);
 
     await this.pool!.query(sql, [
       item.id,
@@ -2360,7 +2464,13 @@ class MySqlDatabaseManager {
       netSalary,
       item.status || item.paymentStatus || 'UNPAID',
       item.paymentDate ? String(item.paymentDate).split('T')[0] : null,
-      item.notes || ''
+      item.notes || '',
+      additionalExpensesJson,
+      deductionsJson,
+      overtimeHours,
+      overtimeRate,
+      paymentMode,
+      bankRefNo
     ]);
 
     const items = this.getFallbackItems('payslips');

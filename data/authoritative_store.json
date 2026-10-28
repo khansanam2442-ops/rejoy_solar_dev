@@ -1,6 +1,8 @@
 {
   "settings": {
     "companyName": "REJOY SOLAR POWER PVT. LTD",
+    "phone": "+91 98250 11223",
+    "email": "admin@rejoysolar.com",
     "companyAddress": "PLOT NO- 14, STREET NO- 14B, PRAGATI NAGAR, RISALI BHILAI, Chhattisgarh 490006",
     "companyPhone": "+91 98250 12345",
     "companyEmail": "rejoysolarpower@gmail.com",
@@ -73,6 +75,27 @@
       "activeProjectId": "proj-1792913305253",
       "createdAt": "2026-10-28T08:07:20.000Z",
       "updatedAt": "2026-10-28T08:14:33.000Z"
+    },
+    {
+      "id": "cust-demo-rejoy",
+      "customerCode": "CUST-REJOY-01",
+      "name": "ABC Industries Ltd.",
+      "companyName": "ABC Industries Ltd.",
+      "customerType": "Commercial",
+      "phone": "+91 98250 12345",
+      "email": "customer@rejoysolar.com",
+      "password": "123456",
+      "siteAddress": "Plot 42, GIDC Industrial Estate",
+      "city": "Ahmedabad",
+      "state": "Gujarat",
+      "pincode": "382445",
+      "gstNumber": "24AAACA0000A1Z5",
+      "electricityConsumerNo": "UGVCL-889922",
+      "sanctionedLoadKw": 50,
+      "status": "ACTIVE",
+      "activeProjectId": null,
+      "createdAt": "2026-10-28T15:44:20.543Z",
+      "updatedAt": "2026-10-28T15:44:20.544Z"
     }
   ],
   "leads": [
