@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth, DEMO_ACCOUNTS, DemoAccount } from '../../context/AuthContext';
-import { apiClient } from '../../services/apiClient';
+import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import {
   Sun,
   Lock,
@@ -8,103 +7,31 @@ import {
   Eye,
   EyeOff,
   ArrowRight,
-  Sparkles,
   AlertCircle,
   CheckCircle2,
   HelpCircle,
   X,
-  ShieldCheck,
-  ChevronDown,
-  ChevronUp,
-  UserCheck,
-  User,
-  Phone,
-  Shield
+  ShieldCheck
 } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
-  const { login, register, resetPassword, loading } = useAuth();
-
-  // Mode: Sign In vs Admin Registration
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const { login, resetPassword, loading } = useAuth();
 
   // Login inputs
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Registration inputs
-  const [name, setName] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [phone, setPhone] = useState('');
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  // Registration status
-  const [regStatus, setRegStatus] = useState<{ allowPublicRegistration: boolean; adminCount: number } | null>(null);
-
   // States
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  // Developer quick-login drawer
-  const [showDevAccounts, setShowDevAccounts] = useState(false);
 
   // Forgot password modal
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetStatus, setResetStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
-  useEffect(() => {
-    fetch(`${apiClient.getBaseUrl()}/auth/registration-status`)
-      .then(r => r.json())
-      .then(d => {
-        if (d && d.success) {
-          setRegStatus(d);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const cleanName = name.trim();
-    const cleanEmail = email.trim();
-    const cleanPassword = password.trim();
-    const cleanConfirm = confirmPassword.trim();
-    const cleanPhone = phone.trim() || '+91 98250 11223';
-
-    if (!cleanName) {
-      setErrorMessage('Please enter your full name.');
-      return;
-    }
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setErrorMessage('Please enter a valid business email address.');
-      return;
-    }
-    if (!cleanPassword || cleanPassword.length < 6) {
-      setErrorMessage('Password must be at least 6 characters long.');
-      return;
-    }
-    if (cleanPassword !== cleanConfirm) {
-      setErrorMessage('Passwords do not match. Please verify your confirm password field.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await register(cleanEmail, cleanPassword, cleanName, 'Admin', 'Administration', 'Lead Administrator', cleanPhone);
-      setSuccessMessage('Administrator account registered and saved to MySQL successfully! Logging in...');
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Registration failed. An account with this email may already exist.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,21 +57,6 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  const handleSelectDemoAccount = async (account: DemoAccount) => {
-    setEmail(account.email);
-    setPassword(account.password);
-    setErrorMessage(null);
-
-    setIsSubmitting(true);
-    try {
-      await login(account.email, account.password);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Login failed for demo account');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetEmail.trim()) {
@@ -158,7 +70,7 @@ export const LoginView: React.FC = () => {
       await resetPassword(resetEmail);
       setResetStatus({
         type: 'success',
-        message: 'Password reset link sent! Check your inbox or contact your administrator.'
+        message: 'Password reset instructions sent. Please check your inbox or contact your administrator.'
       });
     } catch (err: any) {
       setResetStatus({
@@ -211,41 +123,6 @@ export const LoginView: React.FC = () => {
 
         {/* Primary Auth Card */}
         <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 text-slate-900">
-          {/* Auth Mode Switcher (Sign In vs Admin Registration) */}
-          <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl mb-5">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('login');
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                authMode === 'login'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('register');
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'register'
-                  ? 'bg-white text-amber-700 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span>Admin Registration</span>
-            </button>
-          </div>
-
           {/* Error Message */}
           {errorMessage && (
             <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-xs text-rose-800 animate-in fade-in">
@@ -256,7 +133,7 @@ export const LoginView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setErrorMessage(null)}
-                className="text-rose-400 hover:text-rose-600"
+                className="text-rose-400 hover:text-rose-600 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -271,255 +148,91 @@ export const LoginView: React.FC = () => {
             </div>
           )}
 
-          {/* Mode 1: LOGIN */}
-          {authMode === 'login' && (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Mail className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="email"
-                    required
-                    autoFocus
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@rejoysolar.com"
-                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Password
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setResetEmail(email);
-                      setShowForgotModal(true);
-                    }}
-                    className="text-[11px] font-semibold text-amber-600 hover:text-amber-700 transition-colors cursor-pointer"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Lock className="w-4 h-4" />
-                  </div>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full pl-10 pr-16 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-                  >
-                    {showPassword ? (
-                      <>
-                        <EyeOff className="w-3.5 h-3.5" />
-                        <span>Hide</span>
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Show</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting || loading}
-                className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50 cursor-pointer"
-              >
-                {isSubmitting ? (
-                  <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <span>Sign In</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </form>
-          )}
-
-          {/* Mode 2: ADMIN REGISTRATION */}
-          {authMode === 'register' && (
+          {/* Production Login Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              {regStatus && !regStatus.allowPublicRegistration ? (
-                <div className="space-y-4 py-2">
-                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs space-y-2">
-                    <div className="flex items-center gap-2 font-bold text-amber-800">
-                      <ShieldCheck className="w-4 h-4 text-amber-600" />
-                      <span>Initial Administrator Setup Completed</span>
-                    </div>
-                    <p className="leading-relaxed text-slate-600">
-                      Public administrator self-registration is closed because system administrators already exist in MySQL.
-                      To provision additional administrators or team members, sign in with your administrator account and navigate to <strong>User Management</strong>.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAuthMode('login')}
-                    className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
-                  >
-                    Switch to Sign In
-                  </button>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Email Address
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <Mail className="w-4 h-4" />
                 </div>
-              ) : (
-                <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
-                  <div className="p-2.5 bg-amber-50/80 border border-amber-200/70 rounded-xl text-[11px] text-amber-900 flex items-start gap-2">
-                    <Shield className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <p>
-                      <strong>Initial System Setup:</strong> Registering the primary Lead Administrator. Password will be securely hashed with bcrypt and stored directly in MySQL.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Full Name *
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <User className="w-4 h-4" />
-                      </div>
-                      <input
-                        type="text"
-                        required
-                        autoFocus
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. Administrator Name"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Work Email *
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Mail className="w-4 h-4" />
-                      </div>
-                      <input
-                        type="email"
-                        required
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="admin@rejoysolar.com"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Phone Number
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Phone className="w-4 h-4" />
-                      </div>
-                      <input
-                        type="tel"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="+91 98250 11223"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Password *
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                          <Lock className="w-3.5 h-3.5" />
-                        </div>
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          required
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Min 6 chars"
-                          className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-700 cursor-pointer"
-                        >
-                          {showPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Confirm Password *
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                          <Lock className="w-3.5 h-3.5" />
-                        </div>
-                        <input
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          required
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="Repeat password"
-                          className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-700 cursor-pointer"
-                        >
-                          {showConfirmPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || loading}
-                    className="w-full mt-3 flex items-center justify-center gap-2 py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50 cursor-pointer"
-                  >
-                    {isSubmitting ? (
-                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-4 h-4" />
-                        <span>Register Administrator Account</span>
-                      </>
-                    )}
-                  </button>
-                </form>
-              )}
+                <input
+                  type="email"
+                  required
+                  autoFocus
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@rejoysolar.com"
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
+                />
+              </div>
             </div>
-          )}
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetEmail(email);
+                    setShowForgotModal(true);
+                  }}
+                  className="text-[11px] font-semibold text-amber-600 hover:text-amber-700 transition-colors cursor-pointer"
+                >
+                  Forgot password?
+                </button>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full pl-10 pr-16 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all font-medium"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                >
+                  {showPassword ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5" />
+                      <span>Hide</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Show</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting || loading}
+              className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {isSubmitting ? (
+                <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <span>Sign In</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
 
           {/* Footer note */}
           <div className="mt-5 pt-4 border-t border-slate-100 text-center">
@@ -528,48 +241,6 @@ export const LoginView: React.FC = () => {
               <span>Need help? Contact system administrator.</span>
             </p>
           </div>
-        </div>
-
-        {/* Quick Administrator Login Drawer (Collapsible) */}
-        <div className="mt-5 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 p-4 text-white shadow-xl">
-          <button
-            type="button"
-            onClick={() => setShowDevAccounts(prev => !prev)}
-            className="w-full flex items-center justify-between text-left text-xs font-bold text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-amber-400" />
-              <span>Authorized Administrator Logins</span>
-            </div>
-            {showDevAccounts ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-
-          {showDevAccounts && (
-            <div className="mt-3.5 pt-3 border-t border-slate-800 space-y-2 animate-in fade-in">
-              <p className="text-[11px] text-slate-400">
-                Click any administrator below to autofill and log into Rejoy Solar ERP (Default password: <strong className="text-amber-400 font-mono">123456</strong>):
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                {DEMO_ACCOUNTS.map((acc) => (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    onClick={() => handleSelectDemoAccount(acc)}
-                    disabled={isSubmitting}
-                    className="p-2.5 text-left bg-slate-800 hover:bg-amber-500 hover:text-slate-950 border border-slate-700/60 rounded-xl transition-all text-slate-200 group cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold truncate group-hover:text-slate-950">
-                      {acc.name}
-                    </div>
-                    <div className="text-[9px] text-slate-400 font-mono truncate group-hover:text-slate-900">
-                      {acc.email}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Security badge */}
@@ -582,7 +253,7 @@ export const LoginView: React.FC = () => {
       {/* Forgot Password Modal */}
       {showForgotModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-slate-900">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-slate-900 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
@@ -599,7 +270,7 @@ export const LoginView: React.FC = () => {
                   setShowForgotModal(false);
                   setResetStatus(null);
                 }}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
