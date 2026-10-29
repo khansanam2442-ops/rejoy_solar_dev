@@ -727,7 +727,10 @@ class MySqlDatabaseManager {
     const customerType = item.customerType ?? item.customer_type ?? existing?.customer_type ?? 'Residential';
     const phone = item.phone ?? existing?.phone ?? '';
     const email = item.email ?? existing?.email ?? '';
-    const password = item.password ?? existing?.password ?? '123456';
+    let password = item.password ?? existing?.password ?? '123456';
+    if (password && !password.startsWith('$2a$') && !password.startsWith('$2b$') && !password.startsWith('$2y$')) {
+      password = await bcrypt.hash(password, 10);
+    }
     const siteAddress = item.siteAddress ?? item.site_address ?? existing?.site_address ?? 'Not specified';
     const city = item.city ?? existing?.city ?? 'Not specified';
     const state = item.state ?? existing?.state ?? 'Gujarat';
@@ -809,6 +812,261 @@ class MySqlDatabaseManager {
     this.assertDbConnected();
     await this.pool!.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [hashed, customerId]);
     return true;
+  }
+
+  public async importCustomers(customerList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    this.assertDbConnected();
+
+    if (!Array.isArray(customerList) || customerList.length === 0) {
+      return {
+        success: true,
+        total: 0,
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        importedRecords: [],
+        skippedRecords: [],
+        failedRecords: [],
+        errors: []
+      };
+    }
+
+    // 1. Fetch existing customers from MySQL to check duplicates accurately
+    let existingCustomers: any[] = [];
+    if (this.isConnected && this.pool) {
+      const [rows] = await this.pool.query(
+        'SELECT id, customer_code, name, company_name, phone, email, gst_number, city FROM `solar_customers`'
+      );
+      existingCustomers = rows as any[];
+    } else {
+      existingCustomers = this.getFallbackItems('customers');
+    }
+
+    // Helper normalization functions
+    const normalizeDigits = (p: any) => String(p || '').replace(/\D/g, '');
+    const normalizeEmail = (e: any) => String(e || '').trim().toLowerCase();
+    const normalizeGst = (g: any) => String(g || '').trim().toUpperCase().replace(/[\s-]/g, '');
+    const normalizeText = (t: any) => String(t || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    // Track existing values to prevent duplicates
+    const phoneSet = new Map<string, string>();
+    const emailSet = new Map<string, string>();
+    const gstSet = new Map<string, string>();
+    const nameCitySet = new Set<string>();
+    const nameCompSet = new Set<string>();
+    const existingCodes = new Set<string>();
+
+    for (const ec of existingCustomers) {
+      if (ec.customer_code) existingCodes.add(String(ec.customer_code).toUpperCase());
+      const p = normalizeDigits(ec.phone);
+      if (p.length >= 7) phoneSet.set(p, ec.name);
+      const em = normalizeEmail(ec.email);
+      if (em) emailSet.set(em, ec.name);
+      const gst = normalizeGst(ec.gst_number);
+      if (gst) gstSet.set(gst, ec.name);
+      const nm = normalizeText(ec.name);
+      const city = normalizeText(ec.city);
+      const comp = normalizeText(ec.company_name);
+      if (nm && city) nameCitySet.add(`${nm}:::${city}`);
+      if (nm && comp) nameCompSet.add(`${nm}:::${comp}`);
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < customerList.length; i++) {
+      const rowNum = i + 1;
+      const raw = customerList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const name = String(raw.name || raw.customerName || '').trim();
+      if (!name) {
+        failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name is mandatory.`);
+        continue;
+      }
+
+      const phoneRaw = String(raw.phone || '').trim();
+      const phoneDigits = normalizeDigits(phoneRaw);
+      if (phoneDigits.length < 7) {
+        failedRecords.push({ row: rowNum, reason: `Valid phone number is required (got "${phoneRaw || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid phone number is required (got "${phoneRaw || 'empty'}").`);
+        continue;
+      }
+
+      const email = normalizeEmail(raw.email);
+      const gst = normalizeGst(raw.gstNumber || raw.gst_number);
+      const companyName = String(raw.companyName || raw.company_name || '').trim();
+      const city = String(raw.city || 'Ahmedabad').trim();
+      const normName = normalizeText(name);
+      const normCity = normalizeText(city);
+      const normComp = normalizeText(companyName);
+
+      // Check duplicates
+      let isDuplicate = false;
+      let dupReason = '';
+
+      for (const [existingPhone, custName] of phoneSet.entries()) {
+        if (
+          existingPhone === phoneDigits ||
+          (phoneDigits.length >= 10 && existingPhone.endsWith(phoneDigits.slice(-10))) ||
+          (existingPhone.length >= 10 && phoneDigits.endsWith(existingPhone.slice(-10)))
+        ) {
+          isDuplicate = true;
+          dupReason = `Phone number "${phoneRaw}" is already registered to "${custName}".`;
+          break;
+        }
+      }
+
+      if (!isDuplicate && email && emailSet.has(email)) {
+        isDuplicate = true;
+        dupReason = `Email address "${email}" is already registered to "${emailSet.get(email)}".`;
+      }
+
+      if (!isDuplicate && gst && gstSet.has(gst)) {
+        isDuplicate = true;
+        dupReason = `GSTIN "${gst}" is already registered to "${gstSet.get(gst)}".`;
+      }
+
+      if (!isDuplicate && normName && normComp && nameCompSet.has(`${normName}:::${normComp}`)) {
+        isDuplicate = true;
+        dupReason = `Customer "${name}" under company "${companyName}" is already registered.`;
+      } else if (!isDuplicate && normName && normCity && nameCitySet.has(`${normName}:::${normCity}`)) {
+        isDuplicate = true;
+        dupReason = `Customer "${name}" in "${city}" is already registered.`;
+      }
+
+      if (isDuplicate) {
+        skippedRecords.push({ row: rowNum, name, reason: dupReason });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupReason}`);
+        continue;
+      }
+
+      // Generate unique customer ID and unique customer code
+      const custId = raw.id && String(raw.id).startsWith('cust-')
+        ? String(raw.id)
+        : `cust-${Date.now()}-${i + 1}-${Math.random().toString(36).substring(2, 6)}`;
+
+      let customerCode = raw.customerCode || raw.customer_code || '';
+      if (!customerCode || existingCodes.has(String(customerCode).toUpperCase())) {
+        do {
+          codeSeq++;
+          customerCode = `CUST-${new Date().getFullYear()}-${String(codeSeq).padStart(4, '0')}`;
+        } while (existingCodes.has(customerCode.toUpperCase()));
+      }
+      existingCodes.add(customerCode.toUpperCase());
+
+      // Hash password
+      const rawPass = String(raw.password || '123456').trim();
+      const hashedPassword = (rawPass.startsWith('$2a$') || rawPass.startsWith('$2b$') || rawPass.startsWith('$2y$'))
+        ? rawPass
+        : await bcrypt.hash(rawPass, 10);
+
+      const customerType = raw.customerType || raw.customer_type || (companyName ? 'Commercial' : 'Residential');
+      const siteAddress = String(raw.siteAddress || raw.site_address || raw.address || `${city}, Gujarat`).trim();
+      const state = String(raw.state || 'Gujarat').trim();
+      const pincode = String(raw.pincode || '380001').trim();
+      const sanctionedLoadKw = Number(raw.sanctionedLoadKw ?? raw.sanctioned_load_kw) || 0;
+      const status = raw.status || 'ACTIVE';
+      const electricityConsumerNo = String(raw.electricityConsumerNo || raw.electricity_consumer_no || '').trim();
+      const nowIso = new Date().toISOString();
+
+      const customerObj = {
+        id: custId,
+        customerCode,
+        name,
+        companyName,
+        customerType,
+        phone: phoneRaw,
+        email,
+        password: hashedPassword,
+        siteAddress,
+        city,
+        state,
+        pincode,
+        gstNumber: gst,
+        electricityConsumerNo,
+        sanctionedLoadKw,
+        status,
+        activeProjectId: raw.activeProjectId || null,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+
+      if (this.isConnected && this.pool) {
+        const sql = `
+          INSERT INTO \`solar_customers\` (
+            \`id\`, \`customer_code\`, \`name\`, \`company_name\`, \`customer_type\`,
+            \`phone\`, \`email\`, \`password\`, \`site_address\`, \`city\`, \`state\`,
+            \`pincode\`, \`gst_number\`, \`electricity_consumer_no\`, \`sanctioned_load_kw\`,
+            \`status\`, \`active_project_id\`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        await this.pool.query(sql, [
+          custId,
+          customerCode,
+          name,
+          companyName,
+          customerType,
+          phoneRaw,
+          email,
+          hashedPassword,
+          siteAddress,
+          city,
+          state,
+          pincode,
+          gst,
+          electricityConsumerNo,
+          sanctionedLoadKw,
+          status,
+          customerObj.activeProjectId
+        ]);
+      }
+
+      phoneSet.set(phoneDigits, name);
+      if (email) emailSet.set(email, name);
+      if (gst) gstSet.set(gst, name);
+      if (normName && normCity) nameCitySet.add(`${normName}:::${normCity}`);
+      if (normName && normComp) nameCompSet.add(`${normName}:::${normComp}`);
+
+      const fallbackList = this.getFallbackItems('customers');
+      const fIdx = fallbackList.findIndex(c => c.id === custId);
+      if (fIdx >= 0) fallbackList[fIdx] = customerObj;
+      else fallbackList.unshift(customerObj);
+      this.setFallbackItems('customers', fallbackList);
+
+      importedRecords.push(customerObj);
+    }
+
+    return {
+      success: true,
+      total: customerList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
   }
 
   // ==========================================================

@@ -1522,5 +1522,20 @@
       "createdAt": "2026-10-28T08:07:20.000Z",
       "updatedAt": "2026-10-28T08:07:20.000Z"
     }
+  ],
+  "workforce_locations": [
+    {
+      "userId": "emp-1",
+      "employeeCode": "EMP001",
+      "name": "Vikram Patel",
+      "email": "admin@rejoysolar.com",
+      "role": "Admin",
+      "isOnline": true,
+      "isSharingLocation": false,
+      "hasLocation": false,
+      "status": "online",
+      "lastSeenAt": "2026-10-29T16:36:58.283Z",
+      "updatedAt": "2026-10-29T16:23:58.009Z"
+    }
   ]
 }

@@ -1,6 +1,6 @@
 import { storageService } from './storage';
 import { validateCustomer, validateEmployee } from './validation';
-import { Customer, Employee } from '../types/solar';
+import { Customer, Employee, Lead } from '../types/solar';
 
 export type ExportModule =
   | 'Leads'
@@ -18,6 +18,10 @@ export interface ImportValidationReport {
   successful: number;
   failed: number;
   duplicate: number;
+  skipped: number;
+  validRecords: any[];
+  skippedRecords: { row: number; name: string; reason: string }[];
+  failedRecords: { row: number; reason: string }[];
   errors: string[];
 }
 
@@ -85,21 +89,80 @@ export function getSampleTemplate(module: ExportModule): { headers: string[]; sa
   }
 }
 
+/**
+ * Robust CSV Line Parser that respects quotes, commas within quotes, and escaped quotes.
+ */
+export function parseCSVRows(csvText: string): string[][] {
+  const result: string[][] = [];
+  const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i].trim();
+    if (!rawLine) continue;
+
+    const row: string[] = [];
+    let insideQuotes = false;
+    let cell = '';
+
+    for (let c = 0; c < lines[i].length; c++) {
+      const char = lines[i][c];
+      if (char === '"') {
+        if (insideQuotes && lines[i][c + 1] === '"') {
+          cell += '"';
+          c++; // skip escaped quote
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+      } else if (char === ',' && !insideQuotes) {
+        row.push(cell.trim().replace(/^"|"$/g, ''));
+        cell = '';
+      } else {
+        cell += char;
+      }
+    }
+    row.push(cell.trim().replace(/^"|"$/g, ''));
+    if (row.some(val => val.length > 0)) {
+      result.push(row);
+    }
+  }
+
+  return result;
+}
+
+function findColIdx(headers: string[], names: string[], fallbackIdx: number): number {
+  const normalizedHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const n of names) {
+    const target = n.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const idx = normalizedHeaders.findIndex(h => h === target || h.includes(target));
+    if (idx >= 0) return idx;
+  }
+  return fallbackIdx;
+}
+
 export function parseAndValidateCSV(text: string, module: ExportModule): ImportValidationReport {
-  const lines = text.trim().split(/\r\n|\n/).filter(line => line.trim().length > 0);
-  if (lines.length <= 1) {
+  const allRows = parseCSVRows(text);
+  if (allRows.length <= 1) {
     return {
       module,
       totalRows: 0,
       successful: 0,
       failed: 0,
       duplicate: 0,
+      skipped: 0,
+      validRecords: [],
+      skippedRecords: [],
+      failedRecords: [],
       errors: ['The uploaded CSV file is empty or missing data rows.']
     };
   }
 
-  const rows = lines.slice(1);
+  const headerRow = allRows[0];
+  const dataRows = allRows.slice(1);
   const errors: string[] = [];
+  const validRecords: any[] = [];
+  const skippedRecords: { row: number; name: string; reason: string }[] = [];
+  const failedRecords: { row: number; reason: string }[] = [];
+
   let successful = 0;
   let failed = 0;
   let duplicate = 0;
@@ -108,62 +171,137 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
   const batchCustomers: Customer[] = [...storageService.getCustomers()];
   const batchEmployees: Employee[] = [...storageService.getEmployees()];
 
-  rows.forEach((row, index) => {
-    const cols = row.split(',').map(c => c.replace(/^"|"$/g, '').trim());
+  // Column index resolvers for flexible customer CSV columns
+  const nameIdx = findColIdx(headerRow, ['customer name', 'name', 'client name', 'client'], 0);
+  const companyIdx = findColIdx(headerRow, ['company name', 'company', 'enterprise', 'firm'], 1);
+  const typeIdx = findColIdx(headerRow, ['customer type', 'type', 'category'], 2);
+  const phoneIdx = findColIdx(headerRow, ['phone', 'mobile', 'contact', 'phone number', 'contact number'], 3);
+  const emailIdx = findColIdx(headerRow, ['email', 'email address', 'mail'], 4);
+  const addressIdx = findColIdx(headerRow, ['site address', 'address', 'site location', 'premises'], 5);
+  const cityIdx = findColIdx(headerRow, ['city', 'district', 'town'], 6);
+  const gstIdx = findColIdx(headerRow, ['gst number', 'gstin', 'gst', 'gst no'], 7);
+  const loadIdx = findColIdx(headerRow, ['sanctioned load (kw)', 'sanctioned load', 'load (kw)', 'capacity (kw)', 'capacity', 'solar capacity (kw)', 'load'], 8);
+  const stateIdx = findColIdx(headerRow, ['state', 'province'], -1);
+  const pinIdx = findColIdx(headerRow, ['pincode', 'pin code', 'zip'], -1);
+  const passIdx = findColIdx(headerRow, ['password'], -1);
+
+  dataRows.forEach((cols, index) => {
     const rowNum = index + 2;
 
-    if (cols.length < 3 || cols.every(c => c === '')) {
+    if (cols.length === 0 || cols.every(c => c === '')) {
       failed++;
-      errors.push(`Row ${rowNum}: Insufficient columns or empty row.`);
+      failedRecords.push({ row: rowNum, reason: 'Empty row.' });
+      errors.push(`Row ${rowNum}: Empty row.`);
       return;
     }
 
-    if (module === 'Leads') {
-      if (!cols[0]) {
-        failed++;
-        errors.push(`Row ${rowNum}: Customer name is mandatory.`);
-        return;
-      }
-      if (!cols[2] || cols[2].length < 8) {
-        failed++;
-        errors.push(`Row ${rowNum}: Valid phone number is required.`);
-        return;
-      }
-    } else if (module === 'Customers') {
-      const name = cols[0];
-      const phone = cols[3] || '';
-      const email = cols[4] || '';
-      const gstNumber = cols[7] || '';
+    if (module === 'Customers') {
+      const name = (cols[nameIdx] ?? '').trim();
+      const phone = (cols[phoneIdx] ?? '').trim();
+      const email = (cols[emailIdx] ?? '').trim();
+      const companyName = (cols[companyIdx] ?? '').trim();
+      const rawType = (cols[typeIdx] ?? '').trim();
+      const customerType = (['Industrial', 'Commercial', 'Residential', 'Agricultural'].includes(rawType)
+        ? rawType
+        : (companyName ? 'Commercial' : 'Residential')) as Customer['customerType'];
+      const siteAddress = (cols[addressIdx] ?? '').trim();
+      const city = (cols[cityIdx] ?? '').trim() || 'Ahmedabad';
+      const state = (stateIdx >= 0 ? cols[stateIdx] : '') || 'Gujarat';
+      const pincode = (pinIdx >= 0 ? cols[pinIdx] : '') || '380001';
+      const gstNumber = (cols[gstIdx] ?? '').trim();
+      const sanctionedLoadKw = Number(cols[loadIdx]) || 0;
+      const rawPass = (passIdx >= 0 ? cols[passIdx] : '') || '123456';
+
       if (!name) {
         failed++;
+        failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
         errors.push(`Row ${rowNum}: Customer name is mandatory.`);
         return;
       }
-      const dupCheck = validateCustomer({ name, phone, email, gstNumber }, batchCustomers);
-      if (!dupCheck.valid) {
-        duplicate++;
+
+      const phoneDigits = phone.replace(/\D/g, '');
+      if (phoneDigits.length < 7) {
         failed++;
-        errors.push(`Row ${rowNum} Duplicate Customer: ${dupCheck.message}`);
+        failedRecords.push({ row: rowNum, reason: `Valid phone number is required (got "${phone || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid phone number is required (got "${phone || 'empty'}").`);
         return;
       }
-      // Add to batch to prevent duplicates within the same import file
-      batchCustomers.push({
-        id: `batch-c-${rowNum}`,
+
+      // Check duplicates against existing database + intra-file batch
+      const dupCheck = validateCustomer({ name, companyName, phone, email, gstNumber, city }, batchCustomers);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name, reason: dupCheck.message || 'Duplicate customer record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const newCust: Customer = {
+        id: `batch-c-${Date.now()}-${rowNum}`,
+        customerCode: `CUST-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
         name,
-        companyName: cols[1] || '',
-        customerType: (cols[2] as Customer['customerType']) || 'Commercial',
+        companyName,
+        customerType,
         phone,
         email,
-        siteAddress: cols[5] || '',
-        city: cols[6] || '',
-        state: 'Gujarat',
-        pincode: '380001',
+        password: rawPass,
+        siteAddress: siteAddress || `${city}, ${state}`,
+        city,
+        state,
+        pincode,
         gstNumber,
-        sanctionedLoadKw: Number(cols[8]) || 0,
+        sanctionedLoadKw,
         status: 'ACTIVE',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      });
+      };
+
+      batchCustomers.push(newCust);
+      validRecords.push(newCust);
+      successful++;
+    } else if (module === 'Leads') {
+      const name = cols[0] || '';
+      const companyName = cols[1] || '';
+      const phone = cols[2] || '';
+      const email = cols[3] || '';
+      const address = cols[4] || '';
+      const city = cols[5] || 'Ahmedabad';
+      const capacity = Number(cols[6]) || 10;
+      const estValue = Number(cols[7]) || capacity * 50000;
+      const source = cols[8] || 'Website';
+      const status = (cols[9] || 'NEW') as Lead['status'];
+
+      if (!name) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name is mandatory.`);
+        return;
+      }
+      if (!phone || phone.replace(/\D/g, '').length < 7) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: 'Valid phone number is required.' });
+        errors.push(`Row ${rowNum}: Valid phone number is required.`);
+        return;
+      }
+
+      const newLead: Lead = {
+        id: `lead-import-${Date.now()}-${rowNum}`,
+        customerName: name,
+        companyName,
+        phone,
+        email,
+        address,
+        city,
+        solarCapacityKw: capacity,
+        estimatedValue: estValue,
+        source,
+        status,
+        notes: 'Imported via CSV',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      validRecords.push(newLead);
+      successful++;
     } else if (module === 'Employees') {
       const code = cols[0];
       const name = cols[1];
@@ -171,18 +309,18 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
       const email = cols[5] || '';
       if (!code || !name) {
         failed++;
+        failedRecords.push({ row: rowNum, reason: 'Employee code and name are mandatory.' });
         errors.push(`Row ${rowNum}: Employee code and name are mandatory.`);
         return;
       }
       const dupCheck = validateEmployee({ employeeCode: code, name, phone, email }, batchEmployees);
       if (!dupCheck.valid) {
         duplicate++;
-        failed++;
+        skippedRecords.push({ row: rowNum, name, reason: dupCheck.message || 'Duplicate employee' });
         errors.push(`Row ${rowNum} Duplicate Employee: ${dupCheck.message}`);
         return;
       }
-      // Add to batch to prevent duplicates within the same import file
-      batchEmployees.push({
+      const newEmp: Employee = {
         id: `batch-e-${rowNum}`,
         employeeCode: code,
         name,
@@ -196,24 +334,33 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
         photoUrl: '',
         loginEnabled: false,
         accountStatus: 'PENDING'
-      });
+      };
+      batchEmployees.push(newEmp);
+      validRecords.push(newEmp);
+      successful++;
     } else if (module === 'Payments') {
       if (!cols[0] || isNaN(Number(cols[3]))) {
         failed++;
+        failedRecords.push({ row: rowNum, reason: 'Valid amount number is required.' });
         errors.push(`Row ${rowNum}: Valid amount number is required.`);
         return;
       }
+      successful++;
+    } else {
+      successful++;
     }
-
-    successful++;
   });
 
   return {
     module,
-    totalRows: rows.length,
+    totalRows: dataRows.length,
     successful,
     failed,
     duplicate,
+    skipped: duplicate,
+    validRecords,
+    skippedRecords,
+    failedRecords,
     errors
   };
 }

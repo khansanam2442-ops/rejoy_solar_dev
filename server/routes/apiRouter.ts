@@ -508,6 +508,30 @@ apiRouter.post('/customers', async (req: Request, res: Response) => {
   }
 });
 
+// Batch Customer Import (Excel / CSV Hub)
+apiRouter.post(['/customers/import', '/customers/import/'], async (req: Request, res: Response) => {
+  try {
+    const { customers, rows } = req.body || {};
+    const list = Array.isArray(customers) ? customers : (Array.isArray(rows) ? rows : []);
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No customer records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importCustomers(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Customer Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during customer import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
+  }
+});
+
 apiRouter.put('/customers/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

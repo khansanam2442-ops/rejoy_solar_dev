@@ -2102,6 +2102,170 @@ if ($method === 'DELETE' && preg_match('#^/users/([^/]+)/?$#', $cleanPath, $matc
     exit;
 }
 
+// POST /api/customers/import - Batch Customer Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/customers/import', '/customers/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $customers = $body['customers'] ?? ($body['rows'] ?? []);
+    if (!is_array($customers) || empty($customers)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No customer records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, customer_code, name, company_name, phone, email, gst_number, city FROM `solar_customers`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $phoneMap = [];
+    $emailMap = [];
+    $gstMap = [];
+    $existingCodes = [];
+
+    foreach ($existing as $ec) {
+        if (!empty($ec['customer_code'])) $existingCodes[strtoupper($ec['customer_code'])] = true;
+        $p = preg_replace('/\D/', '', $ec['phone'] ?? '');
+        if (strlen($p) >= 7) $phoneMap[$p] = $ec['name'];
+        $em = strtolower(trim($ec['email'] ?? ''));
+        if (!empty($em)) $emailMap[$em] = $ec['name'];
+        $g = strtoupper(preg_replace('/[\s-]/', '', $ec['gst_number'] ?? ''));
+        if (!empty($g)) $gstMap[$g] = $ec['name'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+
+    $insertStmt = $pdo->prepare("
+        INSERT INTO `solar_customers` (
+            `id`, `customer_code`, `name`, `company_name`, `customer_type`,
+            `phone`, `email`, `password`, `site_address`, `city`, `state`,
+            `pincode`, `gst_number`, `electricity_consumer_no`, `sanctioned_load_kw`,
+            `status`, `active_project_id`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ");
+
+    $codeSeq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($customers as $idx => $raw) {
+            $rowNum = $idx + 1;
+            $name = trim($raw['name'] ?? ($raw['customerName'] ?? ''));
+            if (empty($name)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Customer name is mandatory.'];
+                $errors[] = "Row $rowNum: Customer name is mandatory.";
+                continue;
+            }
+
+            $phoneRaw = trim($raw['phone'] ?? '');
+            $phoneDigits = preg_replace('/\D/', '', $phoneRaw);
+            if (strlen($phoneDigits) < 7) {
+                $failed[] = ['row' => $rowNum, 'reason' => "Valid phone number is required (got \"$phoneRaw\")."];
+                $errors[] = "Row $rowNum: Valid phone number is required.";
+                continue;
+            }
+
+            $email = strtolower(trim($raw['email'] ?? ''));
+            $gst = strtoupper(preg_replace('/[\s-]/', '', $raw['gstNumber'] ?? ($raw['gst_number'] ?? '')));
+
+            // Check duplicate
+            $isDup = false;
+            $dupReason = '';
+            foreach ($phoneMap as $exPhone => $cName) {
+                if ($exPhone === $phoneDigits || (strlen($phoneDigits) >= 10 && str_ends_with($exPhone, substr($phoneDigits, -10))) || (strlen($exPhone) >= 10 && str_ends_with($phoneDigits, substr($exPhone, -10)))) {
+                    $isDup = true;
+                    $dupReason = "Phone number \"$phoneRaw\" already registered to \"$cName\".";
+                    break;
+                }
+            }
+            if (!$isDup && !empty($email) && isset($emailMap[$email])) {
+                $isDup = true;
+                $dupReason = "Email \"$email\" already registered to \"{$emailMap[$email]}\".";
+            }
+            if (!$isDup && !empty($gst) && isset($gstMap[$gst])) {
+                $isDup = true;
+                $dupReason = "GST \"$gst\" already registered to \"{$gstMap[$gst]}\".";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $name, 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $cId = 'cust-' . round(microtime(true) * 1000) . '-' . ($idx + 1) . '-' . rand(100, 999);
+            do {
+                $codeSeq++;
+                $cCode = 'CUST-' . date('Y') . '-' . str_pad($codeSeq, 4, '0', STR_PAD_LEFT);
+            } while (isset($existingCodes[strtoupper($cCode)]));
+            $existingCodes[strtoupper($cCode)] = true;
+
+            $cType = $raw['customerType'] ?? ($raw['customer_type'] ?? 'Commercial');
+            $compName = trim($raw['companyName'] ?? ($raw['company_name'] ?? ''));
+            $addr = trim($raw['siteAddress'] ?? ($raw['site_address'] ?? ($raw['address'] ?? 'Site Address')));
+            $city = trim($raw['city'] ?? 'Ahmedabad');
+            $state = trim($raw['state'] ?? 'Gujarat');
+            $pin = trim($raw['pincode'] ?? '380001');
+            $load = floatval($raw['sanctionedLoadKw'] ?? ($raw['sanctioned_load_kw'] ?? 0));
+            $stat = $raw['status'] ?? 'ACTIVE';
+            $elec = trim($raw['electricityConsumerNo'] ?? ($raw['electricity_consumer_no'] ?? ''));
+            $pass = trim($raw['password'] ?? '123456');
+            $hash = password_hash($pass, PASSWORD_BCRYPT);
+
+            $insertStmt->execute([
+                $cId, $cCode, $name, $compName, $cType,
+                $phoneRaw, $email, $hash, $addr, $city, $state,
+                $pin, $gst, $elec, $load, $stat, null
+            ]);
+
+            $phoneMap[$phoneDigits] = $name;
+            if (!empty($email)) $emailMap[$email] = $name;
+            if (!empty($gst)) $gstMap[$gst] = $name;
+
+            $imported[] = [
+                'id' => $cId,
+                'customerCode' => $cCode,
+                'name' => $name,
+                'companyName' => $compName,
+                'customerType' => $cType,
+                'phone' => $phoneRaw,
+                'email' => $email,
+                'siteAddress' => $addr,
+                'city' => $city,
+                'state' => $state,
+                'pincode' => $pin,
+                'gstNumber' => $gst,
+                'sanctionedLoadKw' => $load,
+                'status' => $stat,
+                'createdAt' => date('c'),
+                'updatedAt' => date('c')
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during customer import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($customers),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
 // POST /api/sync/push - Real-Time MySQL Synchronization Across All Collections
 if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
     $pdo = getDbConnection($dbConfig);

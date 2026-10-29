@@ -318,6 +318,29 @@ class ApiClient {
     }
   }
 
+  async importCustomers(customers: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: any[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch(`${this.baseUrl}/customers/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ customers })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Customer import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   async deleteCustomer(id: string): Promise<boolean> {
     try {
       const res = await fetch(`${this.baseUrl}/customers/${encodeURIComponent(id)}`, {

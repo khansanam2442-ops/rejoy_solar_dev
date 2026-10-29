@@ -615,6 +615,47 @@ class StorageService {
     }
   }
 
+  async importCustomers(customers: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: Customer[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/customers/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customers })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Customer import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getCustomers();
+      const existingIds = new Set(current.map(c => c.id));
+      const newlyAdded: Customer[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.CUSTOMERS, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
+  }
+
   updateCustomerPassword(customerId: string, newPassword: string): void {
     const customers = this.getCustomers();
     const index = customers.findIndex(c => c.id === customerId);
