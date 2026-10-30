@@ -635,6 +635,30 @@ apiRouter.post('/projects', async (req: Request, res: Response) => {
   }
 });
 
+// Batch Project Import (Excel / CSV Hub)
+apiRouter.post(['/projects/import', '/projects/import/'], async (req: Request, res: Response) => {
+  try {
+    const { projects, rows } = req.body || {};
+    const list = Array.isArray(projects) ? projects : (Array.isArray(rows) ? rows : []);
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No project records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importProjects(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Project Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during project import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
+  }
+});
+
 apiRouter.put('/projects/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

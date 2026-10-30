@@ -124,8 +124,10 @@ export const ImportExportModal: React.FC = () => {
           p.capacityKw,
           p.totalValue,
           p.status,
-          p.startDate,
-          p.expectedCompletionDate
+          p.startDate || '',
+          p.expectedCompletionDate || '',
+          p.siteAddress || '',
+          p.city || ''
         ]);
         break;
       default:
@@ -213,6 +215,34 @@ export const ImportExportModal: React.FC = () => {
         });
         showToast(`Imported ${report.validRecords.length} employees successfully`, 'success');
         triggerRefresh();
+      } else if (importExportModule === 'Projects') {
+        const result = await storageService.importProjects(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} project(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No project records were imported.', 'error');
+        }
       }
     } catch (err: any) {
       console.error('Import failed:', err);

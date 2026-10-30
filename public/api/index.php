@@ -2266,6 +2266,219 @@ if ($method === 'POST' && in_array($cleanPath, ['/customers/import', '/customers
     exit;
 }
 
+// POST /api/projects/import - Batch Project Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/projects/import', '/projects/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $projects = $body['projects'] ?? ($body['rows'] ?? []);
+    if (!is_array($projects) || empty($projects)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No project records provided for import.']);
+        exit;
+    }
+
+    $stmtP = $pdo->query('SELECT id, project_code, customer_name, title, capacity_kw, site_address FROM `solar_projects`');
+    $existingProjects = $stmtP->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $stmtC = $pdo->query('SELECT id, name, company_name FROM `solar_customers`');
+    $existingCustomers = $stmtC->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $projectCodeMap = [];
+    $custTitleMap = [];
+    $custCapAddrMap = [];
+
+    foreach ($existingProjects as $ep) {
+        $c = strtoupper(trim($ep['project_code'] ?? ''));
+        $cn = strtolower(trim($ep['customer_name'] ?? ''));
+        $t = strtolower(trim($ep['title'] ?? ''));
+        $cap = floatval($ep['capacity_kw'] ?? 0);
+        $addr = strtolower(trim($ep['site_address'] ?? ''));
+
+        if (!empty($c)) $projectCodeMap[$c] = $ep['title'] ?? $ep['project_code'];
+        if (!empty($cn) && !empty($t)) $custTitleMap[$cn . ':::' . $t] = $c ?: $ep['id'];
+        if (!empty($cn) && $cap > 0 && !empty($addr)) $custCapAddrMap[$cn . ':::' . $cap . ':::' . $addr] = $c ?: $ep['id'];
+    }
+
+    $customerMap = [];
+    foreach ($existingCustomers as $ec) {
+        $cn = strtolower(trim($ec['name'] ?? ''));
+        $comp = strtolower(trim($ec['company_name'] ?? ''));
+        if (!empty($cn)) $customerMap[$cn] = $ec;
+        if (!empty($comp)) $customerMap[$comp] = $ec;
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+
+    $codeSeq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($projects as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Empty or malformed record.'];
+                $errors[] = "Row $rowNum: Empty or malformed record.";
+                continue;
+            }
+
+            $rawCode = trim($raw['projectCode'] ?? ($raw['project_code'] ?? ''));
+            $custName = trim($raw['customerName'] ?? ($raw['customer_name'] ?? ($raw['name'] ?? ($raw['client'] ?? ''))));
+            $rawTitle = trim($raw['title'] ?? '');
+            $rawCap = preg_replace('/[^0-9.]/', '', $raw['capacityKw'] ?? ($raw['capacity_kw'] ?? ($raw['capacity'] ?? '')));
+            $capKw = floatval($rawCap);
+            $rawVal = preg_replace('/[^0-9.]/', '', $raw['totalValue'] ?? ($raw['total_value'] ?? ''));
+            $val = floatval($rawVal);
+            $rawStat = strtoupper(trim($raw['status'] ?? 'SURVEY'));
+            $rawCity = trim($raw['city'] ?? 'Ahmedabad');
+            $rawAddr = trim($raw['siteAddress'] ?? ($raw['site_address'] ?? ''));
+            $siteAddr = !empty($rawAddr) ? $rawAddr : ($rawCity . ', Gujarat');
+            $city = !empty($rawCity) ? $rawCity : 'Ahmedabad';
+
+            if (empty($custName) && empty($rawTitle)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Customer name or project title is mandatory.'];
+                $errors[] = "Row $rowNum: Customer name or project title is mandatory.";
+                continue;
+            }
+
+            $effCustName = !empty($custName) ? $custName : $rawTitle;
+
+            if ($capKw <= 0) {
+                $failed[] = ['row' => $rowNum, 'reason' => "Valid solar capacity in kW (> 0) is required (got \"$rawCap\")."];
+                $errors[] = "Row $rowNum: Valid solar capacity in kW (> 0) is required (got \"$rawCap\").";
+                continue;
+            }
+
+            if ($val <= 0) {
+                $val = round($capKw * 48000);
+            }
+
+            $title = !empty($rawTitle) ? $rawTitle : "$capKw kW Rooftop Solar - $effCustName";
+            $projCode = !empty($rawCode) ? $rawCode : ('SOL-' . date('Y') . '-' . str_pad(++$codeSeq, 4, '0', STR_PAD_LEFT));
+
+            $normC = strtoupper($projCode);
+            $normCust = strtolower($effCustName);
+            $normT = strtolower($title);
+            $normAddr = strtolower($siteAddr);
+
+            if (!empty($rawCode) && isset($projectCodeMap[$normC])) {
+                $skipped[] = [
+                    'row' => $rowNum,
+                    'name' => "$projCode ($effCustName)",
+                    'reason' => "Project code \"$projCode\" already exists."
+                ];
+                $errors[] = "Row $rowNum Skipped (Duplicate): Project code \"$projCode\" already exists.";
+                continue;
+            }
+
+            $custTitleKey = $normCust . ':::' . $normT;
+            if (isset($custTitleMap[$custTitleKey])) {
+                $skipped[] = [
+                    'row' => $rowNum,
+                    'name' => "$projCode ($effCustName)",
+                    'reason' => "Project \"$title\" for customer \"$effCustName\" already exists."
+                ];
+                $errors[] = "Row $rowNum Skipped (Duplicate): Project \"$title\" for \"$effCustName\" already exists.";
+                continue;
+            }
+
+            $custCapAddrKey = $normCust . ':::' . $capKw . ':::' . $normAddr;
+            if (!empty($normAddr) && isset($custCapAddrMap[$custCapAddrKey])) {
+                $skipped[] = [
+                    'row' => $rowNum,
+                    'name' => "$projCode ($effCustName)",
+                    'reason' => "A $capKw kW project for \"$effCustName\" at \"$siteAddr\" already exists."
+                ];
+                $errors[] = "Row $rowNum Skipped (Duplicate): Duplicate project at site address.";
+                continue;
+            }
+
+            // Customer linking
+            $customerId = '';
+            if (isset($customerMap[$normCust])) {
+                $customerId = $customerMap[$normCust]['id'];
+            } else {
+                $customerId = 'cust-imp-' . round(microtime(true) * 1000) . '-' . $rowNum;
+                $newCustCode = 'CUST-' . date('Y') . '-' . str_pad($codeSeq + 500, 4, '0', STR_PAD_LEFT);
+                $stmtNewC = $pdo->prepare("
+                    INSERT INTO `solar_customers` (
+                        `id`, `customer_code`, `name`, `company_name`, `customer_type`,
+                        `phone`, `email`, `password`, `site_address`, `city`, `state`,
+                        `pincode`, `sanctioned_load_kw`, `status`
+                    ) VALUES (?, ?, ?, ?, 'Commercial', ?, ?, ?, ?, ?, 'Gujarat', '380001', ?, 'ACTIVE')
+                    ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)
+                ");
+                $defaultPass = password_hash('123456', PASSWORD_BCRYPT);
+                $cleanPhone = $raw['phone'] ?? '+91 98000 00000';
+                $cleanEmail = $raw['email'] ?? (preg_replace('/[^a-z0-9]/', '', $normCust) . '@example.com');
+                $stmtNewC->execute([
+                    $customerId, $newCustCode, $effCustName, $effCustName,
+                    $cleanPhone, $cleanEmail, $defaultPass, $siteAddr, $city, $capKw
+                ]);
+                $customerMap[$normCust] = ['id' => $customerId, 'name' => $effCustName];
+            }
+
+            $projId = $raw['id'] ?? ('proj-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $validStatuses = ['PLANNING', 'SURVEY', 'DESIGN', 'APPROVALS', 'PROCUREMENT', 'CIVIL_WORK', 'INSTALLATION', 'TESTING', 'COMMISSIONING', 'HANDOVER', 'COMPLETED', 'ON_HOLD', 'CANCELLED'];
+            $status = in_array($rawStat, $validStatuses) ? $rawStat : 'SURVEY';
+            $startDate = !empty($raw['startDate']) ? substr($raw['startDate'], 0, 10) : date('Y-m-d');
+            $expDate = !empty($raw['expectedCompletionDate']) ? substr($raw['expectedCompletionDate'], 0, 10) : date('Y-m-d', strtotime('+45 days'));
+
+            $saveProj = [
+                'id' => $projId,
+                'projectCode' => $projCode,
+                'customerId' => $customerId,
+                'customerName' => $effCustName,
+                'title' => $title,
+                'capacityKw' => $capKw,
+                'totalValue' => $val,
+                'status' => $status,
+                'currentStageKey' => $status === 'COMPLETED' ? 'handover_documentation' : 'site_survey',
+                'completionPercentage' => $status === 'COMPLETED' ? 100 : ($status === 'INSTALLATION' ? 68 : 0),
+                'projectManagerId' => $raw['projectManagerId'] ?? '',
+                'projectManagerName' => $raw['projectManagerName'] ?? '',
+                'siteAddress' => $siteAddr,
+                'city' => $city,
+                'startDate' => $startDate,
+                'expectedCompletionDate' => $expDate,
+                'notes' => $raw['notes'] ?? 'Imported via CSV Hub',
+                'stages' => $raw['stages'] ?? []
+            ];
+
+            saveProjectToDb($pdo, $saveProj);
+
+            $projectCodeMap[$normC] = $title;
+            $custTitleMap[$custTitleKey] = $projCode;
+            if (!empty($normAddr)) $custCapAddrMap[$custCapAddrKey] = $projCode;
+
+            $imported[] = $saveProj;
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during project import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($projects),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
 // POST /api/sync/push - Real-Time MySQL Synchronization Across All Collections
 if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
     $pdo = getDbConnection($dbConfig);

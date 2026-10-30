@@ -1,6 +1,7 @@
 import { storageService } from './storage';
-import { validateCustomer, validateEmployee } from './validation';
-import { Customer, Employee, Lead } from '../types/solar';
+import { validateCustomer, validateEmployee, validateProject } from './validation';
+import { Customer, Employee, Lead, SolarProject, ProjectStatus } from '../types/solar';
+import { buildStandardWorkflowStages, WorkflowProgressLevel } from './workflowStages';
 
 export type ExportModule =
   | 'Leads'
@@ -83,8 +84,8 @@ export function getSampleTemplate(module: ExportModule): { headers: string[]; sa
       };
     case 'Projects':
       return {
-        headers: ['Project Code', 'Customer Name', 'Title', 'Capacity (kW)', 'Total Value (INR)', 'Status', 'Start Date', 'Expected Completion'],
-        sampleRow: ['SOL-2026-099', 'Navkar Precision', '50 kW Rooftop Solar', 50, 2400000, 'INSTALLATION', '2026-09-01', '2026-10-15']
+        headers: ['Project Code', 'Customer Name', 'Title', 'Capacity (kW)', 'Total Value (INR)', 'Status', 'Start Date', 'Expected Completion', 'Site Address', 'City'],
+        sampleRow: ['SOL-2026-099', 'Navkar Precision', '50 kW Rooftop Solar System', 50, 2400000, 'INSTALLATION', '2026-09-01', '2026-10-15', 'Plot 45, GIDC Phase II', 'Sanand']
       };
   }
 }
@@ -170,6 +171,23 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
   // Track batch candidates to catch intra-file duplicates
   const batchCustomers: Customer[] = [...storageService.getCustomers()];
   const batchEmployees: Employee[] = [...storageService.getEmployees()];
+  const batchProjects: SolarProject[] = [...storageService.getProjects()];
+
+  // Helper for flexible date parsing
+  const parseDateStr = (raw: string | undefined): string | undefined => {
+    if (!raw || !raw.trim()) return undefined;
+    const s = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmy) {
+      return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+    return undefined;
+  };
 
   // Column index resolvers for flexible customer CSV columns
   const nameIdx = findColIdx(headerRow, ['customer name', 'name', 'client name', 'client'], 0);
@@ -184,6 +202,18 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
   const stateIdx = findColIdx(headerRow, ['state', 'province'], -1);
   const pinIdx = findColIdx(headerRow, ['pincode', 'pin code', 'zip'], -1);
   const passIdx = findColIdx(headerRow, ['password'], -1);
+
+  // Column index resolvers for flexible project CSV columns
+  const projCodeIdx = findColIdx(headerRow, ['project code', 'project id', 'code', 'project no', 'project number'], 0);
+  const projCustIdx = findColIdx(headerRow, ['customer name', 'client name', 'customer', 'client', 'name'], 1);
+  const projTitleIdx = findColIdx(headerRow, ['title', 'project title', 'project name', 'project'], 2);
+  const projCapIdx = findColIdx(headerRow, ['capacity (kw)', 'capacity', 'solar capacity (kw)', 'capacity kw', 'load', 'kw', 'system size'], 3);
+  const projValIdx = findColIdx(headerRow, ['total value (inr)', 'total value', 'value', 'amount', 'cost', 'project cost', 'price'], 4);
+  const projStatIdx = findColIdx(headerRow, ['status', 'project status', 'stage status'], 5);
+  const projStartIdx = findColIdx(headerRow, ['start date', 'start', 'commencement date', 'kickoff'], 6);
+  const projExpIdx = findColIdx(headerRow, ['expected completion', 'completion date', 'expected completion date', 'due date', 'target date', 'end date'], 7);
+  const projAddrIdx = findColIdx(headerRow, ['site address', 'address', 'location', 'site location', 'premises'], 8);
+  const projCityIdx = findColIdx(headerRow, ['city', 'district', 'town'], 9);
 
   dataRows.forEach((cols, index) => {
     const rowNum = index + 2;
@@ -337,6 +367,123 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
       };
       batchEmployees.push(newEmp);
       validRecords.push(newEmp);
+      successful++;
+    } else if (module === 'Projects') {
+      const rawCode = (cols[projCodeIdx] ?? '').trim();
+      const rawCustomer = (cols[projCustIdx] ?? '').trim();
+      const rawTitle = (cols[projTitleIdx] ?? '').trim();
+      const rawCapStr = (cols[projCapIdx] ?? '').replace(/[^0-9.]/g, '');
+      const rawValStr = (cols[projValIdx] ?? '').replace(/[^0-9.]/g, '');
+      const rawStatus = (cols[projStatIdx] ?? '').trim().toUpperCase();
+      const rawStart = (cols[projStartIdx] ?? '').trim();
+      const rawExp = (cols[projExpIdx] ?? '').trim();
+      const rawAddr = (cols[projAddrIdx] ?? '').trim();
+      const rawCity = (cols[projCityIdx] ?? '').trim();
+
+      const customerName = rawCustomer || rawTitle;
+      if (!customerName) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: 'Customer name or project title is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name or project title is mandatory.`);
+        return;
+      }
+
+      const capacityKw = parseFloat(rawCapStr);
+      if (isNaN(capacityKw) || capacityKw <= 0) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: `Valid solar capacity in kW (> 0) is required (got "${cols[projCapIdx] || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid solar capacity in kW (> 0) is required (got "${cols[projCapIdx] || 'empty'}").`);
+        return;
+      }
+
+      let totalValue = parseFloat(rawValStr);
+      if (isNaN(totalValue) || totalValue <= 0) {
+        totalValue = Math.round(capacityKw * 48000);
+      }
+
+      const title = rawTitle || `${capacityKw} kW Rooftop Solar - ${customerName}`;
+      const city = rawCity || 'Ahmedabad';
+      const siteAddress = rawAddr || `${city}, Gujarat`;
+
+      const validStatuses: ProjectStatus[] = [
+        'PLANNING',
+        'SURVEY',
+        'DESIGN & APPROVALS',
+        'CIVIL & STRUCTURE',
+        'INSTALLATION',
+        'TESTING & COMMISSIONING',
+        'HANDOVER',
+        'COMPLETED',
+        'DELAYED',
+        'ON HOLD'
+      ];
+      let status: ProjectStatus = 'SURVEY';
+      const cleanUpper = rawStatus.replace(/_/g, ' ');
+      if (validStatuses.includes(cleanUpper as any)) {
+        status = cleanUpper as ProjectStatus;
+      } else if (cleanUpper.includes('COMPLETE')) {
+        status = 'COMPLETED';
+      } else if (cleanUpper.includes('INSTALL')) {
+        status = 'INSTALLATION';
+      } else if (cleanUpper.includes('PLAN')) {
+        status = 'PLANNING';
+      }
+
+      const startDate = parseDateStr(rawStart) || new Date().toISOString().split('T')[0];
+      const expectedCompletionDate = parseDateStr(rawExp) || new Date(Date.now() + 45 * 86400000).toISOString().split('T')[0];
+      const projectCode = rawCode || `SOL-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      // Check duplicates against existing projects + intra-file batch
+      const dupCheck = validateProject(
+        { projectCode, customerName, title, capacityKw, siteAddress },
+        batchProjects
+      );
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({
+          row: rowNum,
+          name: `${projectCode} (${customerName})`,
+          reason: dupCheck.message || 'Duplicate project record'
+        });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const projId = `proj-import-${Date.now()}-${rowNum}`;
+      const progressLevel: WorkflowProgressLevel = (status === 'COMPLETED' ? 'COMPLETED' : (status === 'INSTALLATION' ? '68_PERCENT' : 'NEW'));
+      const stages = buildStandardWorkflowStages(projId, capacityKw, progressLevel);
+
+      // Match customer from storage
+      const matchedCustomer = batchCustomers.find(c =>
+        c.name.trim().toLowerCase() === customerName.toLowerCase() ||
+        c.companyName?.trim().toLowerCase() === customerName.toLowerCase()
+      );
+
+      const newProj: SolarProject = {
+        id: projId,
+        projectCode,
+        customerId: matchedCustomer ? matchedCustomer.id : `cust-link-${Date.now()}-${rowNum}`,
+        customerName,
+        title,
+        capacityKw,
+        totalValue,
+        status,
+        currentStageKey: status === 'COMPLETED' ? 'final_handover' : 'site_survey',
+        completionPercentage: status === 'COMPLETED' ? 100 : (status === 'INSTALLATION' ? 68 : 0),
+        progressPercentage: status === 'COMPLETED' ? 100 : (status === 'INSTALLATION' ? 68 : 0),
+        siteAddress,
+        city,
+        startDate,
+        expectedCompletionDate,
+        assignedUsers: [],
+        stages,
+        notes: 'Imported via CSV Hub',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      batchProjects.push(newProj);
+      validRecords.push(newProj);
       successful++;
     } else if (module === 'Payments') {
       if (!cols[0] || isNaN(Number(cols[3]))) {

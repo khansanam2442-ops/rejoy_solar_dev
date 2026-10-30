@@ -424,6 +424,29 @@ class ApiClient {
     }
   }
 
+  async importProjects(projects: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: any[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch(`${this.baseUrl}/projects/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ projects })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Project import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   // --- Employees ---
   async getEmployees(): Promise<any[]> {
     try {

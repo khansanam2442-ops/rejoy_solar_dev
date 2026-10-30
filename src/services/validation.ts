@@ -1,5 +1,6 @@
 import {
   Customer,
+  SolarProject,
   ProductItem,
   Vendor,
   Employee,
@@ -148,6 +149,67 @@ export function validateCustomer(
         valid: false,
         field: 'name',
         message: `Customer "${candidate.name}" (${candidate.companyName || match.city || 'existing record'}) is already registered.`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// ==========================================
+// 1B. Project Duplicate Validation
+// ==========================================
+export function validateProject(
+  candidate: Partial<SolarProject>,
+  existingProjects: SolarProject[],
+  ignoreId?: string
+): ValidationResult {
+  const pool = existingProjects.filter(p => !ignoreId || p.id !== ignoreId);
+
+  // 1. Project Code uniqueness
+  const candCode = normalizeCode(candidate.projectCode);
+  if (candCode.length > 0) {
+    const match = pool.find(p => normalizeCode(p.projectCode) === candCode);
+    if (match) {
+      return {
+        valid: false,
+        field: 'projectCode',
+        message: `Project with code "${candidate.projectCode}" already exists (${match.title || match.customerName}).`
+      };
+    }
+  }
+
+  // 2. Customer Name + Title match
+  const candCustomer = normalizeCaseInsensitive(candidate.customerName);
+  const candTitle = normalizeCaseInsensitive(candidate.title);
+  if (candCustomer.length > 0 && candTitle.length > 0) {
+    const match = pool.find(p =>
+      normalizeCaseInsensitive(p.customerName) === candCustomer &&
+      normalizeCaseInsensitive(p.title) === candTitle
+    );
+    if (match) {
+      return {
+        valid: false,
+        field: 'title',
+        message: `Project "${candidate.title}" for customer "${candidate.customerName}" already exists (Code: ${match.projectCode}).`
+      };
+    }
+  }
+
+  // 3. Customer Name + Capacity + Site Address match
+  const candCapacity = candidate.capacityKw ? Number(candidate.capacityKw) : 0;
+  const candAddress = normalizeCaseInsensitive(candidate.siteAddress);
+  if (candCustomer.length > 0 && candCapacity > 0 && candAddress.length > 0) {
+    const match = pool.find(p =>
+      normalizeCaseInsensitive(p.customerName) === candCustomer &&
+      Math.abs(Number(p.capacityKw) - candCapacity) < 0.01 &&
+      normalizeCaseInsensitive(p.siteAddress) === candAddress
+    );
+    if (match) {
+      return {
+        valid: false,
+        field: 'siteAddress',
+        message: `A ${candCapacity} kW project for "${candidate.customerName}" at "${candidate.siteAddress}" already exists (Code: ${match.projectCode}).`
       };
     }
   }

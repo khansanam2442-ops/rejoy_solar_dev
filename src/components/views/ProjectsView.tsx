@@ -83,10 +83,10 @@ export const ProjectsView: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => openImportExportModal('Projects')}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
-            <span>Export Projects</span>
+            <span>Excel / CSV Hub</span>
           </button>
         </div>
       </div>

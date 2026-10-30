@@ -17,6 +17,57 @@
   },
   "customers": [
     {
+      "id": "cust-imp-1793393773721-3",
+      "customerCode": "CUST-2026-4217",
+      "name": "Test Customer Gamma",
+      "companyName": "Test Customer Gamma",
+      "customerType": "Commercial",
+      "phone": "+91 98000 00000",
+      "email": "testcustomergamma@example.com",
+      "password": "$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+      "siteAddress": "Plot 505 GIDC",
+      "city": "25 kW",
+      "state": "Gujarat",
+      "pincode": "380001",
+      "gstNumber": "",
+      "sanctionedLoadKw": 25,
+      "status": "ACTIVE"
+    },
+    {
+      "id": "cust-imp-1793393773719-2",
+      "customerCode": "CUST-2026-4217",
+      "name": "Test Customer Beta",
+      "companyName": "Test Customer Beta",
+      "customerType": "Commercial",
+      "phone": "+91 98000 00000",
+      "email": "testcustomerbeta@example.com",
+      "password": "$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+      "siteAddress": "Plot 202 GIDC",
+      "city": "50",
+      "state": "Gujarat",
+      "pincode": "380001",
+      "gstNumber": "",
+      "sanctionedLoadKw": 50,
+      "status": "ACTIVE"
+    },
+    {
+      "id": "cust-imp-1793393773717-1",
+      "customerCode": "CUST-2026-4217",
+      "name": "Test Customer Alpha",
+      "companyName": "Test Customer Alpha",
+      "customerType": "Commercial",
+      "phone": "+91 98000 00000",
+      "email": "testcustomeralpha@example.com",
+      "password": "$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+      "siteAddress": "2026-09-01",
+      "city": "100 kW",
+      "state": "Gujarat",
+      "pincode": "380001",
+      "gstNumber": "",
+      "sanctionedLoadKw": 100,
+      "status": "ACTIVE"
+    },
+    {
       "id": "cust-diag-1002",
       "customerCode": "CUST-1002",
       "name": "Diagnostic Customer 1002",
@@ -1534,7 +1585,7 @@
       "isSharingLocation": false,
       "hasLocation": false,
       "status": "online",
-      "lastSeenAt": "2026-10-29T16:36:58.283Z",
+      "lastSeenAt": "2026-10-30T20:55:55.877Z",
       "updatedAt": "2026-10-29T16:23:58.009Z"
     }
   ]

@@ -1400,6 +1400,452 @@ class MySqlDatabaseManager {
     return true;
   }
 
+  private generateDefaultProjectStages(projId: string, status: string): any[] {
+    const stageDefs = [
+      { key: 'site_survey', title: 'Site Survey', order: 1, dept: 'Engineering', role: 'Site Survey Engineer', name: 'Rajesh Kumar' },
+      { key: 'cad_design', title: 'CAD & 3D Engineering Design', order: 2, dept: 'Engineering', role: 'Design Engineer', name: 'Sneha Patel' },
+      { key: 'statutory_approvals', title: 'Statutory Approvals & CEIG', order: 3, dept: 'Liaisoning', role: 'Liaisoning Officer', name: 'Vikas Sharma' },
+      { key: 'procurement', title: 'BOM Procurement & Dispatch', order: 4, dept: 'Procurement', role: 'Procurement Manager', name: 'Pooja Mehta' },
+      { key: 'civil_foundations', title: 'Civil Foundations & Pier Casting', order: 5, dept: 'Civil', role: 'Civil Supervisor', name: 'Hardik Joshi' },
+      { key: 'structure_assembly', title: 'Module Mounting Structure (MMS)', order: 6, dept: 'Mechanical', role: 'Mechanical Team', name: 'Ramesh Solanki' },
+      { key: 'earthing_pits', title: 'Chemical Earthing Pits', order: 7, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
+      { key: 'solar_installation', title: 'Solar Module Installation', order: 8, dept: 'Installation', role: 'Installation Team', name: 'Manoj Tiwari' },
+      { key: 'dc_cabling', title: 'DC Cabling & Array Combiner Box', order: 9, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
+      { key: 'inverter_installation', title: 'Grid-Tie Inverter & PCU Mounting', order: 10, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
+      { key: 'ac_distribution', title: 'AC Distribution Board (ACDB) & LT Panel', order: 11, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
+      { key: 'testing_commissioning', title: 'Pre-Commissioning Testing & Insulation Resistance', order: 12, dept: 'Quality & Testing', role: 'Quality Inspector', name: 'Deepak Varma' },
+      { key: 'discom_inspection', title: 'DISCOM Joint Inspection & Net Metering', order: 13, dept: 'Liaisoning', role: 'Liaisoning Officer', name: 'Vikas Sharma' },
+      { key: 'grid_synchronization', title: 'Grid Synchronization & Power Flow Test', order: 14, dept: 'Electrical', role: 'Commissioning Lead', name: 'Deepak Varma' },
+      { key: 'scada_rms', title: 'SCADA & IoT Remote Monitoring Setup', order: 15, dept: 'Instrumentation', role: 'IoT Specialist', name: 'Sneha Patel' },
+      { key: 'handover_documentation', title: 'Client Handover, Warranty & O&M Manuals', order: 16, dept: 'Project Management', role: 'Project Manager', name: 'Amit Sharma' }
+    ];
+
+    const isCompleted = status === 'COMPLETED';
+    const isInstallation = status === 'INSTALLATION';
+
+    return stageDefs.map(def => {
+      let stStatus = 'NOT STARTED';
+      if (isCompleted) {
+        stStatus = 'COMPLETED';
+      } else if (isInstallation) {
+        if (def.order < 8) stStatus = 'COMPLETED';
+        else if (def.order === 8) stStatus = 'IN PROGRESS';
+        else stStatus = 'NOT STARTED';
+      } else if (def.order === 1) {
+        stStatus = 'IN PROGRESS';
+      }
+
+      return {
+        id: `${projId}-stage-${def.order}`,
+        stageKey: def.key,
+        title: def.title,
+        order: def.order,
+        department: def.dept,
+        assignedRole: def.role,
+        assignedEmployeeId: `emp-${def.order}`,
+        assignedEmployeeName: def.name,
+        assignedToName: def.name,
+        status: stStatus,
+        priority: 'MEDIUM',
+        startDate: stStatus !== 'NOT STARTED' ? new Date().toISOString().split('T')[0] : null,
+        dueDate: new Date(Date.now() + def.order * 3 * 86400000).toISOString().split('T')[0],
+        completedDate: stStatus === 'COMPLETED' ? new Date().toISOString().split('T')[0] : null,
+        approvedBy: stStatus === 'COMPLETED' ? 'Amit Sharma (PM)' : null,
+        checklist: [
+          { title: `${def.title} engineering verification completed`, completed: stStatus === 'COMPLETED' },
+          { title: `${def.title} quality checklist signed off`, completed: stStatus === 'COMPLETED' }
+        ],
+        photos: [],
+        documents: [],
+        activities: []
+      };
+    });
+  }
+
+  public async importProjects(projectList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(projectList) || projectList.length === 0) {
+      return {
+        success: false,
+        total: 0,
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        importedRecords: [],
+        skippedRecords: [],
+        failedRecords: [],
+        errors: ['No project rows provided for import.']
+      };
+    }
+
+    // Helper normalizers
+    const normText = (s: any) => String(s || '').trim().toLowerCase();
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+
+    // 1. Gather existing projects and customers for duplicate checking and customer linking
+    let existingProjects: any[] = [];
+    let existingCustomers: any[] = [];
+
+    if (this.isConnected && this.pool) {
+      try {
+        const [projRows]: any = await this.pool.query('SELECT `id`, `project_code`, `customer_id`, `customer_name`, `title`, `capacity_kw`, `site_address` FROM `solar_projects`');
+        if (Array.isArray(projRows)) existingProjects = projRows;
+      } catch (err: any) {
+        console.warn('Could not read existing projects from MySQL:', err.message);
+      }
+
+      try {
+        const [custRows]: any = await this.pool.query('SELECT `id`, `customer_code`, `name`, `company_name`, `phone`, `email`, `site_address`, `city` FROM `solar_customers`');
+        if (Array.isArray(custRows)) existingCustomers = custRows;
+      } catch (err: any) {
+        console.warn('Could not read existing customers from MySQL:', err.message);
+      }
+    }
+
+    if (existingProjects.length === 0) {
+      existingProjects = this.getFallbackItems('projects');
+    }
+    if (existingCustomers.length === 0) {
+      existingCustomers = this.getFallbackItems('customers');
+    }
+
+    // Duplicate tracking maps
+    const projectCodeMap = new Map<string, string>(); // code -> title
+    const custTitleMap = new Map<string, string>(); // cust:::title -> code
+    const custCapAddrMap = new Map<string, string>(); // cust:::cap:::addr -> code
+
+    for (const p of existingProjects) {
+      const code = normCode(p.project_code || p.projectCode);
+      const cust = normText(p.customer_name || p.customerName);
+      const title = normText(p.title);
+      const cap = Number(p.capacity_kw || p.capacityKw) || 0;
+      const addr = normText(p.site_address || p.siteAddress);
+
+      if (code) projectCodeMap.set(code, p.title || p.project_code || 'Project');
+      if (cust && title) custTitleMap.set(`${cust}:::${title}`, code || p.id);
+      if (cust && cap > 0 && addr) custCapAddrMap.set(`${cust}:::${cap}:::${addr}`, code || p.id);
+    }
+
+    // Customer lookup map: normName -> customer object
+    const customerMap = new Map<string, any>();
+    for (const c of existingCustomers) {
+      const name = normText(c.name);
+      const company = normText(c.company_name || c.companyName);
+      if (name) customerMap.set(name, c);
+      if (company) customerMap.set(company, c);
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < projectList.length; i++) {
+      const rowNum = i + 1;
+      const raw = projectList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const rawCode = String(raw.projectCode || raw.project_code || '').trim();
+      const customerName = String(raw.customerName || raw.customer_name || raw.client || raw.name || '').trim();
+      const rawTitle = String(raw.title || '').trim();
+      const rawCap = String(raw.capacityKw || raw.capacity_kw || raw.capacity || '').replace(/[^0-9.]/g, '');
+      const capacityKw = parseFloat(rawCap);
+      const rawVal = String(raw.totalValue || raw.total_value || '').replace(/[^0-9.]/g, '');
+      let totalValue = parseFloat(rawVal);
+      const rawStatus = String(raw.status || 'SURVEY').trim().toUpperCase();
+      const rawCity = String(raw.city || 'Ahmedabad').trim();
+      const rawAddress = String(raw.siteAddress || raw.site_address || '').trim();
+      const siteAddress = rawAddress || `${rawCity}, Gujarat`;
+      const city = rawCity || 'Ahmedabad';
+
+      if (!customerName && !rawTitle) {
+        failedRecords.push({ row: rowNum, reason: 'Customer name or project title is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name or project title is mandatory.`);
+        continue;
+      }
+
+      const effectiveCustomerName = customerName || rawTitle;
+
+      if (isNaN(capacityKw) || capacityKw <= 0) {
+        failedRecords.push({ row: rowNum, reason: `Valid solar capacity in kW (> 0) is required (got "${rawCap || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid solar capacity in kW (> 0) is required (got "${rawCap || 'empty'}").`);
+        continue;
+      }
+
+      if (isNaN(totalValue) || totalValue <= 0) {
+        totalValue = Math.round(capacityKw * 48000);
+      }
+
+      const title = rawTitle || `${capacityKw} kW Rooftop Solar - ${effectiveCustomerName}`;
+      const projectCode = rawCode || `SOL-${new Date().getFullYear()}-${codeSeq++}`;
+
+      // Duplicate Check
+      const normC = normCode(projectCode);
+      const normCust = normText(effectiveCustomerName);
+      const normT = normText(title);
+      const normAddr = normText(siteAddress);
+
+      if (rawCode && projectCodeMap.has(normC)) {
+        const existingName = projectCodeMap.get(normC);
+        skippedRecords.push({
+          row: rowNum,
+          name: `${projectCode} (${effectiveCustomerName})`,
+          reason: `Project code "${projectCode}" already exists (${existingName}).`
+        });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Project code "${projectCode}" already exists.`);
+        continue;
+      }
+
+      const custTitleKey = `${normCust}:::${normT}`;
+      if (custTitleMap.has(custTitleKey)) {
+        const exCode = custTitleMap.get(custTitleKey);
+        skippedRecords.push({
+          row: rowNum,
+          name: `${projectCode} (${effectiveCustomerName})`,
+          reason: `Project "${title}" for customer "${effectiveCustomerName}" already exists (Code: ${exCode}).`
+        });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Project "${title}" for "${effectiveCustomerName}" already exists.`);
+        continue;
+      }
+
+      const custCapAddrKey = `${normCust}:::${capacityKw}:::${normAddr}`;
+      if (normAddr && custCapAddrMap.has(custCapAddrKey)) {
+        const exCode = custCapAddrMap.get(custCapAddrKey);
+        skippedRecords.push({
+          row: rowNum,
+          name: `${projectCode} (${effectiveCustomerName})`,
+          reason: `A ${capacityKw} kW project for "${effectiveCustomerName}" at "${siteAddress}" already exists (Code: ${exCode}).`
+        });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Duplicate project at site address.`);
+        continue;
+      }
+
+      // Customer Linking / Auto-creation
+      let customerId = '';
+      const matchedCust = customerMap.get(normCust);
+      if (matchedCust) {
+        customerId = matchedCust.id;
+      } else {
+        // Auto-create customer in solar_customers
+        customerId = `cust-imp-${Date.now()}-${rowNum}`;
+        const newCustCode = `CUST-${new Date().getFullYear()}-${codeSeq + 500}`;
+        const newCustomerObj = {
+          id: customerId,
+          customerCode: newCustCode,
+          name: effectiveCustomerName,
+          companyName: effectiveCustomerName,
+          customerType: 'Commercial',
+          phone: raw.phone || '+91 98000 00000',
+          email: raw.email || `${normCust.replace(/[^a-z0-9]/g, '') || 'client'}@example.com`,
+          password: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+          siteAddress,
+          city,
+          state: 'Gujarat',
+          pincode: '380001',
+          gstNumber: raw.gstNumber || raw.gst_number || '',
+          sanctionedLoadKw: capacityKw,
+          status: 'ACTIVE'
+        };
+
+        if (this.isConnected && this.pool) {
+          try {
+            await this.pool.query(
+              `INSERT INTO \`solar_customers\` (
+                \`id\`, \`customer_code\`, \`name\`, \`company_name\`, \`customer_type\`,
+                \`phone\`, \`email\`, \`password\`, \`site_address\`, \`city\`, \`state\`,
+                \`pincode\`, \`gst_number\`, \`sanctioned_load_kw\`, \`status\`
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`)`,
+              [
+                newCustomerObj.id, newCustomerObj.customerCode, newCustomerObj.name,
+                newCustomerObj.companyName, newCustomerObj.customerType, newCustomerObj.phone,
+                newCustomerObj.email, newCustomerObj.password, newCustomerObj.siteAddress,
+                newCustomerObj.city, newCustomerObj.state, newCustomerObj.pincode,
+                newCustomerObj.gstNumber, newCustomerObj.sanctionedLoadKw, newCustomerObj.status
+              ]
+            );
+          } catch (cErr: any) {
+            console.warn('Notice auto-linking customer during project import:', cErr.message);
+          }
+        }
+        this.upsertFallback('customers', newCustomerObj);
+        customerMap.set(normCust, newCustomerObj);
+      }
+
+      // Generate Project ID and Stages
+      const projId = raw.id || `proj-imp-${Date.now()}-${rowNum}`;
+      const validStatuses = [
+        'PLANNING', 'SURVEY', 'DESIGN', 'APPROVALS', 'PROCUREMENT',
+        'CIVIL_WORK', 'INSTALLATION', 'TESTING', 'COMMISSIONING',
+        'HANDOVER', 'COMPLETED', 'ON_HOLD', 'CANCELLED'
+      ];
+      const status = validStatuses.includes(rawStatus) ? rawStatus : 'SURVEY';
+      const startDate = raw.startDate ? String(raw.startDate).split('T')[0] : new Date().toISOString().split('T')[0];
+      const expectedCompletionDate = raw.expectedCompletionDate
+        ? String(raw.expectedCompletionDate).split('T')[0]
+        : new Date(Date.now() + 45 * 86400000).toISOString().split('T')[0];
+
+      // Standard stages definition
+      const stagesList = Array.isArray(raw.stages) && raw.stages.length > 0 ? raw.stages : this.generateDefaultProjectStages(projId, status);
+
+      const projectRecord: any = {
+        id: projId,
+        projectCode,
+        customerId,
+        customerName: effectiveCustomerName,
+        title,
+        capacityKw,
+        totalValue,
+        status,
+        currentStageKey: status === 'COMPLETED' ? 'handover_documentation' : 'site_survey',
+        completionPercentage: status === 'COMPLETED' ? 100 : (status === 'INSTALLATION' ? 68 : 0),
+        progressPercentage: status === 'COMPLETED' ? 100 : (status === 'INSTALLATION' ? 68 : 0),
+        projectManagerId: raw.projectManagerId || '',
+        projectManagerName: raw.projectManagerName || '',
+        siteAddress,
+        city,
+        inverterModel: raw.inverterModel || '',
+        panelModel: raw.panelModel || '',
+        structureType: raw.structureType || 'Elevated GI Structure',
+        startDate,
+        expectedCompletionDate,
+        notes: raw.notes || 'Imported via CSV Hub',
+        assignedUsers: Array.isArray(raw.assignedUsers) ? raw.assignedUsers : [],
+        stages: stagesList,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Persistence to MySQL
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_projects\` (
+              \`id\`, \`project_code\`, \`customer_id\`, \`customer_name\`, \`title\`,
+              \`capacity_kw\`, \`total_value\`, \`status\`, \`current_stage_key\`,
+              \`completion_percentage\`, \`project_manager_id\`, \`project_manager_name\`,
+              \`site_address\`, \`city\`, \`inverter_model\`, \`panel_model\`,
+              \`structure_type\`, \`start_date\`, \`expected_completion_date\`,
+              \`notes\`, \`assignments_json\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`title\` = VALUES(\`title\`), \`capacity_kw\` = VALUES(\`capacity_kw\`),
+              \`total_value\` = VALUES(\`total_value\`), \`status\` = VALUES(\`status\`),
+              \`current_stage_key\` = VALUES(\`current_stage_key\`),
+              \`completion_percentage\` = VALUES(\`completion_percentage\`),
+              \`notes\` = VALUES(\`notes\`)
+          `;
+          await this.pool.query(sql, [
+            projectRecord.id,
+            projectRecord.projectCode,
+            projectRecord.customerId,
+            projectRecord.customerName,
+            projectRecord.title,
+            projectRecord.capacityKw,
+            projectRecord.totalValue,
+            projectRecord.status,
+            projectRecord.currentStageKey,
+            projectRecord.completionPercentage,
+            projectRecord.projectManagerId,
+            projectRecord.projectManagerName,
+            projectRecord.siteAddress,
+            projectRecord.city,
+            projectRecord.inverterModel,
+            projectRecord.panelModel,
+            projectRecord.structureType,
+            projectRecord.startDate,
+            projectRecord.expectedCompletionDate,
+            projectRecord.notes,
+            JSON.stringify(projectRecord.assignedUsers)
+          ]);
+
+          // Insert stages into solar_project_stages
+          for (const s of stagesList) {
+            const stageSql = `
+              INSERT INTO \`solar_project_stages\` (
+                \`id\`, \`project_id\`, \`stage_key\`, \`title\`, \`stage_order\`,
+                \`department\`, \`assigned_role\`, \`assigned_employee_id\`, \`assigned_employee_name\`,
+                \`status\`, \`priority\`, \`start_date\`, \`due_date\`, \`completed_date\`,
+                \`checklist_json\`, \`photos_json\`, \`documents_json\`, \`gps_location_json\`,
+                \`notes\`, \`approved_by\`, \`rejection_reason\`
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                \`status\` = VALUES(\`status\`), \`priority\` = VALUES(\`priority\`),
+                \`start_date\` = VALUES(\`start_date\`), \`due_date\` = VALUES(\`due_date\`),
+                \`completed_date\` = VALUES(\`completed_date\`)
+            `;
+            await this.pool.query(stageSql, [
+              s.id || `${projId}-${s.stageKey || 'stage'}`,
+              projId,
+              s.stageKey || 'stage',
+              s.title || 'Stage',
+              Number(s.order ?? s.stageOrder) || 1,
+              s.department || 'Operations',
+              s.assignedRole || 'Technician',
+              s.assignedEmployeeId || '',
+              s.assignedEmployeeName || s.assignedToName || '',
+              s.status || 'NOT STARTED',
+              s.priority || 'MEDIUM',
+              s.startDate ? String(s.startDate).split('T')[0] : null,
+              s.dueDate ? String(s.dueDate).split('T')[0] : null,
+              s.completedDate ? String(s.completedDate).split('T')[0] : null,
+              JSON.stringify(s.checklist || []),
+              JSON.stringify(s.photos || []),
+              JSON.stringify(s.documents || []),
+              s.gpsLocation ? JSON.stringify(s.gpsLocation) : null,
+              s.notes || '',
+              s.approvedBy || '',
+              s.rejectionReason || ''
+            ]);
+          }
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      // In-memory fallback persistence
+      this.upsertFallback('projects', projectRecord);
+
+      // Register into duplicate maps
+      projectCodeMap.set(normC, title);
+      custTitleMap.set(custTitleKey, projectCode);
+      if (normAddr) custCapAddrMap.set(custCapAddrKey, projectCode);
+
+      importedRecords.push(projectRecord);
+    }
+
+    this.saveDiskSnapshot();
+
+    return {
+      success: true,
+      total: projectList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
   // ==========================================================
   // CRUD: EMPLOYEES
   // ==========================================================
