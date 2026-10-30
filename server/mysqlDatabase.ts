@@ -2677,9 +2677,9 @@ class MySqlDatabaseManager {
         continue;
       }
 
-      const rawAmount = String(raw.amount || '').replace(/[^0-9.]/g, '');
-      const amount = parseFloat(rawAmount);
-      const customerName = String(raw.customerName || raw.customer_name || 'Customer').trim();
+      const rawAmountStr = String(raw.amount ?? raw.amount_inr ?? '').trim();
+      const parsedAmount = typeof raw.amount === 'number' ? raw.amount : parseFloat(rawAmountStr.replace(/[^0-9.-]/g, ''));
+      const customerName = String(raw.customerName || raw.customer_name || raw.client || raw.name || '').trim();
       const milestone = String(raw.milestone || 'Project Milestone').trim();
       const rawReceipt = String(raw.receiptNumber || raw.receipt_number || raw.receiptNo || '').trim();
       const status = String(raw.status || 'PAID').trim().toUpperCase();
@@ -2689,11 +2689,18 @@ class MySqlDatabaseManager {
       const txRef = String(raw.transactionReference || raw.transaction_reference || '').trim();
       const notes = String(raw.notes || 'Imported via CSV Hub').trim();
 
-      if (isNaN(amount) || amount <= 0) {
-        failedRecords.push({ row: rowNum, reason: `Valid amount number (> 0) is required (got "${raw.amount || 'empty'}").` });
-        errors.push(`Row ${rowNum}: Valid amount number (> 0) is required (got "${raw.amount || 'empty'}").`);
+      if (!customerName) {
+        failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name is mandatory.`);
         continue;
       }
+
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        failedRecords.push({ row: rowNum, reason: `Valid positive payment amount (> 0) is required (got "${raw.amount ?? 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid positive payment amount (> 0) is required (got "${raw.amount ?? 'empty'}").`);
+        continue;
+      }
+      const amount = parsedAmount;
 
       const receiptNumber = rawReceipt || `RCPT-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
       const recNorm = normCode(receiptNumber);
@@ -2835,21 +2842,28 @@ class MySqlDatabaseManager {
         continue;
       }
 
-      const rawAmount = String(raw.amount || '').replace(/[^0-9.]/g, '');
-      const amount = parseFloat(rawAmount);
-      const vendorName = String(raw.vendorName || raw.vendor_name || raw.vendor || 'General Vendor').trim();
-      const category = String(raw.category || raw.expenseCategory || 'Miscellaneous').trim();
+      const rawAmountStr = String(raw.amount ?? raw.amount_inr ?? '').trim();
+      const parsedAmount = typeof raw.amount === 'number' ? raw.amount : parseFloat(rawAmountStr.replace(/[^0-9.-]/g, ''));
+      const vendorName = String(raw.vendorName || raw.vendor_name || raw.vendor || raw.payee || '').trim();
+      const category = String(raw.category || raw.expenseCategory || 'Site Expenses').trim();
       const rawExpNo = String(raw.expenseNumber || raw.expense_number || raw.expenseNo || '').trim();
       const expenseDate = raw.date ? String(raw.date).split('T')[0] : (raw.expenseDate ? String(raw.expenseDate).split('T')[0] : new Date().toISOString().split('T')[0]);
       const paymentMode = String(raw.paymentMode || raw.payment_mode || 'Bank Payment').trim();
       const refNo = String(raw.referenceNo || raw.reference_no || raw.refNo || '').trim();
       const notes = String(raw.notes || 'Imported via CSV Hub').trim();
 
-      if (isNaN(amount) || amount <= 0) {
-        failedRecords.push({ row: rowNum, reason: `Valid expense amount (> 0) is required (got "${raw.amount || 'empty'}").` });
-        errors.push(`Row ${rowNum}: Valid expense amount (> 0) is required (got "${raw.amount || 'empty'}").`);
+      if (!vendorName) {
+        failedRecords.push({ row: rowNum, reason: 'Vendor name is mandatory.' });
+        errors.push(`Row ${rowNum}: Vendor name is mandatory.`);
         continue;
       }
+
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        failedRecords.push({ row: rowNum, reason: `Valid positive expense amount (> 0) is required (got "${raw.amount ?? 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid positive expense amount (> 0) is required (got "${raw.amount ?? 'empty'}").`);
+        continue;
+      }
+      const amount = parsedAmount;
 
       const expenseNumber = rawExpNo || `EXP-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
       const expNorm = normCode(expenseNumber);
@@ -3144,16 +3158,22 @@ class MySqlDatabaseManager {
       }
 
       const rawTicketId = String(raw.ticketId || raw.ticket_id || raw.ticketNumber || '').trim();
-      const customerName = String(raw.customerName || raw.customer_name || 'Solar Customer').trim();
+      const customerName = String(raw.customerName || raw.customer_name || raw.client || '').trim();
       const issue = String(raw.issue || raw.title || raw.description || '').trim();
       const category = String(raw.category || 'Inverter Error / Offline').trim();
       const priority = String(raw.priority || 'MEDIUM').trim().toUpperCase();
       const status = String(raw.status || 'OPEN').trim().toUpperCase();
       const notes = String(raw.notes || 'Imported via CSV Hub').trim();
 
-      if (!issue && !customerName) {
-        failedRecords.push({ row: rowNum, reason: 'Issue description or customer name is mandatory.' });
-        errors.push(`Row ${rowNum}: Issue description or customer name is mandatory.`);
+      if (!issue) {
+        failedRecords.push({ row: rowNum, reason: 'Issue description is mandatory.' });
+        errors.push(`Row ${rowNum}: Issue description is mandatory.`);
+        continue;
+      }
+
+      if (!customerName) {
+        failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name is mandatory.`);
         continue;
       }
 

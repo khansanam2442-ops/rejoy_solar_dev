@@ -414,16 +414,18 @@ export interface PaymentRecord {
   projectId: string;
   customerId: string;
   customerName: string;
-  milestone: PaymentMilestoneType;
+  milestone: PaymentMilestoneType | string;
   amount: number;
   status: PaymentStatus;
   dueDate: string;
   paidDate?: string;
-  paymentMode?: 'Bank NEFT/RTGS' | 'UPI' | 'Cheque' | 'Credit Card' | 'Cash';
+  paymentMode?: 'Bank NEFT/RTGS' | 'UPI' | 'Cheque' | 'Credit Card' | 'Cash' | string;
   transactionReference?: string;
   notes?: string;
   tallySyncStatus: 'NOT SYNCED' | 'SYNCING' | 'SYNCED' | 'FAILED';
   tallyReference?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ExpenseRecord {
@@ -432,7 +434,7 @@ export interface ExpenseRecord {
   projectId?: string;
   projectCode?: string;
   vendorName: string;
-  category: 'Material - Solar Panels' | 'Material - Inverter' | 'Material - Cables & BOS' | 'Civil Raw Materials' | 'Structure Steel' | 'Labor & Contractors' | 'Transport & Logistics' | 'Travel & Food' | 'Government Permits' | 'Tools & Safety';
+  category: 'Material - Solar Panels' | 'Material - Inverter' | 'Material - Cables & BOS' | 'Civil Raw Materials' | 'Structure Steel' | 'Labor & Contractors' | 'Transport & Logistics' | 'Travel & Food' | 'Government Permits' | 'Tools & Safety' | string;
   amount: number;
   date: string;
   paymentMode: string;
@@ -441,6 +443,8 @@ export interface ExpenseRecord {
   receiptUrl?: string;
   approvedBy?: string;
   tallySyncStatus: 'NOT SYNCED' | 'SYNCING' | 'SYNCED' | 'FAILED';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type EmployeeDocumentCategory =
@@ -526,6 +530,7 @@ export interface AttendanceRecord {
   employeeCode?: string;
   employeeEmail?: string;
   date: string;
+  attendanceDate?: string;
   checkInTime: string;
   checkOutTime?: string;
   gpsCheckIn?: {
@@ -555,6 +560,8 @@ export interface AttendanceRecord {
     locationName: string;
   };
   fuelExpense?: DailyFuelExpense;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AdditionalExpenseItem {
@@ -630,11 +637,13 @@ export interface HolidayRecord {
 export interface ServiceTicket {
   id: string;
   ticketId: string;
+  ticketNumber?: string;
   customerId: string;
   customerName: string;
   projectId: string;
   projectTitle?: string;
   issue: string;
+  title?: string;
   category: string;
   priority: Priority;
   assignedTechnicianId?: string;
@@ -722,25 +731,31 @@ export interface ProductItem {
   name: string;
   category: ProductCategory;
   brand: string;
+  model?: string;
   specification: string;
+  specifications?: string;
   unit: ProductUnit;
   hsnCode: string;
+  gstRate?: number;
   unitPrice: number; // Standard purchase cost (₹)
   sellingPrice: number; // Standard sales price (₹)
   currentStock: number;
   minStockThreshold: number;
+  reorderLevel?: number;
   location: string;
   warehouseId?: string;
   warehouseName?: string;
   warehouseStocks?: Record<string, number>;
   preferredVendorId?: string;
   preferredVendorName?: string;
+  status?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export type VendorCategory =
   | 'Solar Modules'
+  | 'Modules'
   | 'Inverters'
   | 'Structures'
   | 'Cables & Switchgear'
