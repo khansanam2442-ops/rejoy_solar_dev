@@ -501,6 +501,75 @@ class MySqlDatabaseManager {
         }
       } catch {}
 
+      // Check and migrate columns on solar_employees
+      try {
+        const [empCols]: any = await this.pool.query("SHOW COLUMNS FROM `solar_employees`");
+        const existingEmpCols = new Set<string>((empCols as any[]).map(c => String(c.Field).toLowerCase()));
+
+        if (!existingEmpCols.has('joining_date')) {
+          try {
+            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `joining_date` DATE DEFAULT NULL AFTER `email`");
+            console.log('[MySQL Migration] Successfully added missing joining_date column to solar_employees');
+          } catch (e: any) {
+            console.warn('[MySQL Migration] Notice adding joining_date:', e.message);
+          }
+        } else {
+          try {
+            await this.pool.query("ALTER TABLE `solar_employees` MODIFY COLUMN `joining_date` DATE DEFAULT NULL");
+          } catch {}
+        }
+
+        if (!existingEmpCols.has('documents_json')) {
+          try {
+            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `documents_json` LONGTEXT DEFAULT NULL AFTER `photo_url`");
+            console.log('[MySQL Migration] Successfully added documents_json column to solar_employees');
+          } catch (e: any) {
+            console.warn('[MySQL Migration] Notice adding documents_json:', e.message);
+          }
+        }
+
+        if (!existingEmpCols.has('assigned_role')) {
+          try {
+            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `assigned_role` VARCHAR(64) DEFAULT NULL AFTER `system_role`");
+            console.log('[MySQL Migration] Successfully added assigned_role column to solar_employees');
+          } catch (e: any) {
+            console.warn('[MySQL Migration] Notice adding assigned_role:', e.message);
+          }
+        }
+
+        if (!existingEmpCols.has('updated_at')) {
+          try {
+            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+          } catch {}
+        }
+      } catch (err: any) {
+        console.warn('[MySQL Migration] Notice verifying solar_employees schema:', err.message);
+      }
+
+      // Ensure persistent solar_employee_documents table exists
+      try {
+        await this.pool.query(`
+          CREATE TABLE IF NOT EXISTS \`solar_employee_documents\` (
+            \`id\` VARCHAR(64) PRIMARY KEY,
+            \`employee_id\` VARCHAR(64) NOT NULL,
+            \`category\` VARCHAR(64) NOT NULL,
+            \`name\` VARCHAR(255) NOT NULL,
+            \`file_name\` VARCHAR(255) NOT NULL,
+            \`file_path\` VARCHAR(500) NOT NULL,
+            \`file_url\` VARCHAR(500) NOT NULL,
+            \`mime_type\` VARCHAR(128) NOT NULL,
+            \`file_size\` BIGINT DEFAULT 0,
+            \`uploaded_at\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            \`uploaded_by\` VARCHAR(255) DEFAULT 'HR Administrator',
+            \`notes\` TEXT,
+            INDEX \`idx_emp_docs_empid\` (\`employee_id\`),
+            INDEX \`idx_emp_docs_cat\` (\`category\`)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+      } catch (err: any) {
+        console.warn('[MySQL Migration] Notice creating solar_employee_documents table:', err.message);
+      }
+
       await this.ensureHashedPasswords();
     } catch (err: any) {
       console.error('[MySQL] Schema execution notice:', err?.message || err);
@@ -660,8 +729,13 @@ class MySqlDatabaseManager {
       return d.toISOString().split('T')[0];
     }
     const s = String(d).trim();
+    if (!s) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmy) {
+      return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    }
     const parsed = new Date(s);
     if (!isNaN(parsed.getTime())) {
       return parsed.toISOString().split('T')[0];
@@ -2099,7 +2173,8 @@ class MySqlDatabaseManager {
       const designation = String(raw.designation || 'Staff Member').trim();
       const phone = String(raw.phone || '').trim();
       const email = String(raw.email || '').trim().toLowerCase();
-      const joiningDate = raw.joiningDate ? String(raw.joiningDate).split('T')[0] : (raw.joining_date ? String(raw.joining_date).split('T')[0] : new Date().toISOString().split('T')[0]);
+      const rawJoin = raw.joiningDate ?? raw.joining_date ?? raw['joining date'] ?? raw['Joining Date'] ?? raw.date_of_joining ?? raw.doj ?? raw.startDate ?? raw.start_date;
+      const joiningDate = this.toSqlDate(rawJoin) || new Date().toISOString().split('T')[0];
       const rawSalary = String(raw.salaryMonthly ?? raw.salary_monthly ?? raw.salary ?? '').replace(/[^0-9.]/g, '');
       const salaryMonthly = parseFloat(rawSalary) || 0;
       const status = String(raw.status || 'ACTIVE').trim().toUpperCase();
@@ -2144,6 +2219,7 @@ class MySqlDatabaseManager {
         employeeCode,
         name,
         photoUrl: raw.photoUrl || raw.photo_url || '',
+        documents: [],
         department,
         designation,
         phone,
@@ -2164,20 +2240,22 @@ class MySqlDatabaseManager {
         try {
           const sql = `
             INSERT INTO \`solar_employees\` (
-              \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
+              \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`documents_json\`, \`department\`,
               \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
               \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
               \`is_field_worker\`, \`account_status\`
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
-              \`name\` = VALUES(\`name\`), \`department\` = VALUES(\`department\`),
-              \`designation\` = VALUES(\`designation\`), \`phone\` = VALUES(\`phone\`),
-              \`email\` = VALUES(\`email\`), \`salary_monthly\` = VALUES(\`salary_monthly\`),
-              \`status\` = VALUES(\`status\`), \`login_enabled\` = VALUES(\`login_enabled\`),
-              \`system_role\` = VALUES(\`system_role\`), \`is_field_worker\` = VALUES(\`is_field_worker\`)
+              \`name\` = VALUES(\`name\`), \`photo_url\` = VALUES(\`photo_url\`),
+              \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
+              \`phone\` = VALUES(\`phone\`), \`email\` = VALUES(\`email\`),
+              \`joining_date\` = VALUES(\`joining_date\`),
+              \`salary_monthly\` = VALUES(\`salary_monthly\`), \`status\` = VALUES(\`status\`),
+              \`login_enabled\` = VALUES(\`login_enabled\`), \`system_role\` = VALUES(\`system_role\`),
+              \`is_field_worker\` = VALUES(\`is_field_worker\`)
           `;
           await this.pool.query(sql, [
-            record.id, record.employeeCode, record.name, record.photoUrl,
+            record.id, record.employeeCode, record.name, record.photoUrl, '[]',
             record.department, record.designation, record.phone, record.email,
             record.joiningDate, record.salaryMonthly, record.status,
             record.currentSiteLocation, record.loginEnabled ? 1 : 0, record.systemRole,
@@ -3298,25 +3376,60 @@ class MySqlDatabaseManager {
       }
     } catch {}
 
-    const mapped = (rows as any[]).map(r => ({
-      id: r.id,
-      employeeCode: r.employee_code || r.employeeCode || `EMP-${r.id.slice(-4).toUpperCase()}`,
-      name: r.name,
-      photoUrl: r.photo_url || r.photoUrl || '',
-      department: r.department || 'Operations',
-      designation: r.designation || 'Staff',
-      phone: r.phone || '',
-      email: r.email,
-      joiningDate: r.joining_date || r.joiningDate || null,
-      salaryMonthly: Number(r.salary_monthly ?? r.salaryMonthly) || 0,
-      status: r.status || 'ACTIVE',
-      currentSiteLocation: r.current_site_location || r.currentSiteLocation || '',
-      loginEnabled: Boolean(r.login_enabled ?? r.loginEnabled ?? true),
-      systemRole: r.system_role || r.systemRole || 'Staff',
-      isFieldWorker: Boolean(r.is_field_worker ?? r.isFieldWorker),
-      accountStatus: r.account_status || r.accountStatus || 'ACTIVE',
-      createdAt: r.created_at || r.createdAt
-    }));
+    const docMap = new Map<string, any[]>();
+    try {
+      const [docRows]: any = await this.pool!.query('SELECT * FROM `solar_employee_documents` ORDER BY `uploaded_at` DESC');
+      if (Array.isArray(docRows)) {
+        for (const d of docRows) {
+          const list = docMap.get(d.employee_id) || [];
+          list.push({
+            id: d.id,
+            category: d.category,
+            name: d.name,
+            fileName: d.file_name,
+            filePath: d.file_path,
+            fileUrl: d.file_url,
+            mimeType: d.mime_type,
+            fileSize: Number(d.file_size) || 0,
+            uploadedAt: d.uploaded_at ? new Date(d.uploaded_at).toISOString() : new Date().toISOString(),
+            uploadedBy: d.uploaded_by,
+            notes: d.notes
+          });
+          docMap.set(d.employee_id, list);
+        }
+      }
+    } catch {}
+
+    const mapped = (rows as any[]).map(r => {
+      let docs: any[] = docMap.get(r.id) || [];
+      if (docs.length === 0 && r.documents_json) {
+        try {
+          const parsed = JSON.parse(r.documents_json);
+          if (Array.isArray(parsed)) docs = parsed;
+        } catch {}
+      }
+
+      return {
+        id: r.id,
+        employeeCode: r.employee_code || r.employeeCode || `EMP-${r.id.slice(-4).toUpperCase()}`,
+        name: r.name,
+        photoUrl: r.photo_url || r.photoUrl || '',
+        documents: docs,
+        department: r.department || 'Operations',
+        designation: r.designation || 'Staff',
+        phone: r.phone || '',
+        email: r.email,
+        joiningDate: r.joining_date || r.joiningDate || null,
+        salaryMonthly: Number(r.salary_monthly ?? r.salaryMonthly) || 0,
+        status: r.status || 'ACTIVE',
+        currentSiteLocation: r.current_site_location || r.currentSiteLocation || '',
+        loginEnabled: Boolean(r.login_enabled ?? r.loginEnabled ?? true),
+        systemRole: r.system_role || r.systemRole || 'Staff',
+        isFieldWorker: Boolean(r.is_field_worker ?? r.isFieldWorker),
+        accountStatus: r.account_status || r.accountStatus || 'ACTIVE',
+        createdAt: r.created_at || r.createdAt
+      };
+    });
     this.setFallbackItems('employees', mapped);
     return mapped;
   }
@@ -3330,6 +3443,9 @@ class MySqlDatabaseManager {
     const employeeCode = item.employeeCode ?? item.employee_code ?? existing?.employee_code ?? item.id;
     const name = item.name ?? existing?.name ?? (item.firstName ? `${item.firstName} ${item.lastName || ''}`.trim() : 'Employee');
     const photoUrl = item.photoUrl ?? item.photo_url ?? existing?.photo_url ?? '';
+    const rawDocs = item.documents ?? (existing?.documents_json ? JSON.parse(existing.documents_json) : []);
+    const documents = Array.isArray(rawDocs) ? rawDocs : [];
+    const documentsJson = JSON.stringify(documents);
     const department = item.department ?? existing?.department ?? 'Operations';
     const designation = item.designation ?? existing?.designation ?? 'Solar Engineer';
     const phone = item.phone ?? existing?.phone ?? '+91 99999 00000';
@@ -3346,15 +3462,17 @@ class MySqlDatabaseManager {
 
     const sql = `
       INSERT INTO \`solar_employees\` (
-        \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
+        \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`documents_json\`, \`department\`,
         \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
         \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
         \`is_field_worker\`, \`account_status\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`name\` = VALUES(\`name\`), \`photo_url\` = VALUES(\`photo_url\`),
+        \`documents_json\` = VALUES(\`documents_json\`),
         \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
         \`phone\` = VALUES(\`phone\`), \`email\` = VALUES(\`email\`),
+        \`joining_date\` = VALUES(\`joining_date\`),
         \`salary_monthly\` = VALUES(\`salary_monthly\`), \`status\` = VALUES(\`status\`),
         \`current_site_location\` = VALUES(\`current_site_location\`),
         \`login_enabled\` = VALUES(\`login_enabled\`), \`system_role\` = VALUES(\`system_role\`),
@@ -3365,6 +3483,7 @@ class MySqlDatabaseManager {
       employeeCode,
       name,
       photoUrl,
+      documentsJson,
       department,
       designation,
       phone,
@@ -3378,6 +3497,45 @@ class MySqlDatabaseManager {
       isFieldWorker,
       accountStatus
     ]);
+
+    // Synchronize documents into solar_employee_documents audit table
+    if (this.pool && documents.length > 0) {
+      for (const doc of documents) {
+        if (!doc.id || !doc.fileName) continue;
+        try {
+          await this.pool.query(`
+            INSERT INTO \`solar_employee_documents\` (
+              \`id\`, \`employee_id\`, \`category\`, \`name\`, \`file_name\`,
+              \`file_path\`, \`file_url\`, \`mime_type\`, \`file_size\`,
+              \`uploaded_at\`, \`uploaded_by\`, \`notes\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`category\` = VALUES(\`category\`),
+              \`name\` = VALUES(\`name\`),
+              \`file_name\` = VALUES(\`file_name\`),
+              \`file_path\` = VALUES(\`file_path\`),
+              \`file_url\` = VALUES(\`file_url\`),
+              \`mime_type\` = VALUES(\`mime_type\`),
+              \`file_size\` = VALUES(\`file_size\`),
+              \`notes\` = VALUES(\`notes\`)
+          `, [
+            doc.id,
+            item.id,
+            doc.category || 'Other',
+            doc.name || doc.fileName,
+            doc.fileName,
+            doc.filePath || doc.fileUrl || '',
+            doc.fileUrl || '',
+            doc.mimeType || 'application/octet-stream',
+            Number(doc.fileSize) || 0,
+            doc.uploadedBy || 'HR Administrator',
+            doc.notes || null
+          ]);
+        } catch (e: any) {
+          console.warn('[DB Manager] Notice syncing employee doc to table:', e.message);
+        }
+      }
+    }
 
     // Authoritatively synchronize employee account to solar_users if loginEnabled
     if (loginEnabled && this.pool) {
@@ -3433,23 +3591,191 @@ class MySqlDatabaseManager {
       }
     }
 
+    const savedEmp = {
+      ...item,
+      documents
+    };
+
     const items = this.getFallbackItems('employees');
     const idx = items.findIndex(e => e.id === item.id);
-    if (idx >= 0) items[idx] = { ...items[idx], ...item };
-    else items.push(item);
+    if (idx >= 0) items[idx] = { ...items[idx], ...savedEmp };
+    else items.push(savedEmp);
     this.setFallbackItems('employees', items);
-    return item;
+    return savedEmp;
   }
 
   public async deleteEmployee(id: string): Promise<boolean> {
     this.assertDbConnected();
     if (this.pool) {
+      await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `employee_id` = ?', [id]).catch(() => {});
       await this.pool.query('DELETE FROM `solar_employees` WHERE `id` = ?', [id]);
       await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]).catch(() => {});
     }
     const items = this.getFallbackItems('employees').filter(e => e.id !== id);
     this.setFallbackItems('employees', items);
     this.deleteFallback('users', id);
+    return true;
+  }
+
+  public async saveEmployeeDocument(doc: {
+    id?: string;
+    employeeId: string;
+    category?: string;
+    name: string;
+    fileName: string;
+    filePath: string;
+    fileUrl: string;
+    mimeType?: string;
+    fileSize?: number;
+    uploadedBy?: string;
+    notes?: string;
+  }): Promise<any> {
+    this.assertDbConnected();
+    const docId = doc.id || `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const category = doc.category || 'Other';
+    const mimeType = doc.mimeType || 'application/octet-stream';
+    const fileSize = Number(doc.fileSize) || 0;
+    const uploadedBy = doc.uploadedBy || 'HR Administrator';
+    const notes = doc.notes || null;
+
+    if (this.pool) {
+      await this.pool.query(`
+        INSERT INTO \`solar_employee_documents\` (
+          \`id\`, \`employee_id\`, \`category\`, \`name\`, \`file_name\`,
+          \`file_path\`, \`file_url\`, \`mime_type\`, \`file_size\`,
+          \`uploaded_at\`, \`uploaded_by\`, \`notes\`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+        ON DUPLICATE KEY UPDATE
+          \`category\` = VALUES(\`category\`),
+          \`name\` = VALUES(\`name\`),
+          \`file_name\` = VALUES(\`file_name\`),
+          \`file_path\` = VALUES(\`file_path\`),
+          \`file_url\` = VALUES(\`file_url\`),
+          \`mime_type\` = VALUES(\`mime_type\`),
+          \`file_size\` = VALUES(\`file_size\`),
+          \`notes\` = VALUES(\`notes\`)
+      `, [
+        docId, doc.employeeId, category, doc.name, doc.fileName,
+        doc.filePath, doc.fileUrl, mimeType, fileSize, uploadedBy, notes
+      ]);
+
+      // Sync documents_json in solar_employees
+      try {
+        const [rows]: any = await this.pool.query(
+          'SELECT * FROM `solar_employee_documents` WHERE `employee_id` = ? ORDER BY `uploaded_at` DESC',
+          [doc.employeeId]
+        );
+        const docsJson = JSON.stringify(rows.map((d: any) => ({
+          id: d.id,
+          category: d.category,
+          name: d.name,
+          fileName: d.file_name,
+          filePath: d.file_path,
+          fileUrl: d.file_url,
+          mimeType: d.mime_type,
+          fileSize: Number(d.file_size) || 0,
+          uploadedAt: d.uploaded_at ? new Date(d.uploaded_at).toISOString() : new Date().toISOString(),
+          uploadedBy: d.uploaded_by,
+          notes: d.notes
+        })));
+        await this.pool.query('UPDATE `solar_employees` SET `documents_json` = ? WHERE `id` = ?', [docsJson, doc.employeeId]);
+      } catch {}
+    }
+
+    return {
+      id: docId,
+      employeeId: doc.employeeId,
+      category,
+      name: doc.name,
+      fileName: doc.fileName,
+      filePath: doc.filePath,
+      fileUrl: doc.fileUrl,
+      mimeType,
+      fileSize,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy,
+      notes
+    };
+  }
+
+  public async deleteEmployeeDocument(employeeId: string, docId: string): Promise<boolean> {
+    this.assertDbConnected();
+    if (this.pool) {
+      try {
+        const [rows]: any = await this.pool.query(
+          'SELECT file_path FROM `solar_employee_documents` WHERE `id` = ? AND `employee_id` = ?',
+          [docId, employeeId]
+        );
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].file_path) {
+          const fullPath = path.isAbsolute(rows[0].file_path) ? rows[0].file_path : path.join(process.cwd(), rows[0].file_path);
+          if (fs.existsSync(fullPath)) {
+            try { fs.unlinkSync(fullPath); } catch {}
+          }
+        }
+      } catch {}
+
+      await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `id` = ? AND `employee_id` = ?', [docId, employeeId]);
+
+      // Sync documents_json in solar_employees
+      try {
+        const [rows]: any = await this.pool.query(
+          'SELECT * FROM `solar_employee_documents` WHERE `employee_id` = ? ORDER BY `uploaded_at` DESC',
+          [employeeId]
+        );
+        const docsJson = JSON.stringify(rows.map((d: any) => ({
+          id: d.id,
+          category: d.category,
+          name: d.name,
+          fileName: d.file_name,
+          filePath: d.file_path,
+          fileUrl: d.file_url,
+          mimeType: d.mime_type,
+          fileSize: Number(d.file_size) || 0,
+          uploadedAt: d.uploaded_at ? new Date(d.uploaded_at).toISOString() : new Date().toISOString(),
+          uploadedBy: d.uploaded_by,
+          notes: d.notes
+        })));
+        await this.pool.query('UPDATE `solar_employees` SET `documents_json` = ? WHERE `id` = ?', [docsJson, employeeId]);
+      } catch {}
+    }
+    return true;
+  }
+
+  public async getEmployeeDocuments(employeeId: string): Promise<any[]> {
+    if (!this.isConnected || !this.pool) return [];
+    try {
+      const [rows]: any = await this.pool.query(
+        'SELECT * FROM `solar_employee_documents` WHERE `employee_id` = ? ORDER BY `uploaded_at` DESC',
+        [employeeId]
+      );
+      return (rows || []).map((d: any) => ({
+        id: d.id,
+        employeeId: d.employee_id,
+        category: d.category,
+        name: d.name,
+        fileName: d.file_name,
+        filePath: d.file_path,
+        fileUrl: d.file_url,
+        mimeType: d.mime_type,
+        fileSize: Number(d.file_size) || 0,
+        uploadedAt: d.uploaded_at ? new Date(d.uploaded_at).toISOString() : new Date().toISOString(),
+        uploadedBy: d.uploaded_by,
+        notes: d.notes
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  public async updateEmployeePhoto(id: string, photoUrl: string): Promise<boolean> {
+    if (this.pool) {
+      await this.pool.query('UPDATE `solar_employees` SET `photo_url` = ? WHERE `id` = ?', [photoUrl, id]);
+      await this.pool.query('UPDATE `solar_users` SET `photo_url` = ? WHERE `id` = ? OR `employee_id` = ?', [photoUrl, id, id]).catch(() => {});
+    }
+    const items = this.getFallbackItems('employees');
+    const idx = items.findIndex(e => e.id === id);
+    if (idx >= 0) items[idx].photoUrl = photoUrl;
+    this.setFallbackItems('employees', items);
     return true;
   }
 

@@ -22,6 +22,7 @@ import {
   RotateCcw,
   FileText,
   UploadCloud,
+  Upload,
   Download,
   ExternalLink,
   Trash2,
@@ -30,6 +31,7 @@ import {
 import { validateEmployee, DuplicateRecordError } from '../../services/validation';
 import { provisionEmployeeAccount, updateEmployeeAccount } from '../../services/adminAuthService';
 import { useAuth, DEMO_DEFAULT_PASSWORD } from '../../context/AuthContext';
+import { apiClient } from '../../services/apiClient';
 
 interface EmployeeModalProps {
   isOpen: boolean;
@@ -367,24 +369,61 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     if (validFiles.length > 0) {
       setIsUploading(true);
       try {
-        const readPromises = validFiles.map(file => {
+        const targetEmpId = employeeToEdit?.id || (formData.employeeCode ? `emp-${formData.employeeCode.toLowerCase().replace(/[^a-z0-9]/g, '')}` : `emp-${Date.now()}`);
+
+        const uploadPromises = validFiles.map(file => {
           return new Promise<EmployeeDocument>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result as string;
-              const newDoc: EmployeeDocument = {
-                id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-                name: file.name.replace(/\.[^/.]+$/, '') || file.name,
-                category: docCategory,
-                fileName: file.name,
-                mimeType: getMimeType(file),
-                fileSize: file.size,
-                fileUrl: dataUrl,
-                uploadedAt: new Date().toISOString(),
-                uploadedBy: currentUser?.name || 'HR Administrator',
-                notes: docNotes.trim() || undefined
-              };
-              resolve(newDoc);
+            reader.onload = async () => {
+              try {
+                const dataUrl = reader.result as string;
+                // Persistent server upload
+                try {
+                  const uploaded = await apiClient.uploadEmployeeDocument(targetEmpId, {
+                    name: file.name.replace(/\.[^/.]+$/, '') || file.name,
+                    category: docCategory,
+                    fileName: file.name,
+                    mimeType: getMimeType(file),
+                    fileData: dataUrl,
+                    notes: docNotes.trim() || undefined,
+                    uploadedBy: currentUser?.name || 'HR Administrator'
+                  });
+                  if (uploaded && uploaded.fileUrl) {
+                    resolve({
+                      id: uploaded.id,
+                      name: uploaded.name,
+                      category: uploaded.category,
+                      fileName: uploaded.fileName,
+                      mimeType: uploaded.mimeType,
+                      fileSize: uploaded.fileSize,
+                      fileUrl: uploaded.fileUrl,
+                      uploadedAt: uploaded.uploadedAt,
+                      uploadedBy: uploaded.uploadedBy,
+                      notes: uploaded.notes
+                    });
+                    return;
+                  }
+                } catch (uploadErr) {
+                  console.warn('Direct upload notice, falling back:', uploadErr);
+                }
+
+                // Fallback client representation
+                const newDoc: EmployeeDocument = {
+                  id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                  name: file.name.replace(/\.[^/.]+$/, '') || file.name,
+                  category: docCategory,
+                  fileName: file.name,
+                  mimeType: getMimeType(file),
+                  fileSize: file.size,
+                  fileUrl: dataUrl,
+                  uploadedAt: new Date().toISOString(),
+                  uploadedBy: currentUser?.name || 'HR Administrator',
+                  notes: docNotes.trim() || undefined
+                };
+                resolve(newDoc);
+              } catch (readErr) {
+                reject(readErr);
+              }
             };
             reader.onerror = () => {
               reject(new Error(`Failed to read file: ${file.name}`));
@@ -393,7 +432,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
           });
         });
 
-        const newDocs = await Promise.all(readPromises);
+        const newDocs = await Promise.all(uploadPromises);
         setDocuments(prev => [...prev, ...newDocs]);
         setDocNotes('');
       } catch (err) {
@@ -413,7 +452,41 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   };
 
   const handleRemoveDocument = (id: string) => {
+    const targetEmpId = employeeToEdit?.id;
+    if (targetEmpId) {
+      apiClient.deleteEmployeeDocument(targetEmpId, id).catch(() => {});
+    }
     setDocuments(prev => prev.filter(d => d.id !== id));
+  };
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (JPG, PNG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Photo file size exceeds 5 MB limit.');
+      return;
+    }
+
+    const targetEmpId = employeeToEdit?.id || (formData.employeeCode ? `emp-${formData.employeeCode.toLowerCase().replace(/[^a-z0-9]/g, '')}` : `emp-${Date.now()}`);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const dataUrl = reader.result as string;
+        try {
+          const photoUrl = await apiClient.uploadEmployeePhoto(targetEmpId, dataUrl, file.name);
+          setFormData(prev => ({ ...prev, photoUrl }));
+        } catch {
+          setFormData(prev => ({ ...prev, photoUrl: dataUrl }));
+        }
+      } catch (err: any) {
+        console.warn('Photo read error:', err);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleViewDocument = (doc: EmployeeDocument) => {
@@ -1096,17 +1169,34 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <Image className="w-3.5 h-3.5 text-slate-400" />
-                <span>Photo / Avatar URL <span className="text-[10px] text-slate-400 font-normal">(Optional)</span></span>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Image className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Profile Photo <span className="text-[10px] text-slate-400 font-normal">(Server Stored)</span></span>
+                </span>
+                {formData.photoUrl && (
+                  <span className="text-[10px] text-emerald-600 font-medium">✓ Photo set</span>
+                )}
               </label>
-              <input
-                type="url"
-                value={formData.photoUrl}
-                onChange={e => setFormData({ ...formData, photoUrl: e.target.value })}
-                placeholder="https://images.unsplash.com/..."
-                className="w-full text-xs border border-slate-200 rounded-xl p-2.5 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  value={formData.photoUrl}
+                  onChange={e => setFormData({ ...formData, photoUrl: e.target.value })}
+                  placeholder="https://... or choose file"
+                  className="flex-1 text-xs border border-slate-200 rounded-xl p-2.5 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                />
+                <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 transition-colors shadow-2xs shrink-0">
+                  <Upload className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Upload</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={handlePhotoUpload}
+                  />
+                </label>
+              </div>
             </div>
           </div>
 

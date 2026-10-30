@@ -521,6 +521,61 @@ class ApiClient {
     return data;
   }
 
+  async uploadEmployeeDocument(employeeId: string, docData: {
+    name?: string;
+    category?: string;
+    fileName: string;
+    mimeType?: string;
+    fileData: string;
+    notes?: string;
+    uploadedBy?: string;
+  }): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents/upload`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(docData)
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Upload failed with status ${res.status}`);
+    }
+    return data.document;
+  }
+
+  async deleteEmployeeDocument(employeeId: string, docId: string): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(docId)}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders()
+    });
+    const data = await res.json();
+    return Boolean(data.success);
+  }
+
+  async getEmployeeDocuments(employeeId: string): Promise<any[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents`, {
+        headers: this.getAuthHeaders()
+      });
+      const data = await res.json();
+      return data.data || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async uploadEmployeePhoto(employeeId: string, photoData: string, fileName?: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/photo/upload`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ photoData, fileName })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Photo upload failed with status ${res.status}`);
+    }
+    return data.photoUrl;
+  }
+
   // --- Attendance ---
   async getAttendance(): Promise<any[]> {
     try {

@@ -32,7 +32,7 @@
       "status": "ACTIVE",
       "activeProjectId": null,
       "createdAt": "2026-10-30T22:29:43.000Z",
-      "updatedAt": "2026-10-30T22:29:43.000Z"
+      "updatedAt": "2026-10-30T22:54:01.255Z"
     },
     {
       "id": "cust-1793399149025-1-znkh",
@@ -52,7 +52,7 @@
       "status": "ACTIVE",
       "activeProjectId": null,
       "createdAt": "2026-10-30T22:25:49.000Z",
-      "updatedAt": "2026-10-30T22:25:49.000Z"
+      "updatedAt": "2026-10-30T22:54:01.261Z"
     }
   ],
   "leads": [
@@ -73,7 +73,7 @@
       "notes": "Imported via CSV Hub",
       "nextFollowUpDate": null,
       "createdAt": "2026-10-30T22:29:42.000Z",
-      "updatedAt": "2026-10-30T22:29:42.000Z"
+      "updatedAt": "2026-10-30T22:54:01.265Z"
     },
     {
       "id": "lead-imp-1793399148963-1",
@@ -92,7 +92,7 @@
       "notes": "Imported via CSV Hub",
       "nextFollowUpDate": null,
       "createdAt": "2026-10-30T22:25:48.000Z",
-      "updatedAt": "2026-10-30T22:25:48.000Z"
+      "updatedAt": "2026-10-30T22:54:01.269Z"
     },
     {
       "id": "lead-imp-1793399092162-1",
@@ -111,7 +111,7 @@
       "notes": "Imported via CSV Hub",
       "nextFollowUpDate": null,
       "createdAt": "2026-10-30T22:24:52.000Z",
-      "updatedAt": "2026-10-30T22:24:52.000Z"
+      "updatedAt": "2026-10-30T22:54:01.272Z"
     },
     {
       "id": "lead-imp-1793399027917-2",
@@ -130,7 +130,7 @@
       "notes": "Imported via CSV Hub",
       "nextFollowUpDate": null,
       "createdAt": "2026-10-30T22:23:47.000Z",
-      "updatedAt": "2026-10-30T22:23:47.000Z"
+      "updatedAt": "2026-10-30T22:54:01.276Z"
     },
     {
       "id": "lead-imp-1793398824933-1",
@@ -149,7 +149,7 @@
       "notes": "Imported via CSV Hub",
       "nextFollowUpDate": null,
       "createdAt": "2026-10-30T22:20:24.000Z",
-      "updatedAt": "2026-10-30T22:20:24.000Z"
+      "updatedAt": "2026-10-30T22:54:01.279Z"
     }
   ],
   "projects": [
@@ -189,9 +189,9 @@
           "assignedToName": "Rajesh Kumar",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-02T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Site Survey engineering verification completed",
@@ -222,9 +222,9 @@
           "assignedToName": "Sneha Patel",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-05T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "CAD & 3D Engineering Design engineering verification completed",
@@ -255,9 +255,9 @@
           "assignedToName": "Vikas Sharma",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-08T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Statutory Approvals & CEIG engineering verification completed",
@@ -288,9 +288,9 @@
           "assignedToName": "Pooja Mehta",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-11T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "BOM Procurement & Dispatch engineering verification completed",
@@ -321,9 +321,9 @@
           "assignedToName": "Hardik Joshi",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-14T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Civil Foundations & Pier Casting engineering verification completed",
@@ -354,9 +354,9 @@
           "assignedToName": "Ramesh Solanki",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-17T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Module Mounting Structure (MMS) engineering verification completed",
@@ -387,9 +387,9 @@
           "assignedToName": "Ankit Joshi",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-20T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Chemical Earthing Pits engineering verification completed",
@@ -420,8 +420,8 @@
           "assignedToName": "Manoj Tiwari",
           "status": "IN PROGRESS",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-23T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -454,7 +454,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-11-26T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -487,7 +487,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-11-29T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -520,7 +520,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-02T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -553,7 +553,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-05T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -586,7 +586,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-08T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -619,7 +619,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-11T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -652,7 +652,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-14T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -685,7 +685,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-17T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -707,7 +707,7 @@
         }
       ],
       "createdAt": "2026-10-30T22:29:43.000Z",
-      "updatedAt": "2026-10-30T22:29:43.000Z"
+      "updatedAt": "2026-10-30T22:54:01.284Z"
     },
     {
       "id": "proj-imp-1793399149135-1",
@@ -745,9 +745,9 @@
           "assignedToName": "Rajesh Kumar",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-02T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Site Survey engineering verification completed",
@@ -778,9 +778,9 @@
           "assignedToName": "Sneha Patel",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-05T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "CAD & 3D Engineering Design engineering verification completed",
@@ -811,9 +811,9 @@
           "assignedToName": "Vikas Sharma",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-08T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Statutory Approvals & CEIG engineering verification completed",
@@ -844,9 +844,9 @@
           "assignedToName": "Pooja Mehta",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-11T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "BOM Procurement & Dispatch engineering verification completed",
@@ -877,9 +877,9 @@
           "assignedToName": "Hardik Joshi",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-14T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Civil Foundations & Pier Casting engineering verification completed",
@@ -910,9 +910,9 @@
           "assignedToName": "Ramesh Solanki",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-17T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Module Mounting Structure (MMS) engineering verification completed",
@@ -943,9 +943,9 @@
           "assignedToName": "Ankit Joshi",
           "status": "COMPLETED",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-20T00:00:00.000Z",
-          "completedDate": "2026-10-30T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
+          "completedDate": "1899-11-30T00:00:00.000Z",
           "checklist": [
             {
               "title": "Chemical Earthing Pits engineering verification completed",
@@ -976,8 +976,8 @@
           "assignedToName": "Manoj Tiwari",
           "status": "IN PROGRESS",
           "priority": "MEDIUM",
-          "startDate": "2026-10-30T00:00:00.000Z",
-          "dueDate": "2026-11-23T00:00:00.000Z",
+          "startDate": "1899-11-30T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1010,7 +1010,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-11-26T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1043,7 +1043,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-11-29T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1076,7 +1076,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-02T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1109,7 +1109,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-05T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1142,7 +1142,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-08T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1175,7 +1175,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-11T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1208,7 +1208,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-14T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1241,7 +1241,7 @@
           "status": "NOT STARTED",
           "priority": "MEDIUM",
           "startDate": null,
-          "dueDate": "2026-12-17T00:00:00.000Z",
+          "dueDate": "1899-11-30T00:00:00.000Z",
           "completedDate": null,
           "checklist": [
             {
@@ -1263,7 +1263,7 @@
         }
       ],
       "createdAt": "2026-10-30T22:25:49.000Z",
-      "updatedAt": "2026-10-30T22:25:49.000Z"
+      "updatedAt": "2026-10-30T22:54:01.336Z"
     }
   ],
   "employees": [
@@ -1272,6 +1272,7 @@
       "employeeCode": "EMP001",
       "name": "Vikram Patel",
       "photoUrl": "",
+      "documents": [],
       "department": "Administration",
       "designation": "Managing Director & Admin",
       "phone": "+91 98250 11223",
@@ -1291,6 +1292,7 @@
       "employeeCode": "EMP000",
       "name": "Kunal Das",
       "photoUrl": "",
+      "documents": [],
       "department": "Administration",
       "designation": "Owner / Admin",
       "phone": "+91 98250 11223",
@@ -1310,6 +1312,7 @@
       "employeeCode": "EMP-ADM-404",
       "name": "Admin System Fallback",
       "photoUrl": "",
+      "documents": [],
       "department": "Administration",
       "designation": "Lead Administrator",
       "phone": "+91 98250 11223",
@@ -1329,6 +1332,7 @@
       "employeeCode": "EMP-TEST-1793398824828-1",
       "name": "Rohan Sharma",
       "photoUrl": "",
+      "documents": [],
       "department": "Engineering",
       "designation": "Solar PV Designer",
       "phone": "+91 9825824828",
@@ -1348,6 +1352,7 @@
       "employeeCode": "EMP-TEST-1793399027813-1",
       "name": "Rohan Sharma",
       "photoUrl": "",
+      "documents": [],
       "department": "Engineering",
       "designation": "Solar PV Designer",
       "phone": "+91 9825027813",
@@ -1367,6 +1372,7 @@
       "employeeCode": "EMP-TEST-1793399092057-1",
       "name": "Rohan Sharma",
       "photoUrl": "",
+      "documents": [],
       "department": "Engineering",
       "designation": "Solar PV Designer",
       "phone": "+91 9825092057",
@@ -1386,6 +1392,7 @@
       "employeeCode": "EMP-HTTP-1793399148712",
       "name": "Sunil Verma 1793399148712",
       "photoUrl": "",
+      "documents": [],
       "department": "Operations",
       "designation": "Solar Logistics Lead",
       "phone": "+91 9898148712",
@@ -1405,6 +1412,7 @@
       "employeeCode": "EMP-HTTP-1793399382629",
       "name": "Sunil Verma 1793399382629",
       "photoUrl": "",
+      "documents": [],
       "department": "Operations",
       "designation": "Solar Logistics Lead",
       "phone": "+91 9898382629",
@@ -1418,6 +1426,100 @@
       "isFieldWorker": false,
       "accountStatus": "ACTIVE",
       "createdAt": "2026-10-30T22:29:42.000Z"
+    },
+    {
+      "id": "emp-imp-1793400108128-1",
+      "employeeCode": "EMP-TEST-99",
+      "name": "Test Employee",
+      "photoUrl": "",
+      "documents": [],
+      "department": "Engineering",
+      "designation": "Solar Engineer",
+      "phone": "+91 98765 43210",
+      "email": "test.emp99@rejoysolar.com",
+      "joiningDate": "2026-09-01T00:00:00.000Z",
+      "salaryMonthly": 50000,
+      "status": "ACTIVE",
+      "currentSiteLocation": "",
+      "loginEnabled": true,
+      "systemRole": "Staff Member",
+      "isFieldWorker": false,
+      "accountStatus": "ACTIVE",
+      "createdAt": "2026-10-30T22:41:48.000Z"
+    },
+    {
+      "id": "emp-imp-1793400870893-1",
+      "employeeCode": "EMP-ISO-1793400870881",
+      "name": "Aarav Mehta 1793400870881",
+      "photoUrl": "/uploads/employees/emp-imp-1793400870893-1/profile/photo-1793400871236.png",
+      "documents": [
+        {
+          "id": "doc-1793400871219-6d0sq",
+          "category": "Employment Contract",
+          "name": "Employment Contract 2026",
+          "fileName": "employment_contract_signed.pdf",
+          "filePath": "uploads/employees/emp-imp-1793400870893-1/documents/doc-1793400871219-6d0sq_employment_contract_signed.pdf",
+          "fileUrl": "/uploads/employees/emp-imp-1793400870893-1/documents/doc-1793400871219-6d0sq_employment_contract_signed.pdf",
+          "mimeType": "application/pdf",
+          "fileSize": 82,
+          "uploadedAt": "2026-10-30T22:54:31.000Z",
+          "uploadedBy": "HR Manager",
+          "notes": "Signed contract verified by HR."
+        }
+      ],
+      "department": "Engineering",
+      "designation": "Senior Solar Designer",
+      "phone": "+91 9800870881",
+      "email": "aarav.1793400870881@rejoysolar.com",
+      "joiningDate": "2026-07-15T00:00:00.000Z",
+      "salaryMonthly": 65000,
+      "status": "ACTIVE",
+      "currentSiteLocation": "",
+      "loginEnabled": true,
+      "systemRole": "Staff Member",
+      "isFieldWorker": false,
+      "accountStatus": "ACTIVE",
+      "createdAt": "2026-10-30T22:54:30.000Z"
+    },
+    {
+      "id": "emp-imp-1793400871000-2",
+      "employeeCode": "EMP-DMY-1793400870881",
+      "name": "Priya Sharma 1793400870881",
+      "photoUrl": "",
+      "documents": [],
+      "department": "Operations",
+      "designation": "Field Supervisor",
+      "phone": "+91 9700870881",
+      "email": "priya.1793400870881@rejoysolar.com",
+      "joiningDate": "2026-08-25T00:00:00.000Z",
+      "salaryMonthly": 52000,
+      "status": "ACTIVE",
+      "currentSiteLocation": "",
+      "loginEnabled": true,
+      "systemRole": "Staff Member",
+      "isFieldWorker": false,
+      "accountStatus": "ACTIVE",
+      "createdAt": "2026-10-30T22:54:31.000Z"
+    },
+    {
+      "id": "emp-imp-1793400871105-3",
+      "employeeCode": "EMP-DEF-1793400870881",
+      "name": "Dev Patel 1793400870881",
+      "photoUrl": "",
+      "documents": [],
+      "department": "Civil",
+      "designation": "Civil Engineer",
+      "phone": "+91 9600870881",
+      "email": "dev.1793400870881@rejoysolar.com",
+      "joiningDate": "2026-10-30T00:00:00.000Z",
+      "salaryMonthly": 48000,
+      "status": "ACTIVE",
+      "currentSiteLocation": "",
+      "loginEnabled": true,
+      "systemRole": "Staff Member",
+      "isFieldWorker": false,
+      "accountStatus": "ACTIVE",
+      "createdAt": "2026-10-30T22:54:31.000Z"
     }
   ],
   "payments": [
@@ -1430,8 +1532,8 @@
       "milestone": "Commissioning Milestone",
       "amount": 380000,
       "status": "PAID",
-      "dueDate": "2026-08-25T00:00:00.000Z",
-      "paidDate": "2026-08-26T00:00:00.000Z",
+      "dueDate": "1899-11-30T00:00:00.000Z",
+      "paidDate": "1899-11-30T00:00:00.000Z",
       "paymentMode": "Bank NEFT",
       "transactionReference": "NEFT-AXIS-1793399382629",
       "notes": "Final 20% milestone received",
@@ -1448,8 +1550,8 @@
       "milestone": "Commissioning Milestone",
       "amount": 380000,
       "status": "PAID",
-      "dueDate": "2026-08-25T00:00:00.000Z",
-      "paidDate": "2026-08-26T00:00:00.000Z",
+      "dueDate": "1899-11-30T00:00:00.000Z",
+      "paidDate": "1899-11-30T00:00:00.000Z",
       "paymentMode": "Bank NEFT",
       "transactionReference": "NEFT-AXIS-1793399148712",
       "notes": "Final 20% milestone received",
@@ -1521,7 +1623,7 @@
       "vendorName": "Rapid Earth Pit Contractors",
       "category": "Chemical Earthing & Civil",
       "amount": 45000,
-      "expenseDate": "2026-08-21T00:00:00.000Z",
+      "expenseDate": "1899-11-30T00:00:00.000Z",
       "paymentMode": "Bank RTGS",
       "referenceNo": "EP-INV-1793399382629",
       "notes": "6 Nos copper chemical earthing pits testing",
@@ -1538,7 +1640,7 @@
       "vendorName": "Rapid Earth Pit Contractors",
       "category": "Chemical Earthing & Civil",
       "amount": 45000,
-      "expenseDate": "2026-08-21T00:00:00.000Z",
+      "expenseDate": "1899-11-30T00:00:00.000Z",
       "paymentMode": "Bank RTGS",
       "referenceNo": "EP-INV-1793399148712",
       "notes": "6 Nos copper chemical earthing pits testing",
@@ -1894,8 +1996,8 @@
       "id": "att-imp-1793399382940-1",
       "employeeId": "emp-http-1793399382629",
       "employeeName": "Keval Patel 1793399382629",
-      "date": "",
-      "attendanceDate": "",
+      "date": "Fri Oct 30 2026 00:00:00 GM",
+      "attendanceDate": "Fri Oct 30 2026 00:00:00 GM",
       "checkInTime": "09:00 AM",
       "checkOutTime": "06:30 PM",
       "siteProjectId": "",
@@ -1932,8 +2034,8 @@
       "assignedTechnicianName": "",
       "assignedEngineerId": "",
       "assignedEngineerName": "",
-      "scheduledDate": null,
-      "createdDate": "2026-10-30T22:29:42.000Z",
+      "scheduledDate": "2026-10-30T00:00:00.000Z",
+      "createdDate": "2026-10-30T00:00:00.000Z",
       "resolvedDate": null,
       "notes": "Reported by SCADA automated alert",
       "photos": [],
@@ -2675,7 +2777,7 @@
       "isFieldWorker": false,
       "status": "ACTIVE",
       "createdAt": "2026-10-30T22:18:44.000Z",
-      "updatedAt": "2026-10-30T22:29:38.000Z"
+      "updatedAt": "2026-10-30T22:54:00.000Z"
     },
     {
       "id": "usr-kunal",
@@ -2689,7 +2791,7 @@
       "isFieldWorker": false,
       "status": "ACTIVE",
       "createdAt": "2026-10-30T22:18:44.000Z",
-      "updatedAt": "2026-10-30T22:29:38.000Z"
+      "updatedAt": "2026-10-30T22:54:01.000Z"
     },
     {
       "id": "usr-admin-fallback",
@@ -2703,7 +2805,7 @@
       "isFieldWorker": false,
       "status": "ACTIVE",
       "createdAt": "2026-10-30T22:18:44.000Z",
-      "updatedAt": "2026-10-30T22:29:38.000Z"
+      "updatedAt": "2026-10-30T22:54:00.000Z"
     },
     {
       "id": "emp-imp-1793398824830-1",
@@ -2774,6 +2876,20 @@
       "status": "ACTIVE",
       "createdAt": "2026-10-30T22:29:42.000Z",
       "updatedAt": "2026-10-30T22:29:42.000Z"
+    },
+    {
+      "id": "emp-imp-1793400108128-1",
+      "name": "Test Employee",
+      "email": "test.emp99@rejoysolar.com",
+      "role": "Staff Member",
+      "phone": "+91 98765 43210",
+      "department": "Engineering",
+      "designation": "Solar Engineer",
+      "employeeId": "EMP-TEST-99",
+      "isFieldWorker": false,
+      "status": "ACTIVE",
+      "createdAt": "2026-10-30T22:41:48.000Z",
+      "updatedAt": "2026-10-30T22:41:48.000Z"
     }
   ],
   "workforce_locations": [

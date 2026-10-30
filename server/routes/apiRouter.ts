@@ -778,6 +778,156 @@ apiRouter.delete('/employees/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Employee Documents: List documents for employee
+apiRouter.get('/employees/:id/documents', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const documents = await dbManager.getEmployeeDocuments(id);
+    res.json({ success: true, count: documents.length, data: documents });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch employee documents' });
+  }
+});
+
+// Employee Documents: Upload single or multiple documents persistently
+apiRouter.post('/employees/:id/documents/upload', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, category, fileName, mimeType, fileData, notes, uploadedBy } = req.body || {};
+
+    if (!fileName || !fileData) {
+      return res.status(400).json({ success: false, error: 'File name and fileData (base64) are required.' });
+    }
+
+    const safeEmpId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeFileName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const docId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const diskFileName = `${docId}_${safeFileName}`;
+
+    const empDocsDir = path.join(process.cwd(), 'uploads', 'employees', safeEmpId, 'documents');
+    if (!fs.existsSync(empDocsDir)) {
+      fs.mkdirSync(empDocsDir, { recursive: true });
+    }
+
+    // Extract raw base64 data if data URI
+    const base64Data = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+    const fileBuffer = Buffer.from(base64Data, 'base64');
+
+    if (fileBuffer.length > 20 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'Document file size exceeds 20 MB limit.' });
+    }
+
+    const filePath = path.join(empDocsDir, diskFileName);
+    fs.writeFileSync(filePath, fileBuffer);
+
+    const relativePath = path.join('uploads', 'employees', safeEmpId, 'documents', diskFileName);
+    const fileUrl = `/uploads/employees/${safeEmpId}/documents/${diskFileName}`;
+
+    const savedDoc = await dbManager.saveEmployeeDocument({
+      id: docId,
+      employeeId: id,
+      category: category || 'Other',
+      name: name || fileName.replace(/\.[^/.]+$/, ''),
+      fileName: safeFileName,
+      filePath: relativePath,
+      fileUrl,
+      mimeType: mimeType || 'application/octet-stream',
+      fileSize: fileBuffer.length,
+      uploadedBy: uploadedBy || 'HR Administrator',
+      notes: notes || undefined
+    });
+
+    res.json({
+      success: true,
+      message: `Document "${safeFileName}" uploaded and stored persistently on production server.`,
+      document: savedDoc
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to upload document' });
+  }
+});
+
+// Employee Documents: Delete document persistently
+apiRouter.delete('/employees/:id/documents/:docId', async (req: Request, res: Response) => {
+  try {
+    const { id, docId } = req.params;
+    await dbManager.deleteEmployeeDocument(id, docId);
+    res.json({ success: true, message: 'Document removed from server and database.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete document' });
+  }
+});
+
+// Employee Profile Photo Upload
+apiRouter.post('/employees/:id/photo/upload', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { photoData, fileName, mimeType } = req.body || {};
+
+    if (!photoData) {
+      return res.status(400).json({ success: false, error: 'Photo data (base64) is required.' });
+    }
+
+    const safeEmpId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const ext = fileName ? path.extname(fileName).toLowerCase() : '.jpg';
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    const chosenExt = allowedExts.includes(ext) ? ext : '.jpg';
+    const photoId = `photo-${Date.now()}`;
+    const diskFileName = `${photoId}${chosenExt}`;
+
+    const empProfileDir = path.join(process.cwd(), 'uploads', 'employees', safeEmpId, 'profile');
+    if (!fs.existsSync(empProfileDir)) {
+      fs.mkdirSync(empProfileDir, { recursive: true });
+    }
+
+    const base64Data = photoData.includes(',') ? photoData.split(',')[1] : photoData;
+    const fileBuffer = Buffer.from(base64Data, 'base64');
+
+    if (fileBuffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'Profile photo exceeds 5 MB limit.' });
+    }
+
+    const filePath = path.join(empProfileDir, diskFileName);
+    fs.writeFileSync(filePath, fileBuffer);
+
+    const fileUrl = `/uploads/employees/${safeEmpId}/profile/${diskFileName}`;
+
+    // Update photo_url in solar_employees and solar_users
+    await dbManager.updateEmployeePhoto(id, fileUrl);
+
+    res.json({
+      success: true,
+      message: 'Employee profile photo uploaded and saved successfully.',
+      photoUrl: fileUrl
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to upload photo' });
+  }
+});
+
+// Secure streaming fallback endpoint for employee uploads with path traversal protection
+apiRouter.get('/uploads/employees/:employeeId/:category/:filename', (req: Request, res: Response) => {
+  try {
+    const { employeeId, category, filename } = req.params;
+    if (employeeId.includes('..') || category.includes('..') || filename.includes('..')) {
+      return res.status(400).send('Invalid file path access request.');
+    }
+
+    const safeEmpId = path.basename(employeeId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeCat = path.basename(category).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = path.basename(filename);
+
+    const fullPath = path.join(process.cwd(), 'uploads', 'employees', safeEmpId, safeCat, safeName);
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ success: false, error: 'File not found on server.' });
+    }
+
+    res.sendFile(fullPath);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to deliver file' });
+  }
+});
+
 // Attendance
 apiRouter.get('/attendance', async (_req: Request, res: Response) => {
   try {

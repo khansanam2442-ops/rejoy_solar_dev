@@ -95,6 +95,24 @@ async function createServerApp() {
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // Ensure persistent employee document and uploads directories exist
+  const uploadsDir = path.resolve(process.cwd(), 'uploads');
+  const employeeUploadsDir = path.join(uploadsDir, 'employees');
+  try {
+    if (!fs.existsSync(employeeUploadsDir)) {
+      fs.mkdirSync(employeeUploadsDir, { recursive: true });
+    }
+  } catch (err: any) {
+    console.warn('[Server Startup] Notice creating uploads directory:', err?.message || err);
+  }
+
+  // Serve persistent uploads securely
+  app.use('/uploads', express.static(uploadsDir, {
+    maxAge: '1d',
+    immutable: false
+  }));
+
   app.use('/api', apiRouter);
 
   // Fallback mount for reverse proxies that strip the /api prefix before forwarding

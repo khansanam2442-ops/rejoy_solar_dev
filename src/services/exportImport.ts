@@ -277,7 +277,7 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
   const empDesigIdx = findColIdx(headerRow, ['designation', 'role', 'title', 'position'], 3);
   const empPhoneIdx = findColIdx(headerRow, ['phone', 'mobile', 'contact', 'phone number', 'contact number'], 4);
   const empEmailIdx = findColIdx(headerRow, ['email', 'email address', 'mail'], 5);
-  const empDateIdx = findColIdx(headerRow, ['joining date', 'date of joining', 'doj', 'start date'], 6);
+  const empDateIdx = findColIdx(headerRow, ['joining date', 'date of joining', 'doj', 'joining_date', 'joiningdate', 'start date', 'join date', 'date of join'], 6);
   const empSalIdx = findColIdx(headerRow, ['monthly salary', 'salary', 'salary monthly', 'monthly pay', 'ctc'], 7);
   const empStatIdx = findColIdx(headerRow, ['status', 'employment status'], -1);
   const empRoleIdx = findColIdx(headerRow, ['system role', 'role', 'access role', 'app role'], -1);

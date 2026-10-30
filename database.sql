@@ -270,22 +270,46 @@ CREATE TABLE IF NOT EXISTS `solar_employees` (
   `employee_code` VARCHAR(32) NOT NULL UNIQUE,
   `name` VARCHAR(255) NOT NULL,
   `photo_url` TEXT,
+  `documents_json` LONGTEXT DEFAULT NULL,
   `department` VARCHAR(64) NOT NULL,
   `designation` VARCHAR(128) NOT NULL,
   `phone` VARCHAR(32) NOT NULL,
   `email` VARCHAR(191) NOT NULL,
-  `joining_date` DATE NOT NULL,
+  `joining_date` DATE DEFAULT NULL,
   `salary_monthly` DECIMAL(12,2) DEFAULT 0.00,
   `status` VARCHAR(32) DEFAULT 'ACTIVE',
   `current_site_location` VARCHAR(255) DEFAULT '',
   `login_enabled` TINYINT(1) DEFAULT 1,
   `system_role` VARCHAR(64) DEFAULT 'Super Admin',
+  `assigned_role` VARCHAR(64) DEFAULT NULL,
   `is_field_worker` TINYINT(1) DEFAULT 0,
   `account_status` VARCHAR(32) DEFAULT 'ACTIVE',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_employees_dept` (`department`),
   INDEX `idx_employees_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Table structure for table `solar_employee_documents`
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `solar_employee_documents` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `employee_id` VARCHAR(64) NOT NULL,
+  `category` VARCHAR(64) NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `file_path` VARCHAR(500) NOT NULL,
+  `file_url` VARCHAR(500) NOT NULL,
+  `mime_type` VARCHAR(128) NOT NULL,
+  `file_size` BIGINT DEFAULT 0,
+  `uploaded_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `uploaded_by` VARCHAR(255) DEFAULT 'HR Administrator',
+  `notes` TEXT,
+  INDEX `idx_emp_docs_empid` (`employee_id`),
+  INDEX `idx_emp_docs_cat` (`category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- --------------------------------------------------------
 -- Table structure for table `solar_attendance`
