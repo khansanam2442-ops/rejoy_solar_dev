@@ -16,6 +16,18 @@ export interface DbStatusResponse {
   tables?: string[];
 }
 
+export interface BatchImportResult {
+  success: boolean;
+  total: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  importedRecords?: any[];
+  skippedRecords?: { row: number; name: string; reason: string }[];
+  failedRecords?: { row: number; reason: string }[];
+  errors?: string[];
+}
+
 import { safeStorage } from './safeStorage';
 
 class ApiClient {
@@ -388,6 +400,19 @@ class ApiClient {
     }
   }
 
+  async importLeads(leads: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/leads/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ leads })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Lead import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   // --- Projects ---
   async getProjects(): Promise<any[]> {
     try {
@@ -483,6 +508,19 @@ class ApiClient {
     }
   }
 
+  async importEmployees(employees: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/employees/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ employees })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Employee import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   // --- Attendance ---
   async getAttendance(): Promise<any[]> {
     try {
@@ -515,6 +553,19 @@ class ApiClient {
     } catch {
       return false;
     }
+  }
+
+  async importAttendance(attendance: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/attendance/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ attendance })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Attendance import failed with status ${res.status}`);
+    }
+    return data;
   }
 
   // --- Payroll / Payslips ---
@@ -619,6 +670,19 @@ class ApiClient {
     }
   }
 
+  async importProducts(products: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/products/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ products })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Product import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   // --- Vendors ---
   async getVendors(): Promise<any[]> {
     try {
@@ -651,6 +715,19 @@ class ApiClient {
     } catch {
       return false;
     }
+  }
+
+  async importVendors(vendors: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/vendors/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ vendors })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Vendor import failed with status ${res.status}`);
+    }
+    return data;
   }
 
   // --- Purchase Orders ---
@@ -950,6 +1027,19 @@ class ApiClient {
     }
   }
 
+  async importPayments(payments: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/payments/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ payments })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Payment import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   // --- Expenses ---
   async getExpenses(): Promise<any[]> {
     try {
@@ -984,6 +1074,19 @@ class ApiClient {
     }
   }
 
+  async importExpenses(expenses: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/expenses/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ expenses })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Expense import failed with status ${res.status}`);
+    }
+    return data;
+  }
+
   // --- Service Tickets ---
   async getServiceTickets(): Promise<any[]> {
     try {
@@ -1016,6 +1119,19 @@ class ApiClient {
     } catch {
       return false;
     }
+  }
+
+  async importServiceTickets(tickets: any[]): Promise<BatchImportResult> {
+    const res = await fetch(`${this.baseUrl}/service-tickets/import`, {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ tickets })
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Service tickets import failed with status ${res.status}`);
+    }
+    return data;
   }
 
   // --- AMC Contracts ---

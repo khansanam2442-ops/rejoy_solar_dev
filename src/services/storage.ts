@@ -370,6 +370,47 @@ class StorageService {
     this.deleteSync('leads', id);
   }
 
+  async importLeads(leads: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: Lead[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/leads/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leads })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Lead import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getLeads();
+      const existingIds = new Set(current.map(l => l.id));
+      const newlyAdded: Lead[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.LEADS, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
+  }
+
   addLead(leadData: Partial<Lead> & { customerName: string; phone: string; [key: string]: any }): Lead {
     const newLead: Lead = {
       id: `lead-${Date.now()}`,
@@ -1256,6 +1297,47 @@ class StorageService {
     this.deleteSync('payments', id);
   }
 
+  async importPayments(payments: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: PaymentRecord[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/payments/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payments })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Payment import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getPayments();
+      const existingIds = new Set(current.map(p => p.id));
+      const newlyAdded: PaymentRecord[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.PAYMENTS, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
+  }
+
   // --- Expenses ---
   getExpenses(): ExpenseRecord[] {
     return this.get<ExpenseRecord[]>(STORAGE_KEYS.EXPENSES, initialExpenses);
@@ -1276,6 +1358,47 @@ class StorageService {
     const expenses = this.getExpenses().filter(e => e.id !== id);
     this.set(STORAGE_KEYS.EXPENSES, expenses);
     this.deleteSync('expenses', id);
+  }
+
+  async importExpenses(expenses: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: ExpenseRecord[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/expenses/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expenses })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Expense import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getExpenses();
+      const existingIds = new Set(current.map(e => e.id));
+      const newlyAdded: ExpenseRecord[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.EXPENSES, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
   }
 
   // --- Employees & HRMS ---
@@ -1394,6 +1517,47 @@ class StorageService {
     }
   }
 
+  async importEmployees(employees: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: Employee[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/employees/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employees })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Employee import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getEmployees();
+      const existingIds = new Set(current.map(e => e.id));
+      const newlyAdded: Employee[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.EMPLOYEES, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
+  }
+
   // --- Users & Credentials ---
   getUsers(): any[] {
     return this.get<any[]>(STORAGE_KEYS.USERS, []);
@@ -1449,6 +1613,47 @@ class StorageService {
     const attendance = this.getAttendance().filter(a => a.id !== id);
     this.set(STORAGE_KEYS.ATTENDANCE, attendance);
     this.deleteSync('attendance', id);
+  }
+
+  async importAttendance(attendance: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: AttendanceRecord[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/attendance/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attendance })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Attendance import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getAttendance();
+      const existingIds = new Set(current.map(a => a.id));
+      const newlyAdded: AttendanceRecord[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.ATTENDANCE, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
   }
 
   // --- Payroll / Payslips ---
@@ -1555,6 +1760,47 @@ class StorageService {
     const tickets = this.getServiceTickets().filter(t => t.id !== id);
     this.set(STORAGE_KEYS.SERVICE_TICKETS, tickets);
     this.deleteSync('service_tickets', id);
+  }
+
+  async importServiceTickets(tickets: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: ServiceTicket[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/service-tickets/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Service ticket import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getServiceTickets();
+      const existingIds = new Set(current.map(t => t.id));
+      const newlyAdded: ServiceTicket[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.SERVICE_TICKETS, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.SERVICE_TICKETS, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
   }
 
   resolveServiceTicket(ticketId: string, resolutionNotes?: string): void {
@@ -1764,6 +2010,47 @@ class StorageService {
     this.deleteSync('products', id);
   }
 
+  async importProducts(products: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: ProductItem[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/products/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ products })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Product import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getProducts();
+      const existingIds = new Set(current.map(p => p.id));
+      const newlyAdded: ProductItem[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.PRODUCTS, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
+  }
+
   adjustStock(
     productId: string,
     newQty: number,
@@ -1839,6 +2126,47 @@ class StorageService {
     const vendors = this.getVendors().filter(v => v.id !== id);
     this.set(STORAGE_KEYS.VENDORS, vendors);
     this.deleteSync('vendors', id);
+  }
+
+  async importVendors(vendors: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords?: Vendor[];
+    skippedRecords?: { row: number; name: string; reason: string }[];
+    failedRecords?: { row: number; reason: string }[];
+    errors?: string[];
+  }> {
+    const res = await fetch('/api/vendors/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendors })
+    });
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    }
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || result.message || `Vendor import failed with status ${res.status}`);
+    }
+
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getVendors();
+      const existingIds = new Set(current.map(v => v.id));
+      const newlyAdded: Vendor[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.VENDORS, updatedList);
+      safeStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(updatedList));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
+    return result;
   }
 
   // ==========================================

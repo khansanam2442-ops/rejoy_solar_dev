@@ -1847,6 +1847,1396 @@ class MySqlDatabaseManager {
   }
 
   // ==========================================================
+  // BATCH IMPORT: LEADS
+  // ==========================================================
+  public async importLeads(leadList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(leadList) || leadList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No lead rows provided for import.'] };
+    }
+
+    const normText = (s: any) => String(s || '').trim().toLowerCase();
+    const normDigits = (s: any) => String(s || '').replace(/\D/g, '');
+
+    let existingLeads: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `customer_name`, `company_name`, `phone`, `email` FROM `solar_leads`');
+        if (Array.isArray(rows)) existingLeads = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing leads:', err.message);
+      }
+    }
+    if (existingLeads.length === 0) existingLeads = this.getFallbackItems('leads');
+
+    const phoneMap = new Map<string, string>();
+    const emailMap = new Map<string, string>();
+    const nameCompMap = new Map<string, string>();
+
+    for (const l of existingLeads) {
+      const p = normDigits(l.phone);
+      const em = normText(l.email);
+      const name = normText(l.customer_name || l.customerName);
+      const comp = normText(l.company_name || l.companyName);
+      if (p.length >= 7) phoneMap.set(p, l.customer_name || l.customerName || 'Lead');
+      if (em) emailMap.set(em, l.customer_name || l.customerName || 'Lead');
+      if (name && comp) nameCompMap.set(`${name}:::${comp}`, l.customer_name || 'Lead');
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < leadList.length; i++) {
+      const rowNum = i + 1;
+      const raw = leadList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const customerName = String(raw.customerName || raw.customer_name || raw.name || '').trim();
+      const companyName = String(raw.companyName || raw.company_name || '').trim();
+      const phone = String(raw.phone || raw.mobile || '').trim();
+      const email = String(raw.email || '').trim().toLowerCase();
+      const address = String(raw.address || raw.siteAddress || '').trim();
+      const city = String(raw.city || 'Ahmedabad').trim();
+      const rawCap = String(raw.solarCapacityKw ?? raw.solar_capacity_kw ?? raw.capacity ?? '').replace(/[^0-9.]/g, '');
+      const solarCapacityKw = parseFloat(rawCap) || 10;
+      const rawVal = String(raw.estimatedValue ?? raw.estimated_value ?? '').replace(/[^0-9.]/g, '');
+      const estimatedValue = parseFloat(rawVal) || Math.round(solarCapacityKw * 48000);
+      const source = String(raw.source || 'Website').trim();
+      const status = String(raw.status || 'NEW').trim().toUpperCase();
+      const notes = String(raw.notes || 'Imported via CSV Hub').trim();
+
+      if (!customerName) {
+        failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name is mandatory.`);
+        continue;
+      }
+
+      const pDigits = normDigits(phone);
+      if (pDigits.length < 7) {
+        failedRecords.push({ row: rowNum, reason: `Valid phone number is required (got "${phone || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid phone number is required (got "${phone || 'empty'}").`);
+        continue;
+      }
+
+      // Duplicates
+      let isDup = false;
+      let dupReason = '';
+      for (const [exP, exName] of phoneMap.entries()) {
+        if (exP === pDigits || (pDigits.length >= 10 && exP.endsWith(pDigits.slice(-10))) || (exP.length >= 10 && pDigits.endsWith(exP.slice(-10)))) {
+          isDup = true;
+          dupReason = `Phone number "${phone}" is already registered to lead "${exName}".`;
+          break;
+        }
+      }
+
+      if (!isDup && email && emailMap.has(email)) {
+        isDup = true;
+        dupReason = `Email address "${email}" is already registered to lead "${emailMap.get(email)}".`;
+      }
+
+      const nameCompKey = `${normText(customerName)}:::${normText(companyName)}`;
+      if (!isDup && companyName && nameCompMap.has(nameCompKey)) {
+        isDup = true;
+        dupReason = `Lead for "${customerName}" at "${companyName}" already exists.`;
+      }
+
+      if (isDup) {
+        skippedRecords.push({ row: rowNum, name: customerName, reason: dupReason });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupReason}`);
+        continue;
+      }
+
+      const leadId = raw.id || `lead-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: leadId,
+        customerName,
+        companyName,
+        phone,
+        email,
+        address,
+        city,
+        solarCapacityKw,
+        estimatedValue,
+        source,
+        assignedSalespersonId: raw.assignedSalespersonId || '',
+        assignedSalespersonName: raw.assignedSalespersonName || '',
+        status,
+        notes,
+        nextFollowUpDate: raw.nextFollowUpDate ? String(raw.nextFollowUpDate).split('T')[0] : null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_leads\` (
+              \`id\`, \`customer_name\`, \`company_name\`, \`phone\`, \`email\`,
+              \`address\`, \`city\`, \`solar_capacity_kw\`, \`estimated_value\`,
+              \`source\`, \`assigned_salesperson_id\`, \`assigned_salesperson_name\`,
+              \`status\`, \`notes\`, \`next_follow_up_date\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`customer_name\` = VALUES(\`customer_name\`), \`company_name\` = VALUES(\`company_name\`),
+              \`phone\` = VALUES(\`phone\`), \`email\` = VALUES(\`email\`),
+              \`solar_capacity_kw\` = VALUES(\`solar_capacity_kw\`), \`estimated_value\` = VALUES(\`estimated_value\`),
+              \`status\` = VALUES(\`status\`), \`notes\` = VALUES(\`notes\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.customerName, record.companyName, record.phone, record.email,
+            record.address, record.city, record.solarCapacityKw, record.estimatedValue,
+            record.source, record.assignedSalespersonId, record.assignedSalespersonName,
+            record.status, record.notes, record.nextFollowUpDate
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('leads', record);
+      phoneMap.set(pDigits, customerName);
+      if (email) emailMap.set(email, customerName);
+      if (companyName) nameCompMap.set(nameCompKey, customerName);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: leadList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: EMPLOYEES
+  // ==========================================================
+  public async importEmployees(employeeList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(employeeList) || employeeList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No employee rows provided for import.'] };
+    }
+
+    const normText = (s: any) => String(s || '').trim().toLowerCase();
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+    const normDigits = (s: any) => String(s || '').replace(/\D/g, '');
+
+    let existingEmps: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `employee_code`, `name`, `phone`, `email` FROM `solar_employees`');
+        if (Array.isArray(rows)) existingEmps = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing employees:', err.message);
+      }
+    }
+    if (existingEmps.length === 0) existingEmps = this.getFallbackItems('employees');
+
+    const codeMap = new Map<string, string>();
+    const emailMap = new Map<string, string>();
+    const phoneMap = new Map<string, string>();
+
+    for (const e of existingEmps) {
+      const c = normCode(e.employee_code || e.employeeCode);
+      const em = normText(e.email);
+      const p = normDigits(e.phone);
+      if (c) codeMap.set(c, e.name || 'Employee');
+      if (em) emailMap.set(em, e.name || 'Employee');
+      if (p.length >= 7) phoneMap.set(p, e.name || 'Employee');
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < employeeList.length; i++) {
+      const rowNum = i + 1;
+      const raw = employeeList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const name = String(raw.name || '').trim();
+      const rawCode = String(raw.employeeCode || raw.employee_code || '').trim();
+      const department = String(raw.department || 'Operations').trim();
+      const designation = String(raw.designation || 'Staff Member').trim();
+      const phone = String(raw.phone || '').trim();
+      const email = String(raw.email || '').trim().toLowerCase();
+      const joiningDate = raw.joiningDate ? String(raw.joiningDate).split('T')[0] : (raw.joining_date ? String(raw.joining_date).split('T')[0] : new Date().toISOString().split('T')[0]);
+      const rawSalary = String(raw.salaryMonthly ?? raw.salary_monthly ?? raw.salary ?? '').replace(/[^0-9.]/g, '');
+      const salaryMonthly = parseFloat(rawSalary) || 0;
+      const status = String(raw.status || 'ACTIVE').trim().toUpperCase();
+      const systemRole = String(raw.systemRole || raw.system_role || raw.role || 'Staff Member').trim();
+      const isFieldWorker = Boolean(raw.isFieldWorker || raw.is_field_worker);
+      const loginEnabled = raw.loginEnabled !== undefined ? Boolean(raw.loginEnabled) : true;
+
+      if (!name) {
+        failedRecords.push({ row: rowNum, reason: 'Employee name is mandatory.' });
+        errors.push(`Row ${rowNum}: Employee name is mandatory.`);
+        continue;
+      }
+
+      const employeeCode = rawCode || `EMP-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
+      const cNorm = normCode(employeeCode);
+      const pDigits = normDigits(phone);
+
+      if (rawCode && codeMap.has(cNorm)) {
+        const exName = codeMap.get(cNorm);
+        skippedRecords.push({ row: rowNum, name, reason: `Employee code "${employeeCode}" already exists (${exName}).` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Employee code "${employeeCode}" already exists.`);
+        continue;
+      }
+
+      if (email && emailMap.has(email)) {
+        const exName = emailMap.get(email);
+        skippedRecords.push({ row: rowNum, name, reason: `Email "${email}" is already registered to "${exName}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Email "${email}" already exists.`);
+        continue;
+      }
+
+      if (pDigits.length >= 7 && phoneMap.has(pDigits)) {
+        const exName = phoneMap.get(pDigits);
+        skippedRecords.push({ row: rowNum, name, reason: `Phone "${phone}" is already registered to "${exName}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Phone "${phone}" already exists.`);
+        continue;
+      }
+
+      const empId = raw.id || `emp-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: empId,
+        employeeCode,
+        name,
+        photoUrl: raw.photoUrl || raw.photo_url || '',
+        department,
+        designation,
+        phone,
+        email: email || `${cNorm.toLowerCase()}@rejoysolar.com`,
+        joiningDate,
+        salaryMonthly,
+        status,
+        currentSiteLocation: raw.currentSiteLocation || '',
+        loginEnabled,
+        systemRole,
+        isFieldWorker,
+        accountStatus: status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_employees\` (
+              \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
+              \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
+              \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
+              \`is_field_worker\`, \`account_status\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`name\` = VALUES(\`name\`), \`department\` = VALUES(\`department\`),
+              \`designation\` = VALUES(\`designation\`), \`phone\` = VALUES(\`phone\`),
+              \`email\` = VALUES(\`email\`), \`salary_monthly\` = VALUES(\`salary_monthly\`),
+              \`status\` = VALUES(\`status\`), \`login_enabled\` = VALUES(\`login_enabled\`),
+              \`system_role\` = VALUES(\`system_role\`), \`is_field_worker\` = VALUES(\`is_field_worker\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.employeeCode, record.name, record.photoUrl,
+            record.department, record.designation, record.phone, record.email,
+            record.joiningDate, record.salaryMonthly, record.status,
+            record.currentSiteLocation, record.loginEnabled ? 1 : 0, record.systemRole,
+            record.isFieldWorker ? 1 : 0, record.accountStatus
+          ]);
+
+          // Synchronize to solar_users if loginEnabled
+          if (record.loginEnabled) {
+            try {
+              const defaultPasswordHash = bcrypt.hashSync(raw.password || 'User@12345', 10);
+              await this.pool.query(`
+                INSERT INTO \`solar_users\` (
+                  \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
+                  \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                  \`name\` = VALUES(\`name\`), \`phone\` = VALUES(\`phone\`),
+                  \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
+                  \`status\` = VALUES(\`status\`)
+              `, [
+                record.id, record.name, record.email, defaultPasswordHash, record.systemRole,
+                record.phone, record.department, record.designation, record.employeeCode,
+                record.isFieldWorker ? 1 : 0, record.status
+              ]);
+            } catch (uErr: any) {
+              console.warn('Notice syncing employee to users:', uErr.message);
+            }
+          }
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('employees', record);
+      codeMap.set(cNorm, name);
+      if (email) emailMap.set(email, name);
+      if (pDigits.length >= 7) phoneMap.set(pDigits, name);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: employeeList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: PRODUCTS
+  // ==========================================================
+  public async importProducts(productList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(productList) || productList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No product rows provided for import.'] };
+    }
+
+    const normText = (s: any) => String(s || '').trim().toLowerCase();
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+
+    let existingProducts: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `sku`, `name` FROM `solar_products`');
+        if (Array.isArray(rows)) existingProducts = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing products:', err.message);
+      }
+    }
+    if (existingProducts.length === 0) existingProducts = this.getFallbackItems('products');
+
+    const skuMap = new Map<string, string>();
+    const nameMap = new Map<string, string>();
+
+    for (const p of existingProducts) {
+      const sku = normCode(p.sku || p.itemCode);
+      const name = normText(p.name);
+      if (sku) skuMap.set(sku, p.name || 'Product');
+      if (name) nameMap.set(name, p.sku || 'SKU');
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < productList.length; i++) {
+      const rowNum = i + 1;
+      const raw = productList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const name = String(raw.name || '').trim();
+      const rawSku = String(raw.sku || raw.itemCode || '').trim();
+      const category = String(raw.category || 'Solar Panels').trim();
+      const brand = String(raw.brand || '').trim();
+      const model = String(raw.model || '').trim();
+      const specifications = String(raw.specifications || raw.specification || '').trim();
+      const unit = String(raw.unit || 'Nos').trim();
+      const hsnCode = String(raw.hsnCode || raw.hsn_code || '85414011').trim();
+      const rawPrice = String(raw.unitPrice ?? raw.unit_price ?? raw.sellingPrice ?? '').replace(/[^0-9.]/g, '');
+      const unitPrice = parseFloat(rawPrice) || 0;
+      const rawStock = String(raw.currentStock ?? raw.current_stock ?? raw.stock ?? '').replace(/[^0-9.]/g, '');
+      const currentStock = parseFloat(rawStock) || 0;
+      const rawReorder = String(raw.reorderLevel ?? raw.minStockLevel ?? raw.reorder_level ?? '').replace(/[^0-9.]/g, '');
+      const reorderLevel = parseFloat(rawReorder) || 10;
+      const rawGst = String(raw.gstRate ?? raw.gst_rate ?? '').replace(/[^0-9.]/g, '');
+      const gstRate = parseFloat(rawGst) || 18;
+      const warehouseId = String(raw.warehouseId || raw.warehouse_id || '').trim();
+      const status = String(raw.status || 'ACTIVE').trim().toUpperCase();
+
+      if (!name) {
+        failedRecords.push({ row: rowNum, reason: 'Product name is mandatory.' });
+        errors.push(`Row ${rowNum}: Product name is mandatory.`);
+        continue;
+      }
+
+      const sku = rawSku || `PROD-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
+      const skuNorm = normCode(sku);
+      const nameNorm = normText(name);
+
+      if (rawSku && skuMap.has(skuNorm)) {
+        const exName = skuMap.get(skuNorm);
+        skippedRecords.push({ row: rowNum, name, reason: `Product SKU "${sku}" already exists (${exName}).` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): SKU "${sku}" already exists.`);
+        continue;
+      }
+
+      if (nameMap.has(nameNorm)) {
+        const exSku = nameMap.get(nameNorm);
+        skippedRecords.push({ row: rowNum, name, reason: `Product with name "${name}" already exists (SKU: ${exSku}).` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Product name "${name}" already exists.`);
+        continue;
+      }
+
+      const prodId = raw.id || `prod-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: prodId,
+        sku,
+        itemCode: sku,
+        name,
+        category,
+        brand,
+        model,
+        specifications,
+        specification: specifications,
+        unit,
+        hsnCode,
+        gstRate,
+        taxRate: gstRate,
+        unitPrice,
+        sellingPrice: raw.sellingPrice ? parseFloat(String(raw.sellingPrice).replace(/[^0-9.]/g, '')) : Math.round(unitPrice * 1.15),
+        currentStock,
+        reorderLevel,
+        minStockLevel: reorderLevel,
+        minStockThreshold: reorderLevel,
+        location: raw.location || 'Warehouse A',
+        warehouseId,
+        status,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_products\` (
+              \`id\`, \`name\`, \`sku\`, \`category\`, \`brand\`, \`model\`,
+              \`specifications\`, \`unit\`, \`hsn_code\`, \`gst_rate\`,
+              \`unit_price\`, \`current_stock\`, \`reorder_level\`, \`warehouse_id\`, \`status\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`name\` = VALUES(\`name\`), \`sku\` = VALUES(\`sku\`),
+              \`category\` = VALUES(\`category\`), \`brand\` = VALUES(\`brand\`),
+              \`model\` = VALUES(\`model\`), \`specifications\` = VALUES(\`specifications\`),
+              \`unit\` = VALUES(\`unit\`), \`hsn_code\` = VALUES(\`hsn_code\`),
+              \`gst_rate\` = VALUES(\`gst_rate\`), \`unit_price\` = VALUES(\`unit_price\`),
+              \`current_stock\` = VALUES(\`current_stock\`), \`reorder_level\` = VALUES(\`reorder_level\`),
+              \`status\` = VALUES(\`status\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.name, record.sku, record.category, record.brand, record.model,
+            record.specifications, record.unit, record.hsnCode, record.gstRate,
+            record.unitPrice, record.currentStock, record.reorderLevel, record.warehouseId, record.status
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('products', record);
+      skuMap.set(skuNorm, name);
+      nameMap.set(nameNorm, sku);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: productList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: VENDORS
+  // ==========================================================
+  public async importVendors(vendorList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(vendorList) || vendorList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No vendor rows provided for import.'] };
+    }
+
+    const normText = (s: any) => String(s || '').trim().toLowerCase();
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+    const normDigits = (s: any) => String(s || '').replace(/\D/g, '');
+    const normGst = (s: any) => String(s || '').trim().toUpperCase().replace(/[\s-]/g, '');
+
+    let existingVendors: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `vendor_code`, `name`, `phone`, `email`, `gst_number` FROM `solar_vendors`');
+        if (Array.isArray(rows)) existingVendors = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing vendors:', err.message);
+      }
+    }
+    if (existingVendors.length === 0) existingVendors = this.getFallbackItems('vendors');
+
+    const codeMap = new Map<string, string>();
+    const nameMap = new Map<string, string>();
+    const gstMap = new Map<string, string>();
+    const phoneMap = new Map<string, string>();
+    const emailMap = new Map<string, string>();
+
+    for (const v of existingVendors) {
+      const code = normCode(v.vendor_code || v.vendorCode);
+      const name = normText(v.name);
+      const gst = normGst(v.gst_number || v.gstNumber);
+      const phone = normDigits(v.phone);
+      const email = normText(v.email);
+
+      if (code) codeMap.set(code, v.name || 'Vendor');
+      if (name) nameMap.set(name, v.vendor_code || 'VND');
+      if (gst) gstMap.set(gst, v.name || 'Vendor');
+      if (phone.length >= 7) phoneMap.set(phone, v.name || 'Vendor');
+      if (email) emailMap.set(email, v.name || 'Vendor');
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < vendorList.length; i++) {
+      const rowNum = i + 1;
+      const raw = vendorList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const name = String(raw.name || '').trim();
+      const rawCode = String(raw.vendorCode || raw.vendor_code || '').trim();
+      const contactPerson = String(raw.contactPerson || raw.contact_person || '').trim();
+      const phone = String(raw.phone || '').trim();
+      const email = String(raw.email || '').trim().toLowerCase();
+      const address = String(raw.address || '').trim();
+      const city = String(raw.city || 'Ahmedabad').trim();
+      const state = String(raw.state || 'Gujarat').trim();
+      const gstNumber = normGst(raw.gstNumber || raw.gst_number);
+      const panNumber = String(raw.panNumber || raw.pan_number || '').trim().toUpperCase();
+      const paymentTerms = String(raw.paymentTerms || raw.payment_terms || '30 Days').trim();
+      const rawRating = String(raw.rating || '4.5').replace(/[^0-9.]/g, '');
+      const rating = parseFloat(rawRating) || 4.5;
+      const status = String(raw.status || 'ACTIVE').trim().toUpperCase();
+      const rawCat = raw.categories || raw.category || ['Modules'];
+      const categories = Array.isArray(rawCat) ? rawCat : [String(rawCat)];
+
+      if (!name) {
+        failedRecords.push({ row: rowNum, reason: 'Vendor name is mandatory.' });
+        errors.push(`Row ${rowNum}: Vendor name is mandatory.`);
+        continue;
+      }
+
+      const vendorCode = rawCode || `VND-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
+      const codeNorm = normCode(vendorCode);
+      const nameNorm = normText(name);
+      const phoneNorm = normDigits(phone);
+
+      if (rawCode && codeMap.has(codeNorm)) {
+        const exName = codeMap.get(codeNorm);
+        skippedRecords.push({ row: rowNum, name, reason: `Vendor code "${vendorCode}" already exists (${exName}).` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Vendor code "${vendorCode}" already exists.`);
+        continue;
+      }
+
+      if (nameMap.has(nameNorm)) {
+        const exCode = nameMap.get(nameNorm);
+        skippedRecords.push({ row: rowNum, name, reason: `Vendor name "${name}" already exists (Code: ${exCode}).` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Vendor name "${name}" already exists.`);
+        continue;
+      }
+
+      if (gstNumber && gstMap.has(gstNumber)) {
+        const exName = gstMap.get(gstNumber);
+        skippedRecords.push({ row: rowNum, name, reason: `GSTIN "${gstNumber}" is already registered to "${exName}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): GSTIN "${gstNumber}" already exists.`);
+        continue;
+      }
+
+      if (phoneNorm.length >= 7 && phoneMap.has(phoneNorm)) {
+        const exName = phoneMap.get(phoneNorm);
+        skippedRecords.push({ row: rowNum, name, reason: `Phone "${phone}" is already registered to "${exName}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Phone "${phone}" already exists.`);
+        continue;
+      }
+
+      if (email && emailMap.has(email)) {
+        const exName = emailMap.get(email);
+        skippedRecords.push({ row: rowNum, name, reason: `Email "${email}" is already registered to "${exName}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Email "${email}" already exists.`);
+        continue;
+      }
+
+      const vendId = raw.id || `vend-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: vendId,
+        vendorCode,
+        name,
+        contactPerson,
+        phone,
+        email,
+        address,
+        city,
+        state,
+        gstNumber,
+        panNumber,
+        paymentTerms,
+        rating,
+        category: categories[0] || 'Modules',
+        categories,
+        categoriesJson: JSON.stringify(categories),
+        status,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_vendors\` (
+              \`id\`, \`name\`, \`vendor_code\`, \`contact_person\`, \`phone\`, \`email\`,
+              \`address\`, \`city\`, \`state\`, \`gst_number\`, \`pan_number\`,
+              \`payment_terms\`, \`rating\`, \`categories_json\`, \`status\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`name\` = VALUES(\`name\`), \`vendor_code\` = VALUES(\`vendor_code\`),
+              \`contact_person\` = VALUES(\`contact_person\`), \`phone\` = VALUES(\`phone\`),
+              \`email\` = VALUES(\`email\`), \`address\` = VALUES(\`address\`),
+              \`city\` = VALUES(\`city\`), \`state\` = VALUES(\`state\`),
+              \`gst_number\` = VALUES(\`gst_number\`), \`payment_terms\` = VALUES(\`payment_terms\`),
+              \`rating\` = VALUES(\`rating\`), \`status\` = VALUES(\`status\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.name, record.vendorCode, record.contactPerson,
+            record.phone, record.email, record.address, record.city, record.state,
+            record.gstNumber, record.panNumber, record.paymentTerms, record.rating,
+            record.categoriesJson, record.status
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('vendors', record);
+      codeMap.set(codeNorm, name);
+      nameMap.set(nameNorm, vendorCode);
+      if (gstNumber) gstMap.set(gstNumber, name);
+      if (phoneNorm.length >= 7) phoneMap.set(phoneNorm, name);
+      if (email) emailMap.set(email, name);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: vendorList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: PAYMENTS
+  // ==========================================================
+  public async importPayments(paymentList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(paymentList) || paymentList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No payment rows provided for import.'] };
+    }
+
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+
+    let existingPayments: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `receipt_number`, `transaction_reference` FROM `solar_payments`');
+        if (Array.isArray(rows)) existingPayments = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing payments:', err.message);
+      }
+    }
+    if (existingPayments.length === 0) existingPayments = this.getFallbackItems('payments');
+
+    const receiptMap = new Map<string, string>();
+    const txMap = new Map<string, string>();
+
+    for (const p of existingPayments) {
+      const rec = normCode(p.receipt_number || p.receiptNumber);
+      const tx = normCode(p.transaction_reference || p.transactionReference);
+      if (rec) receiptMap.set(rec, p.id);
+      if (tx && tx.length > 3) txMap.set(tx, p.receipt_number || p.id);
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < paymentList.length; i++) {
+      const rowNum = i + 1;
+      const raw = paymentList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const rawAmount = String(raw.amount || '').replace(/[^0-9.]/g, '');
+      const amount = parseFloat(rawAmount);
+      const customerName = String(raw.customerName || raw.customer_name || 'Customer').trim();
+      const milestone = String(raw.milestone || 'Project Milestone').trim();
+      const rawReceipt = String(raw.receiptNumber || raw.receipt_number || raw.receiptNo || '').trim();
+      const status = String(raw.status || 'PAID').trim().toUpperCase();
+      const dueDate = raw.dueDate ? String(raw.dueDate).split('T')[0] : (raw.due_date ? String(raw.due_date).split('T')[0] : null);
+      const paidDate = raw.paidDate ? String(raw.paidDate).split('T')[0] : (raw.paid_date ? String(raw.paid_date).split('T')[0] : new Date().toISOString().split('T')[0]);
+      const paymentMode = String(raw.paymentMode || raw.payment_mode || 'Bank NEFT/RTGS').trim();
+      const txRef = String(raw.transactionReference || raw.transaction_reference || '').trim();
+      const notes = String(raw.notes || 'Imported via CSV Hub').trim();
+
+      if (isNaN(amount) || amount <= 0) {
+        failedRecords.push({ row: rowNum, reason: `Valid amount number (> 0) is required (got "${raw.amount || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid amount number (> 0) is required (got "${raw.amount || 'empty'}").`);
+        continue;
+      }
+
+      const receiptNumber = rawReceipt || `RCPT-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
+      const recNorm = normCode(receiptNumber);
+      const txNorm = normCode(txRef);
+
+      if (rawReceipt && receiptMap.has(recNorm)) {
+        skippedRecords.push({ row: rowNum, name: receiptNumber, reason: `Receipt number "${receiptNumber}" already exists.` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Receipt number "${receiptNumber}" already exists.`);
+        continue;
+      }
+
+      if (txNorm && txNorm.length > 3 && txMap.has(txNorm)) {
+        const exRec = txMap.get(txNorm);
+        skippedRecords.push({ row: rowNum, name: receiptNumber, reason: `Transaction reference "${txRef}" already exists on receipt "${exRec}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Transaction reference "${txRef}" already exists.`);
+        continue;
+      }
+
+      const payId = raw.id || `pay-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: payId,
+        receiptNumber,
+        projectId: raw.projectId || raw.project_id || '',
+        customerId: raw.customerId || raw.customer_id || '',
+        customerName,
+        milestone,
+        amount,
+        status,
+        dueDate,
+        paidDate,
+        paymentMode,
+        transactionReference: txRef,
+        notes,
+        tallySyncStatus: raw.tallySyncStatus || 'NOT SYNCED',
+        tallyReference: raw.tallyReference || '',
+        createdAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_payments\` (
+              \`id\`, \`receipt_number\`, \`project_id\`, \`customer_id\`, \`customer_name\`,
+              \`milestone\`, \`amount\`, \`status\`, \`due_date\`, \`paid_date\`,
+              \`payment_mode\`, \`transaction_reference\`, \`notes\`, \`tally_sync_status\`, \`tally_reference\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`customer_name\` = VALUES(\`customer_name\`), \`milestone\` = VALUES(\`milestone\`),
+              \`amount\` = VALUES(\`amount\`), \`status\` = VALUES(\`status\`),
+              \`paid_date\` = VALUES(\`paid_date\`), \`notes\` = VALUES(\`notes\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.receiptNumber, record.projectId, record.customerId,
+            record.customerName, record.milestone, record.amount, record.status,
+            record.dueDate, record.paidDate, record.paymentMode, record.transactionReference,
+            record.notes, record.tallySyncStatus, record.tallyReference
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('payments', record);
+      receiptMap.set(recNorm, payId);
+      if (txNorm && txNorm.length > 3) txMap.set(txNorm, receiptNumber);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: paymentList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: EXPENSES
+  // ==========================================================
+  public async importExpenses(expenseList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(expenseList) || expenseList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No expense rows provided for import.'] };
+    }
+
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+
+    let existingExpenses: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `expense_number`, `reference_no` FROM `solar_expenses`');
+        if (Array.isArray(rows)) existingExpenses = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing expenses:', err.message);
+      }
+    }
+    if (existingExpenses.length === 0) existingExpenses = this.getFallbackItems('expenses');
+
+    const expMap = new Map<string, string>();
+    const refMap = new Map<string, string>();
+
+    for (const e of existingExpenses) {
+      const num = normCode(e.expense_number || e.expenseNumber);
+      const ref = normCode(e.reference_no || e.referenceNo);
+      if (num) expMap.set(num, e.id);
+      if (ref && ref.length > 3) refMap.set(ref, e.expense_number || e.id);
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < expenseList.length; i++) {
+      const rowNum = i + 1;
+      const raw = expenseList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const rawAmount = String(raw.amount || '').replace(/[^0-9.]/g, '');
+      const amount = parseFloat(rawAmount);
+      const vendorName = String(raw.vendorName || raw.vendor_name || raw.vendor || 'General Vendor').trim();
+      const category = String(raw.category || raw.expenseCategory || 'Miscellaneous').trim();
+      const rawExpNo = String(raw.expenseNumber || raw.expense_number || raw.expenseNo || '').trim();
+      const expenseDate = raw.date ? String(raw.date).split('T')[0] : (raw.expenseDate ? String(raw.expenseDate).split('T')[0] : new Date().toISOString().split('T')[0]);
+      const paymentMode = String(raw.paymentMode || raw.payment_mode || 'Bank Payment').trim();
+      const refNo = String(raw.referenceNo || raw.reference_no || raw.refNo || '').trim();
+      const notes = String(raw.notes || 'Imported via CSV Hub').trim();
+
+      if (isNaN(amount) || amount <= 0) {
+        failedRecords.push({ row: rowNum, reason: `Valid expense amount (> 0) is required (got "${raw.amount || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid expense amount (> 0) is required (got "${raw.amount || 'empty'}").`);
+        continue;
+      }
+
+      const expenseNumber = rawExpNo || `EXP-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
+      const expNorm = normCode(expenseNumber);
+      const refNorm = normCode(refNo);
+
+      if (rawExpNo && expMap.has(expNorm)) {
+        skippedRecords.push({ row: rowNum, name: expenseNumber, reason: `Expense number "${expenseNumber}" already exists.` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Expense number "${expenseNumber}" already exists.`);
+        continue;
+      }
+
+      if (refNorm && refNorm.length > 3 && refMap.has(refNorm)) {
+        const exNum = refMap.get(refNorm);
+        skippedRecords.push({ row: rowNum, name: expenseNumber, reason: `Reference number "${refNo}" already exists on expense "${exNum}".` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Reference number "${refNo}" already exists.`);
+        continue;
+      }
+
+      const expId = raw.id || `exp-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: expId,
+        expenseNumber,
+        projectId: raw.projectId || raw.project_id || '',
+        projectCode: raw.projectCode || raw.project_code || '',
+        vendorName,
+        category,
+        amount,
+        expenseDate,
+        paymentMode,
+        referenceNo: refNo,
+        notes,
+        receiptUrl: raw.receiptUrl || '',
+        approvedBy: raw.approvedBy || '',
+        tallySyncStatus: raw.tallySyncStatus || 'NOT SYNCED',
+        createdAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_expenses\` (
+              \`id\`, \`expense_number\`, \`project_id\`, \`project_code\`, \`vendor_name\`,
+              \`category\`, \`amount\`, \`expense_date\`, \`payment_mode\`, \`reference_no\`,
+              \`notes\`, \`receipt_url\`, \`approved_by\`, \`tally_sync_status\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`vendor_name\` = VALUES(\`vendor_name\`), \`category\` = VALUES(\`category\`),
+              \`amount\` = VALUES(\`amount\`), \`expense_date\` = VALUES(\`expense_date\`),
+              \`notes\` = VALUES(\`notes\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.expenseNumber, record.projectId, record.projectCode,
+            record.vendorName, record.category, record.amount, record.expenseDate,
+            record.paymentMode, record.referenceNo, record.notes, record.receiptUrl,
+            record.approvedBy, record.tallySyncStatus
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('expenses', record);
+      expMap.set(expNorm, expId);
+      if (refNorm && refNorm.length > 3) refMap.set(refNorm, expenseNumber);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: expenseList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: ATTENDANCE
+  // ==========================================================
+  public async importAttendance(attendanceList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(attendanceList) || attendanceList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No attendance rows provided for import.'] };
+    }
+
+    const normText = (s: any) => String(s || '').trim().toLowerCase();
+
+    let existingAtt: any[] = [];
+    let existingEmps: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [aRows]: any = await this.pool.query('SELECT `id`, `employee_id`, `employee_name`, `attendance_date` FROM `solar_attendance`');
+        if (Array.isArray(aRows)) existingAtt = aRows;
+      } catch (err: any) {
+        console.warn('Notice reading existing attendance:', err.message);
+      }
+      try {
+        const [eRows]: any = await this.pool.query('SELECT `id`, `employee_code`, `name` FROM `solar_employees`');
+        if (Array.isArray(eRows)) existingEmps = eRows;
+      } catch (err: any) {
+        console.warn('Notice reading existing employees for attendance:', err.message);
+      }
+    }
+    if (existingAtt.length === 0) existingAtt = this.getFallbackItems('attendance');
+    if (existingEmps.length === 0) existingEmps = this.getFallbackItems('employees');
+
+    const empLookup = new Map<string, string>();
+    for (const e of existingEmps) {
+      if (e.id) empLookup.set(normText(e.id), e.id);
+      if (e.employee_code || e.employeeCode) empLookup.set(normText(e.employee_code || e.employeeCode), e.id);
+      if (e.name) empLookup.set(normText(e.name), e.id);
+    }
+
+    const attMap = new Map<string, string>();
+    for (const a of existingAtt) {
+      const dt = a.attendance_date ? String(a.attendance_date).split('T')[0] : (a.date ? String(a.date).split('T')[0] : '');
+      const empId = normText(a.employee_id || a.employeeId);
+      const empName = normText(a.employee_name || a.employeeName);
+      if (empId && dt) attMap.set(`${empId}:::${dt}`, a.id);
+      if (empName && dt) attMap.set(`${empName}:::${dt}`, a.id);
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < attendanceList.length; i++) {
+      const rowNum = i + 1;
+      const raw = attendanceList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const empName = String(raw.employeeName || raw.employee_name || raw.name || '').trim();
+      const rawEmpId = String(raw.employeeId || raw.employee_id || '').trim();
+      const attendanceDate = raw.date ? String(raw.date).split('T')[0] : (raw.attendanceDate ? String(raw.attendanceDate).split('T')[0] : new Date().toISOString().split('T')[0]);
+      const checkInTime = String(raw.checkInTime || raw.check_in_time || '09:00 AM').trim();
+      const checkOutTime = raw.checkOutTime || raw.check_out_time || null;
+      const status = String(raw.status || 'PRESENT').trim().toUpperCase();
+      const siteProjectTitle = String(raw.siteLocation || raw.siteProjectTitle || raw.site_project_title || '').trim();
+
+      if (!empName && !rawEmpId) {
+        failedRecords.push({ row: rowNum, reason: 'Employee name or ID is mandatory.' });
+        errors.push(`Row ${rowNum}: Employee name or ID is mandatory.`);
+        continue;
+      }
+
+      const effectiveEmpId = rawEmpId || empLookup.get(normText(empName)) || `emp-auto-${normText(empName).replace(/\s+/g, '')}`;
+      const effectiveEmpName = empName || 'Employee';
+
+      const keyId = `${normText(effectiveEmpId)}:::${attendanceDate}`;
+      const keyName = `${normText(effectiveEmpName)}:::${attendanceDate}`;
+
+      if (attMap.has(keyId) || attMap.has(keyName)) {
+        skippedRecords.push({ row: rowNum, name: `${effectiveEmpName} (${attendanceDate})`, reason: `Attendance record for "${effectiveEmpName}" on date "${attendanceDate}" already exists.` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Attendance record on "${attendanceDate}" already exists.`);
+        continue;
+      }
+
+      const attId = raw.id || `att-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: attId,
+        employeeId: effectiveEmpId,
+        employeeName: effectiveEmpName,
+        attendanceDate,
+        date: attendanceDate,
+        checkInTime,
+        checkOutTime,
+        siteProjectId: raw.siteProjectId || '',
+        siteProjectTitle,
+        status,
+        checkInGPS: raw.checkInGPS || null,
+        checkOutGPS: raw.checkOutGPS || null,
+        fuelExpense: raw.fuelExpense || null,
+        createdAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_attendance\` (
+              \`id\`, \`employee_id\`, \`employee_name\`, \`attendance_date\`,
+              \`check_in_time\`, \`check_out_time\`, \`site_project_id\`, \`site_project_title\`,
+              \`status\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`check_in_time\` = VALUES(\`check_in_time\`), \`check_out_time\` = VALUES(\`check_out_time\`),
+              \`status\` = VALUES(\`status\`), \`site_project_title\` = VALUES(\`site_project_title\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.employeeId, record.employeeName, record.attendanceDate,
+            record.checkInTime, record.checkOutTime, record.siteProjectId,
+            record.siteProjectTitle, record.status
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('attendance', record);
+      attMap.set(keyId, attId);
+      attMap.set(keyName, attId);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: attendanceList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
+  // BATCH IMPORT: SERVICE TICKETS
+  // ==========================================================
+  public async importServiceTickets(ticketList: any[]): Promise<{
+    success: boolean;
+    total: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    importedRecords: any[];
+    skippedRecords: { row: number; name: string; reason: string }[];
+    failedRecords: { row: number; reason: string }[];
+    errors: string[];
+  }> {
+    if (!Array.isArray(ticketList) || ticketList.length === 0) {
+      return { success: false, total: 0, imported: 0, skipped: 0, failed: 0, importedRecords: [], skippedRecords: [], failedRecords: [], errors: ['No service ticket rows provided for import.'] };
+    }
+
+    const normCode = (s: any) => String(s || '').trim().toUpperCase();
+
+    let existingTickets: any[] = [];
+    if (this.isConnected && this.pool) {
+      try {
+        const [rows]: any = await this.pool.query('SELECT `id`, `ticket_id` FROM `solar_service_tickets`');
+        if (Array.isArray(rows)) existingTickets = rows;
+      } catch (err: any) {
+        console.warn('Notice reading existing tickets:', err.message);
+      }
+    }
+    if (existingTickets.length === 0) existingTickets = this.getFallbackItems('service_tickets');
+
+    const ticketMap = new Map<string, string>();
+    for (const t of existingTickets) {
+      const code = normCode(t.ticket_id || t.ticketId || t.ticketNumber);
+      if (code) ticketMap.set(code, t.id);
+    }
+
+    const importedRecords: any[] = [];
+    const skippedRecords: { row: number; name: string; reason: string }[] = [];
+    const failedRecords: { row: number; reason: string }[] = [];
+    const errors: string[] = [];
+
+    let codeSeq = Date.now() % 10000;
+
+    for (let i = 0; i < ticketList.length; i++) {
+      const rowNum = i + 1;
+      const raw = ticketList[i];
+      if (!raw || typeof raw !== 'object') {
+        failedRecords.push({ row: rowNum, reason: 'Empty or malformed record.' });
+        errors.push(`Row ${rowNum}: Empty or malformed record.`);
+        continue;
+      }
+
+      const rawTicketId = String(raw.ticketId || raw.ticket_id || raw.ticketNumber || '').trim();
+      const customerName = String(raw.customerName || raw.customer_name || 'Solar Customer').trim();
+      const issue = String(raw.issue || raw.title || raw.description || '').trim();
+      const category = String(raw.category || 'Inverter Error / Offline').trim();
+      const priority = String(raw.priority || 'MEDIUM').trim().toUpperCase();
+      const status = String(raw.status || 'OPEN').trim().toUpperCase();
+      const notes = String(raw.notes || 'Imported via CSV Hub').trim();
+
+      if (!issue && !customerName) {
+        failedRecords.push({ row: rowNum, reason: 'Issue description or customer name is mandatory.' });
+        errors.push(`Row ${rowNum}: Issue description or customer name is mandatory.`);
+        continue;
+      }
+
+      const ticketId = rawTicketId || `SRV-${new Date().getFullYear()}-${String(++codeSeq).padStart(4, '0')}`;
+      const codeNorm = normCode(ticketId);
+
+      if (rawTicketId && ticketMap.has(codeNorm)) {
+        skippedRecords.push({ row: rowNum, name: ticketId, reason: `Service ticket ID "${ticketId}" already exists.` });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): Service ticket ID "${ticketId}" already exists.`);
+        continue;
+      }
+
+      const tId = raw.id || `srv-imp-${Date.now()}-${rowNum}`;
+      const record: any = {
+        id: tId,
+        ticketId,
+        ticketNumber: ticketId,
+        customerId: raw.customerId || raw.customer_id || '',
+        customerName,
+        projectId: raw.projectId || raw.project_id || '',
+        projectTitle: raw.projectTitle || raw.project_title || 'Solar Rooftop Installation',
+        issue: issue || 'Solar System Inspection',
+        title: issue || 'Solar System Inspection',
+        category,
+        priority,
+        assignedTechnicianId: raw.assignedTechnicianId || '',
+        assignedTechnicianName: raw.assignedTechnicianName || '',
+        status,
+        scheduledDate: raw.scheduledDate ? String(raw.scheduledDate).split('T')[0] : null,
+        resolvedDate: raw.resolvedDate ? String(raw.resolvedDate).split('T')[0] : null,
+        notes,
+        photos: [],
+        createdAt: new Date().toISOString()
+      };
+
+      if (this.isConnected && this.pool) {
+        try {
+          const sql = `
+            INSERT INTO \`solar_service_tickets\` (
+              \`id\`, \`ticket_id\`, \`customer_id\`, \`customer_name\`, \`project_id\`,
+              \`project_title\`, \`issue\`, \`category\`, \`priority\`,
+              \`assigned_technician_id\`, \`assigned_technician_name\`, \`status\`,
+              \`scheduled_date\`, \`resolved_date\`, \`notes\`, \`photos_json\`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`customer_name\` = VALUES(\`customer_name\`), \`issue\` = VALUES(\`issue\`),
+              \`category\` = VALUES(\`category\`), \`priority\` = VALUES(\`priority\`),
+              \`status\` = VALUES(\`status\`), \`notes\` = VALUES(\`notes\`)
+          `;
+          await this.pool.query(sql, [
+            record.id, record.ticketId, record.customerId, record.customerName,
+            record.projectId, record.projectTitle, record.issue, record.category,
+            record.priority, record.assignedTechnicianId, record.assignedTechnicianName,
+            record.status, record.scheduledDate, record.resolvedDate, record.notes,
+            JSON.stringify(record.photos)
+          ]);
+        } catch (dbErr: any) {
+          failedRecords.push({ row: rowNum, reason: `MySQL write error: ${dbErr.message}` });
+          errors.push(`Row ${rowNum}: MySQL write error: ${dbErr.message}`);
+          continue;
+        }
+      }
+
+      this.upsertFallback('service_tickets', record);
+      ticketMap.set(codeNorm, tId);
+      importedRecords.push(record);
+    }
+
+    this.saveDiskSnapshot();
+    return {
+      success: true,
+      total: ticketList.length,
+      imported: importedRecords.length,
+      skipped: skippedRecords.length,
+      failed: failedRecords.length,
+      importedRecords,
+      skippedRecords,
+      failedRecords,
+      errors
+    };
+  }
+
+  // ==========================================================
   // CRUD: EMPLOYEES
   // ==========================================================
   public async getEmployees(): Promise<any[]> {

@@ -2479,6 +2479,1083 @@ if ($method === 'POST' && in_array($cleanPath, ['/projects/import', '/projects/i
     exit;
 }
 
+// POST /api/leads/import - Batch Leads Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/leads/import', '/leads/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $leads = $body['leads'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($leads) || empty($leads)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No lead records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, phone, email, customer_name FROM `solar_leads`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $phoneMap = [];
+    $emailMap = [];
+    foreach ($existing as $ex) {
+        $cleanP = preg_replace('/\D/', '', $ex['phone'] ?? '');
+        if (!empty($cleanP)) $phoneMap[$cleanP] = $ex['customer_name'] ?? 'Existing Lead';
+        $em = strtolower(trim($ex['email'] ?? ''));
+        if (!empty($em)) $emailMap[$em] = $ex['customer_name'] ?? 'Existing Lead';
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+
+    $pdo->beginTransaction();
+    try {
+        $insertStmt = $pdo->prepare("
+            INSERT INTO `solar_leads` (
+                `id`, `customer_name`, `company_name`, `phone`, `email`,
+                `address`, `city`, `solar_capacity_kw`, `estimated_value`,
+                `source`, `status`, `notes`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($leads as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $name = trim($raw['customerName'] ?? ($raw['name'] ?? ($raw['customer_name'] ?? '')));
+            if (empty($name)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Customer name is required.'];
+                $errors[] = "Row $rowNum: Customer name is required.";
+                continue;
+            }
+
+            $phoneRaw = trim($raw['phone'] ?? ($raw['mobile'] ?? ''));
+            $phoneDigits = preg_replace('/\D/', '', $phoneRaw);
+            if (strlen($phoneDigits) < 7) {
+                $failed[] = ['row' => $rowNum, 'name' => $name, 'reason' => "Valid phone number is required (got \"$phoneRaw\")."];
+                $errors[] = "Row $rowNum: Valid phone number is required.";
+                continue;
+            }
+
+            $email = strtolower(trim($raw['email'] ?? ''));
+
+            $isDup = false;
+            $dupReason = '';
+            foreach ($phoneMap as $exPhone => $leadOwner) {
+                if ($exPhone === $phoneDigits || (strlen($phoneDigits) >= 10 && str_ends_with($exPhone, substr($phoneDigits, -10))) || (strlen($exPhone) >= 10 && str_ends_with($phoneDigits, substr($exPhone, -10)))) {
+                    $isDup = true;
+                    $dupReason = "Phone \"$phoneRaw\" already registered for lead \"$leadOwner\".";
+                    break;
+                }
+            }
+            if (!$isDup && !empty($email) && isset($emailMap[$email])) {
+                $isDup = true;
+                $dupReason = "Email \"$email\" already registered for lead \"{$emailMap[$email]}\".";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $name, 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $leadId = $raw['id'] ?? ('lead-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $company = trim($raw['companyName'] ?? ($raw['company_name'] ?? ''));
+            $address = trim($raw['address'] ?? '');
+            $city = trim($raw['city'] ?? 'Ahmedabad');
+            $capKw = floatval(preg_replace('/[^0-9.]/', '', $raw['capacityKw'] ?? ($raw['solar_capacity_kw'] ?? ($raw['capacity'] ?? 0))));
+            $estVal = floatval(preg_replace('/[^0-9.]/', '', $raw['estimatedValue'] ?? ($raw['estimated_value'] ?? ($raw['value'] ?? ($capKw > 0 ? $capKw * 48000 : 0)))));
+            $source = trim($raw['source'] ?? 'Website');
+            $status = strtoupper(trim($raw['status'] ?? 'NEW'));
+            $notes = trim($raw['notes'] ?? 'Imported via CSV Hub');
+
+            $insertStmt->execute([
+                $leadId, $name, $company, $phoneRaw, $email,
+                $address, $city, $capKw, $estVal, $source, $status, $notes
+            ]);
+
+            $phoneMap[$phoneDigits] = $name;
+            if (!empty($email)) $emailMap[$email] = $name;
+
+            $imported[] = [
+                'id' => $leadId,
+                'customerName' => $name,
+                'companyName' => $company,
+                'phone' => $phoneRaw,
+                'email' => $email,
+                'address' => $address,
+                'city' => $city,
+                'solarCapacityKw' => $capKw,
+                'estimatedValue' => $estVal,
+                'source' => $source,
+                'status' => $status,
+                'notes' => $notes,
+                'createdAt' => date('c')
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during leads import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($leads),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/employees/import - Batch Employee Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/employees/import', '/employees/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $employees = $body['employees'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($employees) || empty($employees)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No employee records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, employee_code, email, phone, name FROM `solar_employees`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $codeMap = [];
+    $emailMap = [];
+    $phoneMap = [];
+    foreach ($existing as $ex) {
+        $ec = strtoupper(trim($ex['employee_code'] ?? ''));
+        if (!empty($ec)) $codeMap[$ec] = $ex['name'];
+        $em = strtolower(trim($ex['email'] ?? ''));
+        if (!empty($em)) $emailMap[$em] = $ex['name'];
+        $ph = preg_replace('/\D/', '', $ex['phone'] ?? '');
+        if (!empty($ph)) $phoneMap[$ph] = $ex['name'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+    $seq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        $empStmt = $pdo->prepare("
+            INSERT INTO `solar_employees` (
+                `id`, `employee_code`, `name`, `department`, `designation`,
+                `phone`, `email`, `joining_date`, `salary_monthly`, `status`,
+                `login_enabled`, `system_role`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+        $userStmt = $pdo->prepare("
+            INSERT INTO `solar_users` (
+                `id`, `name`, `email`, `password_hash`, `role`, `department`,
+                `employee_id`, `is_active`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `role` = VALUES(`role`)
+        ");
+
+        foreach ($employees as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $name = trim($raw['name'] ?? '');
+            if (empty($name)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Employee name is required.'];
+                $errors[] = "Row $rowNum: Employee name is required.";
+                continue;
+            }
+
+            $rawCode = strtoupper(trim($raw['employeeCode'] ?? ($raw['employee_code'] ?? ($raw['code'] ?? ''))));
+            $email = strtolower(trim($raw['email'] ?? ''));
+            $phoneRaw = trim($raw['phone'] ?? ($raw['mobile'] ?? ''));
+            $phoneDigits = preg_replace('/\D/', '', $phoneRaw);
+
+            $isDup = false;
+            $dupReason = '';
+            if (!empty($rawCode) && isset($codeMap[$rawCode])) {
+                $isDup = true;
+                $dupReason = "Employee code \"$rawCode\" already exists.";
+            } elseif (!empty($email) && isset($emailMap[$email])) {
+                $isDup = true;
+                $dupReason = "Email \"$email\" already assigned to employee \"{$emailMap[$email]}\".";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $name, 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $empId = $raw['id'] ?? ('emp-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $empCode = !empty($rawCode) ? $rawCode : ('EMP' . str_pad(++$seq, 4, '0', STR_PAD_LEFT));
+            $dept = trim($raw['department'] ?? 'Operations');
+            $desig = trim($raw['designation'] ?? 'Field Executive');
+            $joinDate = !empty($raw['joiningDate']) ? substr($raw['joiningDate'], 0, 10) : date('Y-m-d');
+            $salary = floatval(preg_replace('/[^0-9.]/', '', $raw['salaryMonthly'] ?? ($raw['salary'] ?? 25000)));
+            $status = strtoupper(trim($raw['status'] ?? 'ACTIVE'));
+            $loginEnabled = !empty($raw['loginEnabled']) ? 1 : 0;
+            $role = strtoupper(trim($raw['systemRole'] ?? ($raw['role'] ?? 'FIELD_EXECUTIVE')));
+
+            $empStmt->execute([
+                $empId, $empCode, $name, $dept, $desig,
+                $phoneRaw, $email, $joinDate, $salary, $status,
+                $loginEnabled, $role
+            ]);
+
+            if ($loginEnabled && !empty($email)) {
+                $userId = 'usr-' . $empId;
+                $pwdHash = password_hash('123456', PASSWORD_BCRYPT);
+                $userStmt->execute([$userId, $name, $email, $pwdHash, $role, $dept, $empId]);
+            }
+
+            $codeMap[$empCode] = $name;
+            if (!empty($email)) $emailMap[$email] = $name;
+            if (!empty($phoneDigits)) $phoneMap[$phoneDigits] = $name;
+
+            $imported[] = [
+                'id' => $empId,
+                'employeeCode' => $empCode,
+                'name' => $name,
+                'department' => $dept,
+                'designation' => $desig,
+                'phone' => $phoneRaw,
+                'email' => $email,
+                'joiningDate' => $joinDate,
+                'salaryMonthly' => $salary,
+                'status' => $status,
+                'loginEnabled' => $loginEnabled === 1,
+                'systemRole' => $role
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during employee import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($employees),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/products/import - Batch Products Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/products/import', '/products/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $products = $body['products'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($products) || empty($products)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No product records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, sku, name FROM `solar_products`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $skuMap = [];
+    $nameMap = [];
+    foreach ($existing as $ex) {
+        $s = strtoupper(trim($ex['sku'] ?? ''));
+        if (!empty($s)) $skuMap[$s] = $ex['name'];
+        $n = strtolower(trim($ex['name'] ?? ''));
+        if (!empty($n)) $nameMap[$n] = $ex['sku'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+    $seq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        $prodStmt = $pdo->prepare("
+            INSERT INTO `solar_products` (
+                `id`, `sku`, `name`, `category`, `brand`, `model`,
+                `specifications`, `unit`, `hsn_code`, `gst_rate`,
+                `unit_price`, `current_stock`, `reorder_level`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($products as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $name = trim($raw['name'] ?? '');
+            if (empty($name)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Product name is mandatory.'];
+                $errors[] = "Row $rowNum: Product name is mandatory.";
+                continue;
+            }
+
+            $rawSku = strtoupper(trim($raw['sku'] ?? ''));
+            $normN = strtolower($name);
+
+            $isDup = false;
+            $dupReason = '';
+            if (!empty($rawSku) && isset($skuMap[$rawSku])) {
+                $isDup = true;
+                $dupReason = "Product SKU \"$rawSku\" already exists.";
+            } elseif (isset($nameMap[$normN])) {
+                $isDup = true;
+                $dupReason = "Product named \"$name\" already exists (SKU: {$nameMap[$normN]}).";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $name, 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $prodId = $raw['id'] ?? ('prod-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $sku = !empty($rawSku) ? $rawSku : ('PROD-' . str_pad(++$seq, 4, '0', STR_PAD_LEFT));
+            $cat = trim($raw['category'] ?? 'Solar Panels');
+            $brand = trim($raw['brand'] ?? 'Tier 1');
+            $model = trim($raw['model'] ?? '');
+            $specs = trim($raw['specifications'] ?? '');
+            $unit = trim($raw['unit'] ?? 'Nos');
+            $hsn = trim($raw['hsnCode'] ?? ($raw['hsn_code'] ?? '8541'));
+            $gstRate = floatval(preg_replace('/[^0-9.]/', '', $raw['gstRate'] ?? ($raw['gst_rate'] ?? 12)));
+            $price = floatval(preg_replace('/[^0-9.]/', '', $raw['unitPrice'] ?? ($raw['unit_price'] ?? ($raw['price'] ?? 0))));
+            $stock = floatval(preg_replace('/[^0-9.]/', '', $raw['currentStock'] ?? ($raw['current_stock'] ?? ($raw['stock'] ?? 0))));
+            $reorder = floatval(preg_replace('/[^0-9.]/', '', $raw['reorderLevel'] ?? ($raw['reorder_level'] ?? 5)));
+
+            $prodStmt->execute([
+                $prodId, $sku, $name, $cat, $brand, $model,
+                $specs, $unit, $hsn, $gstRate, $price, $stock, $reorder
+            ]);
+
+            $skuMap[$sku] = $name;
+            $nameMap[$normN] = $sku;
+
+            $imported[] = [
+                'id' => $prodId,
+                'sku' => $sku,
+                'name' => $name,
+                'category' => $cat,
+                'brand' => $brand,
+                'model' => $model,
+                'specifications' => $specs,
+                'unit' => $unit,
+                'hsnCode' => $hsn,
+                'gstRate' => $gstRate,
+                'unitPrice' => $price,
+                'currentStock' => $stock,
+                'reorderLevel' => $reorder
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during products import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($products),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/vendors/import - Batch Vendors Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/vendors/import', '/vendors/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $vendors = $body['vendors'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($vendors) || empty($vendors)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No vendor records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, vendor_code, name, phone, gst_number FROM `solar_vendors`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $codeMap = [];
+    $nameMap = [];
+    $phoneMap = [];
+    $gstMap = [];
+    foreach ($existing as $ex) {
+        $vc = strtoupper(trim($ex['vendor_code'] ?? ''));
+        if (!empty($vc)) $codeMap[$vc] = $ex['name'];
+        $n = strtolower(trim($ex['name'] ?? ''));
+        if (!empty($n)) $nameMap[$n] = $ex['vendor_code'];
+        $ph = preg_replace('/\D/', '', $ex['phone'] ?? '');
+        if (!empty($ph)) $phoneMap[$ph] = $ex['name'];
+        $gst = strtoupper(trim($ex['gst_number'] ?? ''));
+        if (!empty($gst)) $gstMap[$gst] = $ex['name'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+    $seq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        $venStmt = $pdo->prepare("
+            INSERT INTO `solar_vendors` (
+                `id`, `name`, `vendor_code`, `contact_person`, `phone`, `email`,
+                `address`, `city`, `state`, `gst_number`, `pan_number`,
+                `payment_terms`, `rating`, `categories_json`, `status`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($vendors as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $name = trim($raw['name'] ?? '');
+            if (empty($name)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Vendor name is mandatory.'];
+                $errors[] = "Row $rowNum: Vendor name is mandatory.";
+                continue;
+            }
+
+            $rawCode = strtoupper(trim($raw['vendorCode'] ?? ($raw['vendor_code'] ?? ($raw['code'] ?? ''))));
+            $phoneRaw = trim($raw['phone'] ?? '');
+            $phoneDigits = preg_replace('/\D/', '', $phoneRaw);
+            $gst = strtoupper(preg_replace('/[\s-]/', '', $raw['gstNumber'] ?? ($raw['gst_number'] ?? '')));
+            $normN = strtolower($name);
+
+            $isDup = false;
+            $dupReason = '';
+            if (!empty($rawCode) && isset($codeMap[$rawCode])) {
+                $isDup = true;
+                $dupReason = "Vendor code \"$rawCode\" already exists.";
+            } elseif (!empty($gst) && isset($gstMap[$gst])) {
+                $isDup = true;
+                $dupReason = "GST number \"$gst\" already registered for vendor \"{$gstMap[$gst]}\".";
+            } elseif (isset($nameMap[$normN])) {
+                $isDup = true;
+                $dupReason = "Vendor named \"$name\" already exists.";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $name, 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $venId = $raw['id'] ?? ('ven-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $venCode = !empty($rawCode) ? $rawCode : ('VEN-' . str_pad(++$seq, 4, '0', STR_PAD_LEFT));
+            $contact = trim($raw['contactPerson'] ?? ($raw['contact_person'] ?? $name));
+            $email = strtolower(trim($raw['email'] ?? ''));
+            $address = trim($raw['address'] ?? '');
+            $city = trim($raw['city'] ?? 'Ahmedabad');
+            $state = trim($raw['state'] ?? 'Gujarat');
+            $pan = strtoupper(trim($raw['panNumber'] ?? ($raw['pan_number'] ?? '')));
+            $terms = trim($raw['paymentTerms'] ?? ($raw['payment_terms'] ?? '30 Days Net'));
+            $rating = floatval(preg_replace('/[^0-9.]/', '', $raw['rating'] ?? 4.5));
+            $status = strtoupper(trim($raw['status'] ?? 'ACTIVE'));
+            $cats = $raw['categories'] ?? ['Modules', 'Inverters'];
+            $catsJson = is_string($cats) ? $cats : json_encode($cats);
+
+            $venStmt->execute([
+                $venId, $name, $venCode, $contact, $phoneRaw, $email,
+                $address, $city, $state, $gst, $pan, $terms, $rating, $catsJson, $status
+            ]);
+
+            $codeMap[$venCode] = $name;
+            $nameMap[$normN] = $venCode;
+            if (!empty($phoneDigits)) $phoneMap[$phoneDigits] = $name;
+            if (!empty($gst)) $gstMap[$gst] = $name;
+
+            $imported[] = [
+                'id' => $venId,
+                'name' => $name,
+                'vendorCode' => $venCode,
+                'contactPerson' => $contact,
+                'phone' => $phoneRaw,
+                'email' => $email,
+                'address' => $address,
+                'city' => $city,
+                'state' => $state,
+                'gstNumber' => $gst,
+                'panNumber' => $pan,
+                'paymentTerms' => $terms,
+                'rating' => $rating,
+                'categories' => is_string($cats) ? json_decode($cats, true) : $cats,
+                'status' => $status
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during vendors import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($vendors),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/payments/import - Batch Payments Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/payments/import', '/payments/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $payments = $body['payments'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($payments) || empty($payments)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No payment records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, receipt_number, transaction_reference FROM `solar_payments`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $recMap = [];
+    $txMap = [];
+    foreach ($existing as $ex) {
+        $rn = strtoupper(trim($ex['receipt_number'] ?? ''));
+        if (!empty($rn)) $recMap[$rn] = $ex['id'];
+        $tr = strtoupper(trim($ex['transaction_reference'] ?? ''));
+        if (!empty($tr)) $txMap[$tr] = $ex['id'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+    $seq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        $payStmt = $pdo->prepare("
+            INSERT INTO `solar_payments` (
+                `id`, `receipt_number`, `project_id`, `customer_id`, `customer_name`,
+                `milestone`, `amount`, `status`, `due_date`, `paid_date`,
+                `payment_mode`, `transaction_reference`, `notes`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($payments as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $amount = floatval(preg_replace('/[^0-9.]/', '', $raw['amount'] ?? 0));
+            if ($amount <= 0) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Valid positive payment amount is required.'];
+                $errors[] = "Row $rowNum: Valid positive payment amount is required.";
+                continue;
+            }
+
+            $rawRec = strtoupper(trim($raw['receiptNumber'] ?? ($raw['receipt_number'] ?? '')));
+            $rawTx = strtoupper(trim($raw['transactionReference'] ?? ($raw['transaction_reference'] ?? ($raw['ref'] ?? ''))));
+
+            $isDup = false;
+            $dupReason = '';
+            if (!empty($rawRec) && isset($recMap[$rawRec])) {
+                $isDup = true;
+                $dupReason = "Receipt number \"$rawRec\" already exists.";
+            } elseif (!empty($rawTx) && isset($txMap[$rawTx])) {
+                $isDup = true;
+                $dupReason = "Transaction reference \"$rawTx\" already exists.";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $rawRec ?: "Payment #$rowNum", 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $payId = $raw['id'] ?? ('pay-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $recNumber = !empty($rawRec) ? $rawRec : ('REC-' . date('Y') . '-' . str_pad(++$seq, 4, '0', STR_PAD_LEFT));
+            $projId = trim($raw['projectId'] ?? ($raw['project_id'] ?? ''));
+            $custId = trim($raw['customerId'] ?? ($raw['customer_id'] ?? ''));
+            $custName = trim($raw['customerName'] ?? ($raw['customer_name'] ?? 'Client'));
+            $milestone = trim($raw['milestone'] ?? 'Advance / Milestone Payment');
+            $status = strtoupper(trim($raw['status'] ?? 'PAID'));
+            $dueDate = !empty($raw['dueDate']) ? substr($raw['dueDate'], 0, 10) : date('Y-m-d');
+            $paidDate = !empty($raw['paidDate']) ? substr($raw['paidDate'], 0, 10) : ($status === 'PAID' ? date('Y-m-d') : null);
+            $mode = strtoupper(trim($raw['paymentMode'] ?? ($raw['payment_mode'] ?? 'NEFT/RTGS')));
+            $txRef = !empty($rawTx) ? $rawTx : ('TXN-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $notes = trim($raw['notes'] ?? 'Imported via CSV Hub');
+
+            $payStmt->execute([
+                $payId, $recNumber, $projId, $custId, $custName,
+                $milestone, $amount, $status, $dueDate, $paidDate,
+                $mode, $txRef, $notes
+            ]);
+
+            $recMap[$recNumber] = $payId;
+            $txMap[$txRef] = $payId;
+
+            $imported[] = [
+                'id' => $payId,
+                'receiptNumber' => $recNumber,
+                'projectId' => $projId,
+                'customerId' => $custId,
+                'customerName' => $custName,
+                'milestone' => $milestone,
+                'amount' => $amount,
+                'status' => $status,
+                'dueDate' => $dueDate,
+                'paidDate' => $paidDate,
+                'paymentMode' => $mode,
+                'transactionReference' => $txRef,
+                'notes' => $notes
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during payments import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($payments),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/expenses/import - Batch Expenses Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/expenses/import', '/expenses/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $expenses = $body['expenses'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($expenses) || empty($expenses)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No expense records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, expense_number, reference_no FROM `solar_expenses`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $expMap = [];
+    $refMap = [];
+    foreach ($existing as $ex) {
+        $en = strtoupper(trim($ex['expense_number'] ?? ''));
+        if (!empty($en)) $expMap[$en] = $ex['id'];
+        $ref = strtoupper(trim($ex['reference_no'] ?? ''));
+        if (!empty($ref)) $refMap[$ref] = $ex['id'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+    $seq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        $expStmt = $pdo->prepare("
+            INSERT INTO `solar_expenses` (
+                `id`, `expense_number`, `project_id`, `project_code`, `vendor_name`,
+                `category`, `amount`, `expense_date`, `payment_mode`,
+                `reference_no`, `notes`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($expenses as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $amount = floatval(preg_replace('/[^0-9.]/', '', $raw['amount'] ?? 0));
+            if ($amount <= 0) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Valid positive expense amount is required.'];
+                $errors[] = "Row $rowNum: Valid positive expense amount is required.";
+                continue;
+            }
+
+            $rawExp = strtoupper(trim($raw['expenseNumber'] ?? ($raw['expense_number'] ?? '')));
+            $rawRef = strtoupper(trim($raw['referenceNo'] ?? ($raw['reference_no'] ?? ($raw['billNo'] ?? ''))));
+
+            $isDup = false;
+            $dupReason = '';
+            if (!empty($rawExp) && isset($expMap[$rawExp])) {
+                $isDup = true;
+                $dupReason = "Expense number \"$rawExp\" already exists.";
+            } elseif (!empty($rawRef) && isset($refMap[$rawRef])) {
+                $isDup = true;
+                $dupReason = "Reference bill/voucher \"$rawRef\" already exists.";
+            }
+
+            if ($isDup) {
+                $skipped[] = ['row' => $rowNum, 'name' => $rawExp ?: "Expense #$rowNum", 'reason' => $dupReason];
+                $errors[] = "Row $rowNum Skipped (Duplicate): $dupReason";
+                continue;
+            }
+
+            $expId = $raw['id'] ?? ('exp-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $expNumber = !empty($rawExp) ? $rawExp : ('EXP-' . date('Y') . '-' . str_pad(++$seq, 4, '0', STR_PAD_LEFT));
+            $projId = trim($raw['projectId'] ?? ($raw['project_id'] ?? ''));
+            $projCode = trim($raw['projectCode'] ?? ($raw['project_code'] ?? ''));
+            $vendorName = trim($raw['vendorName'] ?? ($raw['vendor_name'] ?? 'Vendor'));
+            $category = trim($raw['category'] ?? 'Site Expenses');
+            $expDate = !empty($raw['expenseDate']) ? substr($raw['expenseDate'], 0, 10) : date('Y-m-d');
+            $mode = strtoupper(trim($raw['paymentMode'] ?? ($raw['payment_mode'] ?? 'CASH')));
+            $refNo = !empty($rawRef) ? $rawRef : ('VCH-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $notes = trim($raw['notes'] ?? 'Imported via CSV Hub');
+
+            $expStmt->execute([
+                $expId, $expNumber, $projId, $projCode, $vendorName,
+                $category, $amount, $expDate, $mode, $refNo, $notes
+            ]);
+
+            $expMap[$expNumber] = $expId;
+            $refMap[$refNo] = $expId;
+
+            $imported[] = [
+                'id' => $expId,
+                'expenseNumber' => $expNumber,
+                'projectId' => $projId,
+                'projectCode' => $projCode,
+                'vendorName' => $vendorName,
+                'category' => $category,
+                'amount' => $amount,
+                'expenseDate' => $expDate,
+                'paymentMode' => $mode,
+                'referenceNo' => $refNo,
+                'notes' => $notes
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during expenses import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($expenses),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/attendance/import - Batch Attendance Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/attendance/import', '/attendance/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $attendance = $body['attendance'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
+    if (!is_array($attendance) || empty($attendance)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No attendance records provided for import.']);
+        exit;
+    }
+
+    $stmtA = $pdo->query('SELECT id, employee_id, employee_name, attendance_date FROM `solar_attendance`');
+    $existing = $stmtA->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $attKeyMap = [];
+    foreach ($existing as $ex) {
+        $emp = strtolower(trim($ex['employee_name'] ?? $ex['employee_id']));
+        $d = substr($ex['attendance_date'] ?? '', 0, 10);
+        if (!empty($emp) && !empty($d)) {
+            $attKeyMap[$emp . ':::' . $d] = $ex['id'];
+        }
+    }
+
+    $stmtE = $pdo->query('SELECT id, name, employee_code FROM `solar_employees`');
+    $existingEmp = $stmtE->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $empNameMap = [];
+    foreach ($existingEmp as $ee) {
+        $empNameMap[strtolower(trim($ee['name']))] = $ee['id'];
+        $empNameMap[strtolower(trim($ee['employee_code']))] = $ee['id'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+
+    $pdo->beginTransaction();
+    try {
+        $attStmt = $pdo->prepare("
+            INSERT INTO `solar_attendance` (
+                `id`, `employee_id`, `employee_name`, `attendance_date`,
+                `check_in_time`, `check_out_time`, `status`, `site_project_title`,
+                `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($attendance as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $empName = trim($raw['employeeName'] ?? ($raw['employee_name'] ?? ($raw['name'] ?? '')));
+            $empIdRaw = trim($raw['employeeId'] ?? ($raw['employee_id'] ?? ''));
+            if (empty($empName) && empty($empIdRaw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Employee name or ID is mandatory.'];
+                $errors[] = "Row $rowNum: Employee name or ID is mandatory.";
+                continue;
+            }
+
+            $dateRaw = trim($raw['date'] ?? ($raw['attendanceDate'] ?? ($raw['attendance_date'] ?? '')));
+            $attDate = !empty($dateRaw) ? substr($dateRaw, 0, 10) : date('Y-m-d');
+
+            $effEmpName = !empty($empName) ? $empName : $empIdRaw;
+            $effEmpId = !empty($empIdRaw) ? $empIdRaw : ($empNameMap[strtolower($effEmpName)] ?? ('emp-' . md5(strtolower($effEmpName))));
+
+            $lookupKey = strtolower($effEmpName) . ':::' . $attDate;
+            if (isset($attKeyMap[$lookupKey])) {
+                $skipped[] = [
+                    'row' => $rowNum,
+                    'name' => "$effEmpName ($attDate)",
+                    'reason' => "Attendance for \"$effEmpName\" on date $attDate already logged."
+                ];
+                $errors[] = "Row $rowNum Skipped (Duplicate): Attendance on $attDate already recorded.";
+                continue;
+            }
+
+            $attId = $raw['id'] ?? ('att-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $checkIn = trim($raw['checkInTime'] ?? ($raw['check_in_time'] ?? ($raw['checkIn'] ?? '09:00:00')));
+            $checkOut = trim($raw['checkOutTime'] ?? ($raw['check_out_time'] ?? ($raw['checkOut'] ?? '18:00:00')));
+            $status = strtoupper(trim($raw['status'] ?? 'PRESENT'));
+            $site = trim($raw['siteProjectTitle'] ?? ($raw['site_project_title'] ?? ($raw['site'] ?? 'Headquarters')));
+
+            $attStmt->execute([
+                $attId, $effEmpId, $effEmpName, $attDate,
+                $checkIn, $checkOut, $status, $site
+            ]);
+
+            $attKeyMap[$lookupKey] = $attId;
+
+            $imported[] = [
+                'id' => $attId,
+                'employeeId' => $effEmpId,
+                'employeeName' => $effEmpName,
+                'attendanceDate' => $attDate,
+                'checkInTime' => $checkIn,
+                'checkOutTime' => $checkOut,
+                'status' => $status,
+                'siteProjectTitle' => $site
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during attendance import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($attendance),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
+// POST /api/service-tickets/import or /service/import - Batch Service Tickets Import to MySQL
+if ($method === 'POST' && in_array($cleanPath, ['/service-tickets/import', '/service-tickets/import/', '/service/import', '/service/import/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $tickets = $body['tickets'] ?? ($body['service'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : [])));
+    if (!is_array($tickets) || empty($tickets)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'No service ticket records provided for import.']);
+        exit;
+    }
+
+    $stmt = $pdo->query('SELECT id, ticket_id FROM `solar_service_tickets`');
+    $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $ticketMap = [];
+    foreach ($existing as $ex) {
+        $tid = strtoupper(trim($ex['ticket_id'] ?? ''));
+        if (!empty($tid)) $ticketMap[$tid] = $ex['id'];
+    }
+
+    $imported = [];
+    $skipped = [];
+    $failed = [];
+    $errors = [];
+    $seq = round(microtime(true) * 1000) % 10000;
+
+    $pdo->beginTransaction();
+    try {
+        $tkStmt = $pdo->prepare("
+            INSERT INTO `solar_service_tickets` (
+                `id`, `ticket_id`, `customer_id`, `customer_name`, `project_id`,
+                `project_title`, `issue`, `category`, `priority`, `status`,
+                `scheduled_date`, `resolved_date`, `created_at`, `updated_at`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ");
+
+        foreach ($tickets as $idx => $raw) {
+            $rowNum = $idx + 1;
+            if (!is_array($raw)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Malformed record'];
+                $errors[] = "Row $rowNum: Malformed record";
+                continue;
+            }
+
+            $issue = trim($raw['issue'] ?? ($raw['description'] ?? ($raw['title'] ?? '')));
+            if (empty($issue)) {
+                $failed[] = ['row' => $rowNum, 'reason' => 'Ticket issue description is required.'];
+                $errors[] = "Row $rowNum: Ticket issue description is required.";
+                continue;
+            }
+
+            $rawTicketId = strtoupper(trim($raw['ticketId'] ?? ($raw['ticket_id'] ?? '')));
+            if (!empty($rawTicketId) && isset($ticketMap[$rawTicketId])) {
+                $skipped[] = ['row' => $rowNum, 'name' => $rawTicketId, 'reason' => "Ticket ID \"$rawTicketId\" already exists."];
+                $errors[] = "Row $rowNum Skipped (Duplicate): Ticket ID \"$rawTicketId\" already exists.";
+                continue;
+            }
+
+            $tkDbId = $raw['id'] ?? ('srv-imp-' . round(microtime(true) * 1000) . '-' . $rowNum);
+            $ticketCode = !empty($rawTicketId) ? $rawTicketId : ('SRV-' . date('Y') . '-' . str_pad(++$seq, 4, '0', STR_PAD_LEFT));
+            $custId = trim($raw['customerId'] ?? ($raw['customer_id'] ?? ''));
+            $custName = trim($raw['customerName'] ?? ($raw['customer_name'] ?? 'Client'));
+            $projId = trim($raw['projectId'] ?? ($raw['project_id'] ?? ''));
+            $projTitle = trim($raw['projectTitle'] ?? ($raw['project_title'] ?? 'Solar System'));
+            $cat = trim($raw['category'] ?? 'INVERTER');
+            $priority = strtoupper(trim($raw['priority'] ?? 'MEDIUM'));
+            $status = strtoupper(trim($raw['status'] ?? 'OPEN'));
+            $schedDate = !empty($raw['scheduledDate']) ? substr($raw['scheduledDate'], 0, 10) : date('Y-m-d');
+            $resDate = !empty($raw['resolvedDate']) ? substr($raw['resolvedDate'], 0, 10) : ($status === 'RESOLVED' ? date('Y-m-d') : null);
+
+            $tkStmt->execute([
+                $tkDbId, $ticketCode, $custId, $custName, $projId,
+                $projTitle, $issue, $cat, $priority, $status,
+                $schedDate, $resDate
+            ]);
+
+            $ticketMap[$ticketCode] = $tkDbId;
+
+            $imported[] = [
+                'id' => $tkDbId,
+                'ticketId' => $ticketCode,
+                'customerId' => $custId,
+                'customerName' => $custName,
+                'projectId' => $projId,
+                'projectTitle' => $projTitle,
+                'issue' => $issue,
+                'category' => $cat,
+                'priority' => $priority,
+                'status' => $status,
+                'scheduledDate' => $schedDate,
+                'resolvedDate' => $resDate
+            ];
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Database error during service tickets import: ' . $e->getMessage()]);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'total' => count($tickets),
+        'imported' => count($imported),
+        'skipped' => count($skipped),
+        'failed' => count($failed),
+        'importedRecords' => $imported,
+        'skippedRecords' => $skipped,
+        'failedRecords' => $failed,
+        'errors' => $errors
+    ]);
+    exit;
+}
+
 // POST /api/sync/push - Real-Time MySQL Synchronization Across All Collections
 if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
     $pdo = getDbConnection($dbConfig);

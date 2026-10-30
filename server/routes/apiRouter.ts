@@ -585,6 +585,30 @@ apiRouter.post('/leads', async (req: Request, res: Response) => {
   }
 });
 
+// Batch Lead Import (Excel / CSV Hub)
+apiRouter.post(['/leads/import', '/leads/import/'], async (req: Request, res: Response) => {
+  try {
+    const { leads, rows } = req.body || {};
+    const list = Array.isArray(leads) ? leads : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No lead records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importLeads(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Lead Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during lead import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
+  }
+});
+
 apiRouter.put('/leads/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -709,6 +733,30 @@ apiRouter.post('/employees', async (req: Request, res: Response) => {
   }
 });
 
+// Batch Employee Import (Excel / CSV Hub)
+apiRouter.post(['/employees/import', '/employees/import/'], async (req: Request, res: Response) => {
+  try {
+    const { employees, rows } = req.body || {};
+    const list = Array.isArray(employees) ? employees : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No employee records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importEmployees(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Employee Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during employee import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
+  }
+});
+
 apiRouter.put('/employees/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -747,6 +795,30 @@ apiRouter.post('/attendance', async (req: Request, res: Response) => {
     res.status(201).json({ success: true, data: saved });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to save attendance' });
+  }
+});
+
+// Batch Attendance Import (Excel / CSV Hub)
+apiRouter.post(['/attendance/import', '/attendance/import/'], async (req: Request, res: Response) => {
+  try {
+    const { attendance, rows } = req.body || {};
+    const list = Array.isArray(attendance) ? attendance : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No attendance records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importAttendance(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Attendance Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during attendance import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
   }
 });
 
@@ -871,6 +943,30 @@ apiRouter.post('/products', async (req: Request, res: Response) => {
   }
 });
 
+// Batch Product Import (Excel / CSV Hub)
+apiRouter.post(['/products/import', '/products/import/'], async (req: Request, res: Response) => {
+  try {
+    const { products, rows } = req.body || {};
+    const list = Array.isArray(products) ? products : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No product records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importProducts(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Product Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during product import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
+  }
+});
+
 apiRouter.put('/products/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -907,6 +1003,30 @@ apiRouter.post('/vendors', async (req: Request, res: Response) => {
     res.status(201).json({ success: true, data: saved });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to save vendor' });
+  }
+});
+
+// Batch Vendor Import (Excel / CSV Hub)
+apiRouter.post(['/vendors/import', '/vendors/import/'], async (req: Request, res: Response) => {
+  try {
+    const { vendors, rows } = req.body || {};
+    const list = Array.isArray(vendors) ? vendors : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No vendor records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importVendors(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Vendor Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during vendor import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
   }
 });
 
@@ -1238,6 +1358,30 @@ apiRouter.post('/payments', async (req: Request, res: Response) => {
   }
 });
 
+// Batch Payment Import (Excel / CSV Hub)
+apiRouter.post(['/payments/import', '/payments/import/'], async (req: Request, res: Response) => {
+  try {
+    const { payments, rows } = req.body || {};
+    const list = Array.isArray(payments) ? payments : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No payment records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importPayments(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Payment Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during payment import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
+  }
+});
+
 apiRouter.delete('/payments/:id', async (req: Request, res: Response) => {
   try {
     await dbManager.deletePayment(req.params.id);
@@ -1263,6 +1407,30 @@ apiRouter.post('/expenses', async (req: Request, res: Response) => {
     res.status(201).json({ success: true, data: saved });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to save expense' });
+  }
+});
+
+// Batch Expense Import (Excel / CSV Hub)
+apiRouter.post(['/expenses/import', '/expenses/import/'], async (req: Request, res: Response) => {
+  try {
+    const { expenses, rows } = req.body || {};
+    const list = Array.isArray(expenses) ? expenses : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No expense records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importExpenses(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Expense Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during expense import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
   }
 });
 
@@ -1295,6 +1463,30 @@ apiRouter.post('/service-tickets', async (req: Request, res: Response) => {
     res.status(201).json({ success: true, data: saved });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to save service ticket' });
+  }
+});
+
+// Batch Service Tickets Import (Excel / CSV Hub)
+apiRouter.post(['/service-tickets/import', '/service/import', '/service-tickets/import/', '/service/import/'], async (req: Request, res: Response) => {
+  try {
+    const { tickets, service, rows } = req.body || {};
+    const list = Array.isArray(tickets) ? tickets : (Array.isArray(service) ? service : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : [])));
+    if (!list || list.length === 0) {
+      res.status(400).json({ success: false, message: 'No service ticket records provided for import.' });
+      return;
+    }
+    const result = await dbManager.importServiceTickets(list);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[MySQL Service Ticket Import Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database error during service tickets import.',
+      total: 0,
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    });
   }
 });
 

@@ -4,6 +4,11 @@ import {
   ProductItem,
   Vendor,
   Employee,
+  Lead,
+  PaymentRecord,
+  ExpenseRecord,
+  AttendanceRecord,
+  ServiceTicket,
   BillOfMaterials,
   BOMItem,
   PurchaseOrder,
@@ -719,6 +724,207 @@ export function validatePurchaseOrder(
         valid: false,
         field: 'purchaseNumber',
         message: `Purchase Order number "${candidate.purchaseNumber}" already exists.`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// ==========================================
+// 8. Lead Duplicate Validation
+// ==========================================
+export function validateLead(
+  candidate: Partial<Lead>,
+  existingLeads: Lead[],
+  ignoreId?: string
+): ValidationResult {
+  const pool = existingLeads.filter(l => !ignoreId || l.id !== ignoreId);
+
+  // 1. Phone number comparison (digits only)
+  const candPhone = normalizePhone(candidate.phone);
+  if (candPhone.length >= 7) {
+    const match = pool.find(l => {
+      const p = normalizePhone(l.phone);
+      return p.length >= 7 && (p === candPhone || p.endsWith(candPhone) || candPhone.endsWith(p));
+    });
+    if (match) {
+      return {
+        valid: false,
+        field: 'phone',
+        message: `Lead with phone number "${candidate.phone}" already exists (${match.customerName}).`
+      };
+    }
+  }
+
+  // 2. Email comparison
+  const candEmail = normalizeEmail(candidate.email);
+  if (candEmail.length > 0) {
+    const match = pool.find(l => normalizeEmail(l.email) === candEmail);
+    if (match) {
+      return {
+        valid: false,
+        field: 'email',
+        message: `Lead with email "${candidate.email}" already exists (${match.customerName}).`
+      };
+    }
+  }
+
+  // 3. Customer name + Company name match
+  const candName = normalizeCaseInsensitive(candidate.customerName);
+  const candComp = normalizeCaseInsensitive(candidate.companyName);
+  if (candName.length > 0 && candComp.length > 0) {
+    const match = pool.find(l =>
+      normalizeCaseInsensitive(l.customerName) === candName &&
+      normalizeCaseInsensitive(l.companyName) === candComp
+    );
+    if (match) {
+      return {
+        valid: false,
+        field: 'customerName',
+        message: `Lead for "${candidate.customerName}" at "${candidate.companyName}" already exists.`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// ==========================================
+// 9. Payment Duplicate Validation
+// ==========================================
+export function validatePayment(
+  candidate: Partial<PaymentRecord>,
+  existingPayments: PaymentRecord[],
+  ignoreId?: string
+): ValidationResult {
+  const pool = existingPayments.filter(p => !ignoreId || p.id !== ignoreId);
+
+  const candReceipt = normalizeCode(candidate.receiptNumber);
+  if (candReceipt.length > 0) {
+    const match = pool.find(p => normalizeCode(p.receiptNumber) === candReceipt);
+    if (match) {
+      return {
+        valid: false,
+        field: 'receiptNumber',
+        message: `Payment with receipt number "${candidate.receiptNumber}" already exists.`
+      };
+    }
+  }
+
+  const candTx = normalizeCode(candidate.transactionReference);
+  if (candTx.length > 3) {
+    const match = pool.find(p => p.transactionReference && normalizeCode(p.transactionReference) === candTx);
+    if (match) {
+      return {
+        valid: false,
+        field: 'transactionReference',
+        message: `Payment with transaction reference "${candidate.transactionReference}" already exists (${match.receiptNumber}).`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// ==========================================
+// 10. Expense Duplicate Validation
+// ==========================================
+export function validateExpense(
+  candidate: Partial<ExpenseRecord>,
+  existingExpenses: ExpenseRecord[],
+  ignoreId?: string
+): ValidationResult {
+  const pool = existingExpenses.filter(e => !ignoreId || e.id !== ignoreId);
+
+  const candExpNo = normalizeCode(candidate.expenseNumber);
+  if (candExpNo.length > 0) {
+    const match = pool.find(e => normalizeCode(e.expenseNumber) === candExpNo);
+    if (match) {
+      return {
+        valid: false,
+        field: 'expenseNumber',
+        message: `Expense with number "${candidate.expenseNumber}" already exists.`
+      };
+    }
+  }
+
+  const candRef = normalizeCode(candidate.referenceNo);
+  if (candRef.length > 3) {
+    const match = pool.find(e => e.referenceNo && normalizeCode(e.referenceNo) === candRef);
+    if (match) {
+      return {
+        valid: false,
+        field: 'referenceNo',
+        message: `Expense with reference number "${candidate.referenceNo}" already exists (${match.expenseNumber}).`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// ==========================================
+// 11. Attendance Duplicate Validation
+// ==========================================
+export function validateAttendance(
+  candidate: Partial<AttendanceRecord>,
+  existingAttendance: AttendanceRecord[],
+  ignoreId?: string
+): ValidationResult {
+  const pool = existingAttendance.filter(a => !ignoreId || a.id !== ignoreId);
+  const candDate = candidate.attendanceDate ? String(candidate.attendanceDate).split('T')[0] : (candidate.date ? String(candidate.date).split('T')[0] : '');
+
+  if (candidate.employeeId && candDate) {
+    const match = pool.find(a =>
+      a.employeeId === candidate.employeeId &&
+      (a.attendanceDate === candDate || a.date === candDate)
+    );
+    if (match) {
+      return {
+        valid: false,
+        field: 'attendanceDate',
+        message: `Attendance for employee ID "${candidate.employeeId}" on date "${candDate}" already exists.`
+      };
+    }
+  }
+
+  const candName = normalizeCaseInsensitive(candidate.employeeName);
+  if (candName && candDate) {
+    const match = pool.find(a =>
+      normalizeCaseInsensitive(a.employeeName) === candName &&
+      (a.attendanceDate === candDate || a.date === candDate)
+    );
+    if (match) {
+      return {
+        valid: false,
+        field: 'employeeName',
+        message: `Attendance for "${candidate.employeeName}" on date "${candDate}" already exists.`
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// ==========================================
+// 12. Service Ticket Duplicate Validation
+// ==========================================
+export function validateServiceTicket(
+  candidate: Partial<ServiceTicket>,
+  existingTickets: ServiceTicket[],
+  ignoreId?: string
+): ValidationResult {
+  const pool = existingTickets.filter(t => !ignoreId || t.id !== ignoreId);
+
+  const candTicketId = normalizeCode(candidate.ticketId || candidate.ticketNumber);
+  if (candTicketId.length > 0) {
+    const match = pool.find(t => normalizeCode(t.ticketId || t.ticketNumber) === candTicketId);
+    if (match) {
+      return {
+        valid: false,
+        field: 'ticketId',
+        message: `Service ticket with ID "${candidate.ticketId || candidate.ticketNumber}" already exists.`
       };
     }
   }

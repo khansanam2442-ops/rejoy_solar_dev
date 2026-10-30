@@ -1,6 +1,29 @@
 import { storageService } from './storage';
-import { validateCustomer, validateEmployee, validateProject } from './validation';
-import { Customer, Employee, Lead, SolarProject, ProjectStatus } from '../types/solar';
+import {
+  validateCustomer,
+  validateEmployee,
+  validateProject,
+  validateProduct,
+  validateVendor,
+  validateLead,
+  validatePayment,
+  validateExpense,
+  validateAttendance,
+  validateServiceTicket
+} from './validation';
+import {
+  Customer,
+  Employee,
+  Lead,
+  SolarProject,
+  ProjectStatus,
+  ProductItem,
+  Vendor,
+  PaymentRecord,
+  ExpenseRecord,
+  AttendanceRecord,
+  ServiceTicket
+} from '../types/solar';
 import { buildStandardWorkflowStages, WorkflowProgressLevel } from './workflowStages';
 
 export type ExportModule =
@@ -11,7 +34,9 @@ export type ExportModule =
   | 'Payments'
   | 'Expenses'
   | 'Attendance'
-  | 'Service';
+  | 'Service'
+  | 'Products'
+  | 'Vendors';
 
 export interface ImportValidationReport {
   module: ExportModule;
@@ -64,8 +89,8 @@ export function getSampleTemplate(module: ExportModule): { headers: string[]; sa
       };
     case 'Payments':
       return {
-        headers: ['Receipt Number', 'Customer Name', 'Milestone', 'Amount (INR)', 'Status', 'Due Date', 'Paid Date', 'Payment Mode'],
-        sampleRow: ['RCPT-2026-099', 'ABC Industries Ltd.', 'Advance', 2000000, 'PAID', '2026-08-15', '2026-08-16', 'Bank NEFT/RTGS']
+        headers: ['Receipt Number', 'Customer Name', 'Milestone', 'Amount (INR)', 'Status', 'Due Date', 'Paid Date', 'Payment Mode', 'Reference'],
+        sampleRow: ['RCPT-2026-099', 'ABC Industries Ltd.', 'Advance', 2000000, 'PAID', '2026-08-15', '2026-08-16', 'Bank NEFT/RTGS', 'TXN-99881']
       };
     case 'Expenses':
       return {
@@ -74,18 +99,28 @@ export function getSampleTemplate(module: ExportModule): { headers: string[]; sa
       };
     case 'Attendance':
       return {
-        headers: ['Employee Name', 'Date', 'Check In Time', 'Status', 'Site Location'],
-        sampleRow: ['Rajesh Kumar', '2026-09-07', '09:00 AM', 'PRESENT', 'Sanand GIDC Solar Site']
+        headers: ['Employee Name', 'Date', 'Check In Time', 'Check Out Time', 'Status', 'Site Location'],
+        sampleRow: ['Rajesh Kumar', '2026-09-07', '09:00:00', '18:00:00', 'PRESENT', 'Sanand GIDC Solar Site']
       };
     case 'Service':
       return {
         headers: ['Ticket ID', 'Customer Name', 'Issue', 'Category', 'Priority', 'Status'],
-        sampleRow: ['SRV-2026-099', 'GreenTech Logistics Hub', 'Inverter offline code 302', 'Inverter Error / Offline', 'HIGH', 'OPEN']
+        sampleRow: ['SRV-2026-099', 'GreenTech Logistics Hub', 'Inverter offline code 302', 'INVERTER', 'HIGH', 'OPEN']
       };
     case 'Projects':
       return {
         headers: ['Project Code', 'Customer Name', 'Title', 'Capacity (kW)', 'Total Value (INR)', 'Status', 'Start Date', 'Expected Completion', 'Site Address', 'City'],
         sampleRow: ['SOL-2026-099', 'Navkar Precision', '50 kW Rooftop Solar System', 50, 2400000, 'INSTALLATION', '2026-09-01', '2026-10-15', 'Plot 45, GIDC Phase II', 'Sanand']
+      };
+    case 'Products':
+      return {
+        headers: ['SKU', 'Product Name', 'Category', 'Brand', 'Model', 'Unit', 'HSN Code', 'GST Rate (%)', 'Unit Price (INR)', 'Current Stock', 'Reorder Level'],
+        sampleRow: ['MOD-MONO-550', '550W Mono PERC Solar Module', 'Solar Panels', 'Waaree', 'WS-550', 'Nos', '8541', 12, 11500, 150, 20]
+      };
+    case 'Vendors':
+      return {
+        headers: ['Vendor Code', 'Vendor Name', 'Contact Person', 'Phone', 'Email', 'Address', 'City', 'State', 'GST Number', 'Payment Terms'],
+        sampleRow: ['VEN-015', 'Polycab Wires Ltd', 'Suresh Sharma', '+91 98250 11445', 'sales@polycab.com', 'Plot 45, GIDC Industrial Estate', 'Vadodara', 'Gujarat', '24AABCP1234F1Z5', '30 Days Net']
       };
   }
 }
