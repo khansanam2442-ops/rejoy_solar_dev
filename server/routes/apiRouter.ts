@@ -708,7 +708,7 @@ apiRouter.delete('/projects/:id', async (req: Request, res: Response) => {
 // 7. HRMS & WORKFORCE APIS
 // ==========================================================
 
-apiRouter.get('/employees', async (_req: Request, res: Response) => {
+apiRouter.get(['/employees', '/employee'], async (_req: Request, res: Response) => {
   try {
     const items = await dbManager.getEmployees();
     res.json({ success: true, count: items.length, data: items });
@@ -717,14 +717,14 @@ apiRouter.get('/employees', async (_req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/employees', async (req: Request, res: Response) => {
+apiRouter.post(['/employees', '/employee'], async (req: Request, res: Response) => {
   try {
     const payload = req.body;
     const emp = {
       ...payload,
       id: payload.id || `emp-${Date.now()}`,
       employeeCode: payload.employeeCode || `EMP${Math.floor(100 + Math.random() * 900)}`,
-      createdAt: new Date().toISOString()
+      createdAt: payload.createdAt || new Date().toISOString()
     };
     const saved = await dbManager.saveEmployee(emp);
     res.status(201).json({ success: true, data: saved });
@@ -734,7 +734,7 @@ apiRouter.post('/employees', async (req: Request, res: Response) => {
 });
 
 // Batch Employee Import (Excel / CSV Hub)
-apiRouter.post(['/employees/import', '/employees/import/'], async (req: Request, res: Response) => {
+apiRouter.post(['/employees/import', '/employees/import/', '/employee/import', '/employee/import/'], async (req: Request, res: Response) => {
   try {
     const { employees, rows } = req.body || {};
     const list = Array.isArray(employees) ? employees : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
@@ -757,7 +757,7 @@ apiRouter.post(['/employees/import', '/employees/import/'], async (req: Request,
   }
 });
 
-apiRouter.put('/employees/:id', async (req: Request, res: Response) => {
+apiRouter.put(['/employees/:id', '/employee/:id'], async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const payload = req.body;
@@ -768,7 +768,7 @@ apiRouter.put('/employees/:id', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.delete('/employees/:id', async (req: Request, res: Response) => {
+apiRouter.delete(['/employees/:id', '/employee/:id'], async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await dbManager.deleteEmployee(id);

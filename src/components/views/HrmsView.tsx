@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storage';
+import { apiClient } from '../../services/apiClient';
 import { Employee, AttendanceRecord, Payslip, HolidayRecord } from '../../types/solar';
 import { attendanceBelongsToEmployee } from '../../utils/employeeMatching';
 import { getCurrentGPSPosition } from '../../services/gps';
@@ -257,17 +258,30 @@ export const HrmsView: React.FC = () => {
     setIsEmployeeModalOpen(true);
   };
 
-  const handleSaveEmployee = (emp: Employee) => {
+  const handleSaveEmployee = async (emp: Employee) => {
     const isEdit = Boolean(employeeToEdit);
     try {
-      storageService.saveEmployee(emp);
-      const loginMsg = emp.loginEnabled
-        ? ` (ERP Login: ${emp.systemRole || 'Active'})`
+      // 1. Persist directly to backend MySQL API
+      let effectiveEmp = emp;
+      try {
+        const saved = await apiClient.saveEmployee(emp);
+        if (saved && saved.id) {
+          effectiveEmp = { ...emp, ...saved };
+        }
+      } catch (apiErr: any) {
+        console.warn('[HRMS] Direct API save notice, relying on storage sync:', apiErr?.message);
+      }
+
+      // 2. Synchronize local store
+      storageService.saveEmployee(effectiveEmp);
+
+      const loginMsg = effectiveEmp.loginEnabled
+        ? ` (ERP Login: ${effectiveEmp.systemRole || 'Active'})`
         : ' (ERP Login: Disabled)';
       showToast(
         isEdit
-          ? `Employee ${emp.name} (${emp.employeeCode}) updated${loginMsg}`
-          : `Employee ${emp.name} (${emp.employeeCode}) registered${loginMsg}`,
+          ? `Employee ${effectiveEmp.name} (${effectiveEmp.employeeCode}) updated${loginMsg}`
+          : `Employee ${effectiveEmp.name} (${effectiveEmp.employeeCode}) registered${loginMsg}`,
         'success'
       );
       triggerRefresh();

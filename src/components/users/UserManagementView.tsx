@@ -386,6 +386,7 @@ export const UserManagementView: React.FC = () => {
           if (formData.tempPassword && formData.tempPassword.trim().length >= 6) {
             await apiClient.updateUserPassword(editingEmployee.id, formData.tempPassword.trim());
           }
+          await apiClient.saveEmployee(updatedEmp).catch(() => {});
           storageService.saveEmployee(updatedEmp);
           setEmployees(updated);
           showToast(`Employee ${cleanName} updated successfully in MySQL`, 'success');
@@ -412,6 +413,7 @@ export const UserManagementView: React.FC = () => {
         designation: finalDesignation,
         systemRole: finalRole,
         assignedRole: finalRole,
+        authUid: newEmpId,
         isFieldWorker: formData.isFieldWorker,
         loginEnabled: formData.loginEnabled,
         status: formData.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
@@ -437,6 +439,7 @@ export const UserManagementView: React.FC = () => {
           employee_id: cleanCode,
           login_enabled: formData.loginEnabled ? 1 : 0
         });
+        await apiClient.saveEmployee(newEmp).catch(() => {});
         storageService.saveEmployee(newEmp);
         setEmployees([newEmp, ...employees]);
         showToast(`Employee ${newEmp.name} created and saved to MySQL successfully`, 'success');

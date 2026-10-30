@@ -501,49 +501,93 @@ class MySqlDatabaseManager {
         }
       } catch {}
 
-      // Check and migrate columns on solar_employees
+      // Check and migrate table & columns on solar_employee (authoritative employee table)
       try {
-        const [empCols]: any = await this.pool.query("SHOW COLUMNS FROM `solar_employees`");
+        // Ensure base table solar_employee exists
+        await this.pool.query(`
+          CREATE TABLE IF NOT EXISTS \`solar_employee\` (
+            \`id\` VARCHAR(64) PRIMARY KEY,
+            \`employee_code\` VARCHAR(32) NOT NULL UNIQUE,
+            \`name\` VARCHAR(255) NOT NULL,
+            \`photo_url\` TEXT DEFAULT NULL,
+            \`documents_json\` LONGTEXT DEFAULT NULL,
+            \`department\` VARCHAR(64) NOT NULL,
+            \`designation\` VARCHAR(128) NOT NULL,
+            \`phone\` VARCHAR(32) NOT NULL,
+            \`email\` VARCHAR(191) NOT NULL,
+            \`joining_date\` DATE DEFAULT NULL,
+            \`salary_monthly\` DECIMAL(12,2) DEFAULT 0.00,
+            \`status\` VARCHAR(32) DEFAULT 'ACTIVE',
+            \`current_site_location\` VARCHAR(255) DEFAULT '',
+            \`login_enabled\` TINYINT(1) DEFAULT 1,
+            \`auth_uid\` VARCHAR(64) DEFAULT NULL,
+            \`system_role\` VARCHAR(64) DEFAULT 'Super Admin',
+            \`assigned_role\` VARCHAR(64) DEFAULT NULL,
+            \`is_field_worker\` TINYINT(1) DEFAULT 0,
+            \`account_status\` VARCHAR(32) DEFAULT 'ACTIVE',
+            \`account_created_at\` VARCHAR(64) DEFAULT NULL,
+            \`account_created_by\` VARCHAR(255) DEFAULT NULL,
+            \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX \`idx_solar_emp_dept\` (\`department\`),
+            INDEX \`idx_solar_emp_status\` (\`status\`),
+            INDEX \`idx_solar_emp_auth_uid\` (\`auth_uid\`),
+            INDEX \`idx_solar_emp_email\` (\`email\`)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // Check if solar_employees is still a base table instead of a view
+        const [tableTypeRows]: any = await this.pool.query("SHOW FULL TABLES LIKE 'solar_employees'");
+        if (Array.isArray(tableTypeRows) && tableTypeRows.length > 0) {
+          const type = Object.values(tableTypeRows[0])[1];
+          if (type === 'BASE TABLE') {
+            // Copy any records not in solar_employee
+            await this.pool.query(`
+              INSERT IGNORE INTO \`solar_employee\`
+              SELECT * FROM \`solar_employees\`
+            `).catch(() => {});
+            await this.pool.query("DROP TABLE IF EXISTS `solar_employees`");
+          }
+        }
+
+        // Ensure backward-compatible updatable view solar_employees points to solar_employee
+        await this.pool.query("CREATE OR REPLACE VIEW `solar_employees` AS SELECT * FROM `solar_employee`");
+
+        // Verify and migrate all columns on solar_employee
+        const [empCols]: any = await this.pool.query("SHOW COLUMNS FROM `solar_employee`");
         const existingEmpCols = new Set<string>((empCols as any[]).map(c => String(c.Field).toLowerCase()));
 
         if (!existingEmpCols.has('joining_date')) {
-          try {
-            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `joining_date` DATE DEFAULT NULL AFTER `email`");
-            console.log('[MySQL Migration] Successfully added missing joining_date column to solar_employees');
-          } catch (e: any) {
-            console.warn('[MySQL Migration] Notice adding joining_date:', e.message);
-          }
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `joining_date` DATE DEFAULT NULL AFTER `email`").catch(() => {});
         } else {
-          try {
-            await this.pool.query("ALTER TABLE `solar_employees` MODIFY COLUMN `joining_date` DATE DEFAULT NULL");
-          } catch {}
+          await this.pool.query("ALTER TABLE `solar_employee` MODIFY COLUMN `joining_date` DATE DEFAULT NULL").catch(() => {});
         }
 
         if (!existingEmpCols.has('documents_json')) {
-          try {
-            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `documents_json` LONGTEXT DEFAULT NULL AFTER `photo_url`");
-            console.log('[MySQL Migration] Successfully added documents_json column to solar_employees');
-          } catch (e: any) {
-            console.warn('[MySQL Migration] Notice adding documents_json:', e.message);
-          }
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `documents_json` LONGTEXT DEFAULT NULL AFTER `photo_url`").catch(() => {});
+        }
+
+        if (!existingEmpCols.has('auth_uid')) {
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `auth_uid` VARCHAR(64) DEFAULT NULL AFTER `login_enabled`").catch(() => {});
         }
 
         if (!existingEmpCols.has('assigned_role')) {
-          try {
-            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `assigned_role` VARCHAR(64) DEFAULT NULL AFTER `system_role`");
-            console.log('[MySQL Migration] Successfully added assigned_role column to solar_employees');
-          } catch (e: any) {
-            console.warn('[MySQL Migration] Notice adding assigned_role:', e.message);
-          }
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `assigned_role` VARCHAR(64) DEFAULT NULL AFTER `system_role`").catch(() => {});
+        }
+
+        if (!existingEmpCols.has('account_created_at')) {
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `account_created_at` VARCHAR(64) DEFAULT NULL AFTER `account_status`").catch(() => {});
+        }
+
+        if (!existingEmpCols.has('account_created_by')) {
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `account_created_by` VARCHAR(255) DEFAULT NULL AFTER `account_created_at`").catch(() => {});
         }
 
         if (!existingEmpCols.has('updated_at')) {
-          try {
-            await this.pool.query("ALTER TABLE `solar_employees` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
-          } catch {}
+          await this.pool.query("ALTER TABLE `solar_employee` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP").catch(() => {});
         }
       } catch (err: any) {
-        console.warn('[MySQL Migration] Notice verifying solar_employees schema:', err.message);
+        console.warn('[MySQL Migration] Notice verifying solar_employee schema:', err.message);
       }
 
       // Ensure persistent solar_employee_documents table exists
@@ -699,13 +743,21 @@ class MySqlDatabaseManager {
     if (!id) return null;
     if (!this.pool || !this.isConnected) {
       const colMap: Record<string, string> = {
+        solar_customer: 'customers',
         solar_customers: 'customers',
+        solar_lead: 'leads',
         solar_leads: 'leads',
+        solar_project: 'projects',
         solar_projects: 'projects',
+        solar_employee: 'employees',
         solar_employees: 'employees',
+        solar_product: 'products',
         solar_products: 'products',
+        solar_vendor: 'vendors',
         solar_vendors: 'vendors',
+        solar_purchase_order: 'purchase_orders',
         solar_purchase_orders: 'purchase_orders',
+        solar_user: 'users',
         solar_users: 'users'
       };
       const col = colMap[table];
@@ -2130,7 +2182,7 @@ class MySqlDatabaseManager {
     let existingEmps: any[] = [];
     if (this.isConnected && this.pool) {
       try {
-        const [rows]: any = await this.pool.query('SELECT `id`, `employee_code`, `name`, `phone`, `email` FROM `solar_employees`');
+        const [rows]: any = await this.pool.query('SELECT `id`, `employee_code`, `name`, `phone`, `email` FROM `solar_employee`');
         if (Array.isArray(rows)) existingEmps = rows;
       } catch (err: any) {
         console.warn('Notice reading existing employees:', err.message);
@@ -2239,7 +2291,7 @@ class MySqlDatabaseManager {
       if (this.isConnected && this.pool) {
         try {
           const sql = `
-            INSERT INTO \`solar_employees\` (
+            INSERT INTO \`solar_employee\` (
               \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`documents_json\`, \`department\`,
               \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
               \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
@@ -3055,7 +3107,7 @@ class MySqlDatabaseManager {
         console.warn('Notice reading existing attendance:', err.message);
       }
       try {
-        const [eRows]: any = await this.pool.query('SELECT `id`, `employee_code`, `name` FROM `solar_employees`');
+        const [eRows]: any = await this.pool.query('SELECT `id`, `employee_code`, `name` FROM `solar_employee`');
         if (Array.isArray(eRows)) existingEmps = eRows;
       } catch (err: any) {
         console.warn('Notice reading existing employees for attendance:', err.message);
@@ -3340,7 +3392,7 @@ class MySqlDatabaseManager {
   public async getEmployees(): Promise<any[]> {
     if (!this.isConnected) return this.getFallbackItems('employees');
     this.assertDbConnected();
-    const [rows] = await this.pool!.query('SELECT * FROM `solar_employees` ORDER BY `created_at` ASC');
+    const [rows] = await this.pool!.query('SELECT * FROM `solar_employee` ORDER BY `created_at` ASC');
     const existingIds = new Set((rows as any[]).map(r => r.id));
     const existingEmails = new Set((rows as any[]).map(r => (r.email || '').toLowerCase()).filter(Boolean));
 
@@ -3364,7 +3416,9 @@ class MySqlDatabaseManager {
               status: u.status || 'ACTIVE',
               current_site_location: '',
               login_enabled: u.status !== 'DISABLED',
+              auth_uid: u.id,
               system_role: u.role || 'Admin',
+              assigned_role: u.role || 'Admin',
               is_field_worker: Boolean(u.is_field_worker),
               account_status: u.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
               created_at: u.created_at
@@ -3400,6 +3454,18 @@ class MySqlDatabaseManager {
       }
     } catch {}
 
+    const formatSqlDate = (val: any): string | null => {
+      if (!val) return null;
+      if (typeof val === 'string') return val.slice(0, 10);
+      if (val instanceof Date) {
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const d = String(val.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+      return String(val).slice(0, 10);
+    };
+
     const mapped = (rows as any[]).map(r => {
       let docs: any[] = docMap.get(r.id) || [];
       if (docs.length === 0 && r.documents_json) {
@@ -3417,17 +3483,22 @@ class MySqlDatabaseManager {
         documents: docs,
         department: r.department || 'Operations',
         designation: r.designation || 'Staff',
+        assignedRole: r.assigned_role || r.assignedRole || r.system_role || 'Staff',
         phone: r.phone || '',
         email: r.email,
-        joiningDate: r.joining_date || r.joiningDate || null,
+        joiningDate: formatSqlDate(r.joining_date || r.joiningDate),
         salaryMonthly: Number(r.salary_monthly ?? r.salaryMonthly) || 0,
         status: r.status || 'ACTIVE',
         currentSiteLocation: r.current_site_location || r.currentSiteLocation || '',
         loginEnabled: Boolean(r.login_enabled ?? r.loginEnabled ?? true),
+        authUid: r.auth_uid || r.authUid || r.id,
         systemRole: r.system_role || r.systemRole || 'Staff',
         isFieldWorker: Boolean(r.is_field_worker ?? r.isFieldWorker),
         accountStatus: r.account_status || r.accountStatus || 'ACTIVE',
-        createdAt: r.created_at || r.createdAt
+        accountCreatedAt: r.account_created_at || r.accountCreatedAt,
+        accountCreatedBy: r.account_created_by || r.accountCreatedBy,
+        createdAt: r.created_at || r.createdAt,
+        updatedAt: r.updated_at || r.updatedAt
       };
     });
     this.setFallbackItems('employees', mapped);
@@ -3439,7 +3510,7 @@ class MySqlDatabaseManager {
     const item = { ...emp };
     if (!item.createdAt) item.createdAt = new Date().toISOString();
 
-    const existing = await this.getExistingRow('solar_employees', item.id);
+    const existing = await this.getExistingRow('solar_employee', item.id);
     const employeeCode = item.employeeCode ?? item.employee_code ?? existing?.employee_code ?? item.id;
     const name = item.name ?? existing?.name ?? (item.firstName ? `${item.firstName} ${item.lastName || ''}`.trim() : 'Employee');
     const photoUrl = item.photoUrl ?? item.photo_url ?? existing?.photo_url ?? '';
@@ -3456,27 +3527,43 @@ class MySqlDatabaseManager {
     const status = item.status ?? existing?.status ?? 'ACTIVE';
     const currentSiteLocation = item.currentSiteLocation ?? item.current_site_location ?? existing?.current_site_location ?? '';
     const loginEnabled = (item.loginEnabled !== undefined ? item.loginEnabled : (existing?.login_enabled !== undefined ? existing.login_enabled : true)) ? 1 : 0;
+    const authUid = item.authUid ?? item.auth_uid ?? existing?.auth_uid ?? item.id;
     const systemRole = item.systemRole ?? item.system_role ?? existing?.system_role ?? 'Super Admin';
+    const assignedRole = item.assignedRole ?? item.assigned_role ?? existing?.assigned_role ?? systemRole;
     const isFieldWorker = (item.isFieldWorker !== undefined ? item.isFieldWorker : (existing?.is_field_worker !== undefined ? existing.is_field_worker : false)) ? 1 : 0;
     const accountStatus = item.accountStatus ?? item.account_status ?? existing?.account_status ?? 'ACTIVE';
+    const accountCreatedAt = item.accountCreatedAt ?? item.account_created_at ?? existing?.account_created_at ?? null;
+    const accountCreatedBy = item.accountCreatedBy ?? item.account_created_by ?? existing?.account_created_by ?? null;
 
     const sql = `
-      INSERT INTO \`solar_employees\` (
+      INSERT INTO \`solar_employee\` (
         \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`documents_json\`, \`department\`,
         \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
-        \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
-        \`is_field_worker\`, \`account_status\`
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        \`status\`, \`current_site_location\`, \`login_enabled\`, \`auth_uid\`, \`system_role\`,
+        \`assigned_role\`, \`is_field_worker\`, \`account_status\`, \`account_created_at\`, \`account_created_by\`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        \`name\` = VALUES(\`name\`), \`photo_url\` = VALUES(\`photo_url\`),
+        \`employee_code\` = VALUES(\`employee_code\`),
+        \`name\` = VALUES(\`name\`),
+        \`photo_url\` = VALUES(\`photo_url\`),
         \`documents_json\` = VALUES(\`documents_json\`),
-        \`department\` = VALUES(\`department\`), \`designation\` = VALUES(\`designation\`),
-        \`phone\` = VALUES(\`phone\`), \`email\` = VALUES(\`email\`),
+        \`department\` = VALUES(\`department\`),
+        \`designation\` = VALUES(\`designation\`),
+        \`phone\` = VALUES(\`phone\`),
+        \`email\` = VALUES(\`email\`),
         \`joining_date\` = VALUES(\`joining_date\`),
-        \`salary_monthly\` = VALUES(\`salary_monthly\`), \`status\` = VALUES(\`status\`),
+        \`salary_monthly\` = VALUES(\`salary_monthly\`),
+        \`status\` = VALUES(\`status\`),
         \`current_site_location\` = VALUES(\`current_site_location\`),
-        \`login_enabled\` = VALUES(\`login_enabled\`), \`system_role\` = VALUES(\`system_role\`),
-        \`is_field_worker\` = VALUES(\`is_field_worker\`), \`account_status\` = VALUES(\`account_status\`)
+        \`login_enabled\` = VALUES(\`login_enabled\`),
+        \`auth_uid\` = VALUES(\`auth_uid\`),
+        \`system_role\` = VALUES(\`system_role\`),
+        \`assigned_role\` = VALUES(\`assigned_role\`),
+        \`is_field_worker\` = VALUES(\`is_field_worker\`),
+        \`account_status\` = VALUES(\`account_status\`),
+        \`account_created_at\` = COALESCE(VALUES(\`account_created_at\`), \`solar_employee\`.\`account_created_at\`),
+        \`account_created_by\` = COALESCE(VALUES(\`account_created_by\`), \`solar_employee\`.\`account_created_by\`),
+        \`updated_at\` = CURRENT_TIMESTAMP
     `;
     await this.pool!.query(sql, [
       item.id,
@@ -3493,9 +3580,13 @@ class MySqlDatabaseManager {
       status,
       currentSiteLocation,
       loginEnabled,
+      authUid,
       systemRole,
+      assignedRole,
       isFieldWorker,
-      accountStatus
+      accountStatus,
+      accountCreatedAt,
+      accountCreatedBy
     ]);
 
     // Synchronize documents into solar_employee_documents audit table
@@ -3541,8 +3632,8 @@ class MySqlDatabaseManager {
     if (loginEnabled && this.pool) {
       try {
         const [existingUserRows]: any = await this.pool.query(
-          'SELECT id, password FROM `solar_users` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1',
-          [item.id, email.toLowerCase()]
+          'SELECT id, password FROM `solar_users` WHERE `id` = ? OR `employee_id` = ? OR LOWER(`email`) = ? LIMIT 1',
+          [item.id, employeeCode, email.toLowerCase()]
         );
         const existingUser = Array.isArray(existingUserRows) && existingUserRows.length > 0 ? existingUserRows[0] : null;
         let passwordHash = existingUser?.password;
@@ -3558,6 +3649,7 @@ class MySqlDatabaseManager {
         }
 
         const userStatus = (status === 'INACTIVE' || accountStatus === 'DISABLED') ? 'DISABLED' : 'ACTIVE';
+        const targetUserId = existingUser?.id || item.id;
         await this.pool.query(`
           INSERT INTO \`solar_users\` (
             \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
@@ -3574,7 +3666,7 @@ class MySqlDatabaseManager {
             \`status\` = VALUES(\`status\`)
             ${rawPass ? ', `password` = VALUES(`password`)' : ''}
         `, [
-          item.id,
+          targetUserId,
           name,
           email.toLowerCase(),
           passwordHash,
@@ -3608,8 +3700,8 @@ class MySqlDatabaseManager {
     this.assertDbConnected();
     if (this.pool) {
       await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `employee_id` = ?', [id]).catch(() => {});
-      await this.pool.query('DELETE FROM `solar_employees` WHERE `id` = ?', [id]);
-      await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]).catch(() => {});
+      await this.pool.query('DELETE FROM `solar_employee` WHERE `id` = ?', [id]);
+      await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ? OR `employee_id` = ?', [id, id]).catch(() => {});
     }
     const items = this.getFallbackItems('employees').filter(e => e.id !== id);
     this.setFallbackItems('employees', items);
@@ -3659,7 +3751,7 @@ class MySqlDatabaseManager {
         doc.filePath, doc.fileUrl, mimeType, fileSize, uploadedBy, notes
       ]);
 
-      // Sync documents_json in solar_employees
+      // Sync documents_json in solar_employee
       try {
         const [rows]: any = await this.pool.query(
           'SELECT * FROM `solar_employee_documents` WHERE `employee_id` = ? ORDER BY `uploaded_at` DESC',
@@ -3678,7 +3770,7 @@ class MySqlDatabaseManager {
           uploadedBy: d.uploaded_by,
           notes: d.notes
         })));
-        await this.pool.query('UPDATE `solar_employees` SET `documents_json` = ? WHERE `id` = ?', [docsJson, doc.employeeId]);
+        await this.pool.query('UPDATE `solar_employee` SET `documents_json` = ? WHERE `id` = ?', [docsJson, doc.employeeId]);
       } catch {}
     }
 
@@ -3716,7 +3808,7 @@ class MySqlDatabaseManager {
 
       await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `id` = ? AND `employee_id` = ?', [docId, employeeId]);
 
-      // Sync documents_json in solar_employees
+      // Sync documents_json in solar_employee
       try {
         const [rows]: any = await this.pool.query(
           'SELECT * FROM `solar_employee_documents` WHERE `employee_id` = ? ORDER BY `uploaded_at` DESC',
@@ -3735,7 +3827,7 @@ class MySqlDatabaseManager {
           uploadedBy: d.uploaded_by,
           notes: d.notes
         })));
-        await this.pool.query('UPDATE `solar_employees` SET `documents_json` = ? WHERE `id` = ?', [docsJson, employeeId]);
+        await this.pool.query('UPDATE `solar_employee` SET `documents_json` = ? WHERE `id` = ?', [docsJson, employeeId]);
       } catch {}
     }
     return true;
@@ -3769,7 +3861,7 @@ class MySqlDatabaseManager {
 
   public async updateEmployeePhoto(id: string, photoUrl: string): Promise<boolean> {
     if (this.pool) {
-      await this.pool.query('UPDATE `solar_employees` SET `photo_url` = ? WHERE `id` = ?', [photoUrl, id]);
+      await this.pool.query('UPDATE `solar_employee` SET `photo_url` = ? WHERE `id` = ?', [photoUrl, id]);
       await this.pool.query('UPDATE `solar_users` SET `photo_url` = ? WHERE `id` = ? OR `employee_id` = ?', [photoUrl, id, id]).catch(() => {});
     }
     const items = this.getFallbackItems('employees');
@@ -5583,22 +5675,25 @@ class MySqlDatabaseManager {
       try {
         const empCode = employeeId || `EMP-${canonicalId.replace(/[^0-9]/g, '').slice(-3) || '001'}`;
         await this.pool.query(`
-          INSERT INTO \`solar_employees\` (
+          INSERT INTO \`solar_employee\` (
             \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
             \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
-            \`status\`, \`current_site_location\`, \`login_enabled\`, \`system_role\`,
-            \`is_field_worker\`, \`account_status\`
-          ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', 1, ?, ?, ?)
+            \`status\`, \`current_site_location\`, \`login_enabled\`, \`auth_uid\`, \`system_role\`,
+            \`assigned_role\`, \`is_field_worker\`, \`account_status\`
+          ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', 1, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             \`name\` = VALUES(\`name\`),
             \`department\` = VALUES(\`department\`),
             \`designation\` = VALUES(\`designation\`),
             \`phone\` = VALUES(\`phone\`),
             \`email\` = VALUES(\`email\`),
+            \`auth_uid\` = VALUES(\`auth_uid\`),
             \`system_role\` = VALUES(\`system_role\`),
+            \`assigned_role\` = VALUES(\`assigned_role\`),
             \`is_field_worker\` = VALUES(\`is_field_worker\`),
             \`status\` = VALUES(\`status\`),
-            \`account_status\` = VALUES(\`account_status\`)
+            \`account_status\` = VALUES(\`account_status\`),
+            \`updated_at\` = CURRENT_TIMESTAMP
         `, [
           canonicalId,
           empCode,
@@ -5608,6 +5703,8 @@ class MySqlDatabaseManager {
           phone,
           email,
           status === 'DISABLED' ? 'INACTIVE' : 'ACTIVE',
+          canonicalId,
+          role,
           role,
           isFieldWorker,
           status === 'DISABLED' ? 'DISABLED' : 'ACTIVE'
@@ -5642,7 +5739,7 @@ class MySqlDatabaseManager {
     this.assertDbConnected();
     if (this.pool) {
       await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]);
-      await this.pool.query('DELETE FROM `solar_employees` WHERE `id` = ?', [id]).catch(() => {});
+      await this.pool.query('DELETE FROM `solar_employee` WHERE `id` = ?', [id]).catch(() => {});
     }
     const items = this.getFallbackItems('users').filter(u => u.id !== id);
     this.setFallbackItems('users', items);
@@ -5859,6 +5956,7 @@ class MySqlDatabaseManager {
       case 'customers': return this.saveCustomer(item);
       case 'leads': return this.saveLead(item);
       case 'projects': return this.saveProject(item);
+      case 'employee':
       case 'employees': return this.saveEmployee(item);
       case 'payments': return this.savePayment(item);
       case 'expenses': return this.saveExpense(item);
@@ -5896,6 +5994,7 @@ class MySqlDatabaseManager {
       case 'customers': return this.deleteCustomer(id);
       case 'leads': return this.deleteLead(id);
       case 'projects': return this.deleteProject(id);
+      case 'employee':
       case 'employees': return this.deleteEmployee(id);
       case 'payments': return this.deletePayment(id);
       case 'expenses': return this.deleteExpense(id);
@@ -6122,7 +6221,7 @@ class MySqlDatabaseManager {
 
     try {
       await this.pool!.query(
-        'INSERT INTO `solar_employees` (`id`, `employee_code`, `name`, `email`, `phone`, `department`, `designation`, `system_role`, `assigned_role`, `login_enabled`, `account_status`, `status`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
+        'INSERT INTO `solar_employee` (`id`, `employee_code`, `name`, `email`, `phone`, `department`, `designation`, `system_role`, `assigned_role`, `login_enabled`, `auth_uid`, `account_status`, `status`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
         [
           userObj.id,
           empCode,
@@ -6133,6 +6232,7 @@ class MySqlDatabaseManager {
           userObj.designation,
           'Admin',
           'Admin',
+          userObj.id,
           'ACTIVE',
           'ACTIVE'
         ]

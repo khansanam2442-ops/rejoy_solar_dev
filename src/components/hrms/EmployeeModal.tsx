@@ -260,7 +260,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         designation: employeeToEdit.designation || '',
         phone: employeeToEdit.phone || '',
         email: employeeToEdit.email || '',
-        joiningDate: employeeToEdit.joiningDate || new Date().toISOString().slice(0, 10),
+        joiningDate: employeeToEdit.joiningDate ? String(employeeToEdit.joiningDate).slice(0, 10) : new Date().toISOString().slice(0, 10),
         salaryMonthly: Number(employeeToEdit.salaryMonthly) || 0,
         status: employeeToEdit.status || 'ACTIVE',
         photoUrl: employeeToEdit.photoUrl || '',
@@ -666,9 +666,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       setPassword('');
       setConfirmPassword('');
 
+      // Authoritative employee ID resolution: preserve existing ID on edit, or use provisioned auth UID, or generate code-based ID
+      const effectiveId = employeeToEdit
+        ? employeeToEdit.id
+        : (linkedAuthUid || (formData.employeeCode ? `emp-${formData.employeeCode.toLowerCase().replace(/[^a-z0-9]/g, '')}` : `emp-${Date.now()}`));
+
       // Build safe final employee model with NO PLAINTEXT PASSWORD
       const finalEmployee: Employee = {
-        id: employeeToEdit ? employeeToEdit.id : `emp-${Date.now()}`,
+        id: effectiveId,
         name: formData.name.trim(),
         employeeCode: formData.employeeCode.trim().toUpperCase(),
         department: formData.department,
@@ -683,8 +688,9 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
         // Safe account linkage fields only
         loginEnabled: loginEnabled,
-        authUid: linkedAuthUid,
+        authUid: linkedAuthUid || effectiveId,
         systemRole: systemRole,
+        assignedRole: systemRole,
         accountStatus: loginEnabled ? accountStatus : 'DISABLED',
         accountCreatedAt: employeeToEdit?.accountCreatedAt || (loginEnabled ? new Date().toISOString() : undefined),
         accountCreatedBy: employeeToEdit?.accountCreatedBy || (loginEnabled ? (currentUser?.name || 'System Administrator') : undefined),
@@ -692,6 +698,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         // HR Documents
         documents: documents,
 
+        createdAt: employeeToEdit?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
 
