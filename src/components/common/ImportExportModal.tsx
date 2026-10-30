@@ -130,6 +130,55 @@ export const ImportExportModal: React.FC = () => {
           p.city || ''
         ]);
         break;
+      case 'Products':
+        rows = storageService.getProducts().map(p => [
+          p.sku,
+          p.name,
+          p.category,
+          p.brand || '',
+          p.model || '',
+          p.unit,
+          p.hsnCode,
+          p.gstRate,
+          p.unitPrice,
+          p.currentStock,
+          p.minStockThreshold || p.reorderLevel || 10
+        ]);
+        break;
+      case 'Vendors':
+        rows = storageService.getVendors().map(v => [
+          v.vendorCode,
+          v.name,
+          v.contactPerson || '',
+          v.phone,
+          v.email,
+          v.address,
+          v.city,
+          v.state,
+          v.gstNumber,
+          v.paymentTerms
+        ]);
+        break;
+      case 'Attendance':
+        rows = storageService.getAttendance().map(a => [
+          a.employeeName,
+          a.attendanceDate || a.date || '',
+          a.checkInTime || '09:00:00',
+          a.checkOutTime || '18:00:00',
+          a.status,
+          a.siteLocation || a.siteProjectTitle || ''
+        ]);
+        break;
+      case 'Service':
+        rows = storageService.getServiceTickets().map(s => [
+          s.ticketId || s.ticketNumber || '',
+          s.customerName,
+          s.issue || s.title || '',
+          s.category,
+          s.priority,
+          s.status
+        ]);
+        break;
       default:
         rows = [tmpl.sampleRow];
     }
@@ -187,34 +236,6 @@ export const ImportExportModal: React.FC = () => {
         } else {
           showToast('No customer records were imported.', 'error');
         }
-      } else if (importExportModule === 'Leads') {
-        report.validRecords.forEach(l => storageService.saveLead(l));
-        setImportResult({
-          success: true,
-          total: report.totalRows,
-          imported: report.validRecords.length,
-          skipped: report.skipped || 0,
-          failed: report.failed || 0,
-          skippedRecords: report.skippedRecords || [],
-          failedRecords: report.failedRecords || [],
-          errors: report.errors || []
-        });
-        showToast(`Imported ${report.validRecords.length} leads successfully`, 'success');
-        triggerRefresh();
-      } else if (importExportModule === 'Employees') {
-        report.validRecords.forEach(e => storageService.saveEmployee(e));
-        setImportResult({
-          success: true,
-          total: report.totalRows,
-          imported: report.validRecords.length,
-          skipped: report.skipped || 0,
-          failed: report.failed || 0,
-          skippedRecords: report.skippedRecords || [],
-          failedRecords: report.failedRecords || [],
-          errors: report.errors || []
-        });
-        showToast(`Imported ${report.validRecords.length} employees successfully`, 'success');
-        triggerRefresh();
       } else if (importExportModule === 'Projects') {
         const result = await storageService.importProjects(report.validRecords);
         const summary: ImportExecutionSummary = {
@@ -242,6 +263,230 @@ export const ImportExportModal: React.FC = () => {
           showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
         } else {
           showToast('No project records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Leads') {
+        const result = await storageService.importLeads(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} lead(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No lead records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Employees') {
+        const result = await storageService.importEmployees(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} employee(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No employee records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Products') {
+        const result = await storageService.importProducts(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} product(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No product records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Vendors') {
+        const result = await storageService.importVendors(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} vendor(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No vendor records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Payments') {
+        const result = await storageService.importPayments(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} payment(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No payment records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Expenses') {
+        const result = await storageService.importExpenses(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} expense(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No expense records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Attendance') {
+        const result = await storageService.importAttendance(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} attendance record(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No attendance records were imported.', 'error');
+        }
+      } else if (importExportModule === 'Service') {
+        const result = await storageService.importServiceTickets(report.validRecords);
+        const summary: ImportExecutionSummary = {
+          success: result.success,
+          total: report.totalRows,
+          imported: result.imported,
+          skipped: (result.skipped ?? 0) + (report.skipped ?? 0),
+          failed: (result.failed ?? 0) + (report.failed ?? 0),
+          skippedRecords: [
+            ...(report.skippedRecords || []),
+            ...(result.skippedRecords || [])
+          ],
+          failedRecords: [
+            ...(report.failedRecords || []),
+            ...(result.failedRecords || [])
+          ],
+          errors: [...(report.errors || []), ...(result.errors || [])]
+        };
+        setImportResult(summary);
+
+        if (result.imported > 0) {
+          showToast(`Successfully saved ${result.imported} service ticket(s) to MySQL!`, 'success');
+          triggerRefresh();
+        } else if (summary.skipped > 0) {
+          showToast(`0 records imported: ${summary.skipped} skipped as duplicates.`, 'info');
+        } else {
+          showToast('No service ticket records were imported.', 'error');
         }
       }
     } catch (err: any) {

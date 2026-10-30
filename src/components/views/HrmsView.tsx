@@ -543,7 +543,7 @@ export const HrmsView: React.FC = () => {
           {/* Excel Hub */}
           <button
             type="button"
-            onClick={() => openImportExportModal('Employees')}
+            onClick={() => openImportExportModal(activeTab === 'ATTENDANCE' ? 'Attendance' : 'Employees')}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />

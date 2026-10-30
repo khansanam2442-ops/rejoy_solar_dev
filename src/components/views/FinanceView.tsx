@@ -122,8 +122,8 @@ export const FinanceView: React.FC = () => {
           )}
 
           <button
-            onClick={() => openImportExportModal('Payments')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors"
+            onClick={() => openImportExportModal(activeTab === 'EXPENSES' ? 'Expenses' : 'Payments')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
             <span>Excel Hub</span>

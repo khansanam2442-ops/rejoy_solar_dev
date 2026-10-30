@@ -207,6 +207,13 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
   const batchCustomers: Customer[] = [...storageService.getCustomers()];
   const batchEmployees: Employee[] = [...storageService.getEmployees()];
   const batchProjects: SolarProject[] = [...storageService.getProjects()];
+  const batchLeads: Lead[] = [...storageService.getLeads()];
+  const batchProducts: ProductItem[] = [...storageService.getProducts()];
+  const batchVendors: Vendor[] = [...storageService.getVendors()];
+  const batchPayments: PaymentRecord[] = [...storageService.getPayments()];
+  const batchExpenses: ExpenseRecord[] = [...storageService.getExpenses()];
+  const batchAttendance: AttendanceRecord[] = [...storageService.getAttendance()];
+  const batchServiceTickets: ServiceTicket[] = [...storageService.getServiceTickets()];
 
   // Helper for flexible date parsing
   const parseDateStr = (raw: string | undefined): string | undefined => {
@@ -249,6 +256,94 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
   const projExpIdx = findColIdx(headerRow, ['expected completion', 'completion date', 'expected completion date', 'due date', 'target date', 'end date'], 7);
   const projAddrIdx = findColIdx(headerRow, ['site address', 'address', 'location', 'site location', 'premises'], 8);
   const projCityIdx = findColIdx(headerRow, ['city', 'district', 'town'], 9);
+
+  // Column resolvers for Leads
+  const leadNameIdx = findColIdx(headerRow, ['customer name', 'name', 'client name', 'client', 'lead name'], 0);
+  const leadCompIdx = findColIdx(headerRow, ['company name', 'company', 'organization', 'firm', 'business'], 1);
+  const leadPhoneIdx = findColIdx(headerRow, ['phone', 'mobile', 'contact', 'phone number', 'contact number'], 2);
+  const leadEmailIdx = findColIdx(headerRow, ['email', 'email address', 'mail'], 3);
+  const leadAddrIdx = findColIdx(headerRow, ['address', 'site address', 'street', 'location'], 4);
+  const leadCityIdx = findColIdx(headerRow, ['city', 'district', 'town'], 5);
+  const leadCapIdx = findColIdx(headerRow, ['solar capacity (kw)', 'solar capacity', 'capacity (kw)', 'capacity kw', 'capacity', 'load', 'kw'], 6);
+  const leadValIdx = findColIdx(headerRow, ['estimated value (inr)', 'estimated value', 'estimated amount', 'value', 'amount', 'budget'], 7);
+  const leadSourceIdx = findColIdx(headerRow, ['source', 'lead source', 'channel'], 8);
+  const leadStatIdx = findColIdx(headerRow, ['status', 'lead status', 'stage'], 9);
+  const leadNotesIdx = findColIdx(headerRow, ['notes', 'remarks', 'comment'], -1);
+
+  // Column resolvers for Employees
+  const empCodeIdx = findColIdx(headerRow, ['employee code', 'emp code', 'code', 'emp id', 'employee id'], 0);
+  const empNameIdx = findColIdx(headerRow, ['name', 'employee name', 'full name', 'staff name'], 1);
+  const empDeptIdx = findColIdx(headerRow, ['department', 'dept'], 2);
+  const empDesigIdx = findColIdx(headerRow, ['designation', 'role', 'title', 'position'], 3);
+  const empPhoneIdx = findColIdx(headerRow, ['phone', 'mobile', 'contact', 'phone number', 'contact number'], 4);
+  const empEmailIdx = findColIdx(headerRow, ['email', 'email address', 'mail'], 5);
+  const empDateIdx = findColIdx(headerRow, ['joining date', 'date of joining', 'doj', 'start date'], 6);
+  const empSalIdx = findColIdx(headerRow, ['monthly salary', 'salary', 'salary monthly', 'monthly pay', 'ctc'], 7);
+  const empStatIdx = findColIdx(headerRow, ['status', 'employment status'], -1);
+  const empRoleIdx = findColIdx(headerRow, ['system role', 'role', 'access role', 'app role'], -1);
+  const empFieldIdx = findColIdx(headerRow, ['is field worker', 'field worker', 'field employee'], -1);
+
+  // Column resolvers for Products
+  const prodSkuIdx = findColIdx(headerRow, ['sku', 'item code', 'product code', 'part number', 'code'], 0);
+  const prodNameIdx = findColIdx(headerRow, ['product name', 'name', 'item name', 'description', 'title'], 1);
+  const prodCatIdx = findColIdx(headerRow, ['category', 'item category', 'type', 'product category'], 2);
+  const prodBrandIdx = findColIdx(headerRow, ['brand', 'make', 'manufacturer'], 3);
+  const prodModelIdx = findColIdx(headerRow, ['model', 'model number', 'model no'], 4);
+  const prodUnitIdx = findColIdx(headerRow, ['unit', 'uom', 'measuring unit'], 5);
+  const prodHsnIdx = findColIdx(headerRow, ['hsn code', 'hsn', 'hsn/sac', 'sac code'], 6);
+  const prodGstIdx = findColIdx(headerRow, ['gst rate (%)', 'gst rate', 'gst %', 'gst', 'tax rate'], 7);
+  const prodPriceIdx = findColIdx(headerRow, ['unit price (inr)', 'unit price', 'price', 'rate', 'cost', 'selling price'], 8);
+  const prodStockIdx = findColIdx(headerRow, ['current stock', 'stock', 'quantity', 'qty', 'stock qty'], 9);
+  const prodReorderIdx = findColIdx(headerRow, ['reorder level', 'min stock', 'minimum stock', 'reorder point', 'reorder qty'], 10);
+
+  // Column resolvers for Vendors
+  const vndCodeIdx = findColIdx(headerRow, ['vendor code', 'code', 'vendor id', 'supplier code'], 0);
+  const vndNameIdx = findColIdx(headerRow, ['vendor name', 'name', 'supplier name', 'company', 'company name'], 1);
+  const vndContactIdx = findColIdx(headerRow, ['contact person', 'contact name', 'person', 'representative'], 2);
+  const vndPhoneIdx = findColIdx(headerRow, ['phone', 'mobile', 'contact number', 'phone number', 'contact'], 3);
+  const vndEmailIdx = findColIdx(headerRow, ['email', 'email address', 'mail'], 4);
+  const vndAddrIdx = findColIdx(headerRow, ['address', 'office address', 'street', 'premises'], 5);
+  const vndCityIdx = findColIdx(headerRow, ['city', 'district', 'town'], 6);
+  const vndStateIdx = findColIdx(headerRow, ['state', 'province'], 7);
+  const vndGstIdx = findColIdx(headerRow, ['gst number', 'gstin', 'gst', 'gst no'], 8);
+  const vndTermsIdx = findColIdx(headerRow, ['payment terms', 'terms', 'credit terms'], 9);
+
+  // Column resolvers for Payments
+  const payRcptIdx = findColIdx(headerRow, ['receipt number', 'receipt no', 'receipt', 'voucher no', 'rcpt no'], 0);
+  const payCustIdx = findColIdx(headerRow, ['customer name', 'client name', 'customer', 'client', 'name'], 1);
+  const payMileIdx = findColIdx(headerRow, ['milestone', 'payment milestone', 'stage', 'description'], 2);
+  const payAmtIdx = findColIdx(headerRow, ['amount (inr)', 'amount', 'total amount', 'received amount', 'paid amount'], 3);
+  const payStatIdx = findColIdx(headerRow, ['status', 'payment status'], 4);
+  const payDueIdx = findColIdx(headerRow, ['due date', 'target date', 'expected date'], 5);
+  const payPaidIdx = findColIdx(headerRow, ['paid date', 'payment date', 'receipt date', 'date'], 6);
+  const payModeIdx = findColIdx(headerRow, ['payment mode', 'mode', 'method', 'payment method'], 7);
+  const payRefIdx = findColIdx(headerRow, ['reference', 'transaction reference', 'ref no', 'txn id', 'transaction id', 'cheque no'], 8);
+
+  // Column resolvers for Expenses
+  const expNumIdx = findColIdx(headerRow, ['expense number', 'expense no', 'voucher no', 'exp no', 'number'], 0);
+  const expVndIdx = findColIdx(headerRow, ['vendor name', 'vendor', 'payee', 'supplier', 'name'], 1);
+  const expCatIdx = findColIdx(headerRow, ['category', 'expense category', 'type'], 2);
+  const expAmtIdx = findColIdx(headerRow, ['amount (inr)', 'amount', 'total', 'cost', 'expense amount'], 3);
+  const expDateIdx = findColIdx(headerRow, ['date', 'expense date', 'bill date'], 4);
+  const expModeIdx = findColIdx(headerRow, ['payment mode', 'mode', 'method'], 5);
+  const expRefIdx = findColIdx(headerRow, ['reference no', 'reference', 'invoice no', 'bill no', 'ref no', 'txn id'], 6);
+  const expNotesIdx = findColIdx(headerRow, ['notes', 'description', 'remarks', 'memo'], 7);
+
+  // Column resolvers for Attendance
+  const attNameIdx = findColIdx(headerRow, ['employee name', 'name', 'staff name', 'employee'], 0);
+  const attDateIdx = findColIdx(headerRow, ['date', 'attendance date', 'day'], 1);
+  const attInIdx = findColIdx(headerRow, ['check in time', 'check in', 'in time', 'time in', 'login time'], 2);
+  const attOutIdx = findColIdx(headerRow, ['check out time', 'check out', 'out time', 'time out', 'logout time'], 3);
+  const attStatIdx = findColIdx(headerRow, ['status', 'attendance status'], 4);
+  const attLocIdx = findColIdx(headerRow, ['site location', 'site', 'location', 'project site', 'project'], 5);
+
+  // Column resolvers for Service
+  const srvIdIdx = findColIdx(headerRow, ['ticket id', 'ticket number', 'ticket no', 'srv no', 'id'], 0);
+  const srvCustIdx = findColIdx(headerRow, ['customer name', 'client name', 'customer', 'client', 'name'], 1);
+  const srvIssueIdx = findColIdx(headerRow, ['issue', 'description', 'problem', 'subject', 'title'], 2);
+  const srvCatIdx = findColIdx(headerRow, ['category', 'ticket category', 'issue type', 'type'], 3);
+  const srvPriIdx = findColIdx(headerRow, ['priority', 'urgency', 'severity'], 4);
+  const srvStatIdx = findColIdx(headerRow, ['status', 'ticket status'], 5);
 
   dataRows.forEach((cols, index) => {
     const rowNum = index + 2;
@@ -325,80 +420,119 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
       validRecords.push(newCust);
       successful++;
     } else if (module === 'Leads') {
-      const name = cols[0] || '';
-      const companyName = cols[1] || '';
-      const phone = cols[2] || '';
-      const email = cols[3] || '';
-      const address = cols[4] || '';
-      const city = cols[5] || 'Ahmedabad';
-      const capacity = Number(cols[6]) || 10;
-      const estValue = Number(cols[7]) || capacity * 50000;
-      const source = cols[8] || 'Website';
-      const status = (cols[9] || 'NEW') as Lead['status'];
+      const customerName = (cols[leadNameIdx] ?? '').trim();
+      const companyName = (leadCompIdx >= 0 ? cols[leadCompIdx] : '')?.trim() || '';
+      const phone = (cols[leadPhoneIdx] ?? '').trim();
+      const email = (leadEmailIdx >= 0 ? cols[leadEmailIdx] : '')?.trim() || '';
+      const address = (leadAddrIdx >= 0 ? cols[leadAddrIdx] : '')?.trim() || '';
+      const city = (leadCityIdx >= 0 ? cols[leadCityIdx] : '')?.trim() || 'Ahmedabad';
+      const rawCap = (leadCapIdx >= 0 ? cols[leadCapIdx] : '')?.replace(/[^0-9.]/g, '');
+      const solarCapacityKw = parseFloat(rawCap) || 10;
+      const rawVal = (leadValIdx >= 0 ? cols[leadValIdx] : '')?.replace(/[^0-9.]/g, '');
+      const estimatedValue = parseFloat(rawVal) || Math.round(solarCapacityKw * 48000);
+      const source = (leadSourceIdx >= 0 ? cols[leadSourceIdx] : '')?.trim() || 'Website';
+      const rawStat = (leadStatIdx >= 0 ? cols[leadStatIdx] : '')?.trim().toUpperCase();
+      const status = (['NEW', 'CONTACTED', 'QUALIFIED', 'PROPOSAL_SENT', 'NEGOTIATION', 'WON', 'LOST'].includes(rawStat)
+        ? rawStat
+        : 'NEW') as Lead['status'];
+      const notes = (leadNotesIdx >= 0 ? cols[leadNotesIdx] : '')?.trim() || 'Imported via CSV Hub';
 
-      if (!name) {
+      if (!customerName) {
         failed++;
         failedRecords.push({ row: rowNum, reason: 'Customer name is mandatory.' });
         errors.push(`Row ${rowNum}: Customer name is mandatory.`);
         return;
       }
-      if (!phone || phone.replace(/\D/g, '').length < 7) {
+
+      const phoneDigits = phone.replace(/\D/g, '');
+      if (phoneDigits.length < 7) {
         failed++;
-        failedRecords.push({ row: rowNum, reason: 'Valid phone number is required.' });
-        errors.push(`Row ${rowNum}: Valid phone number is required.`);
+        failedRecords.push({ row: rowNum, reason: `Valid phone number is required (got "${phone || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid phone number is required (got "${phone || 'empty'}").`);
+        return;
+      }
+
+      const dupCheck = validateLead({ customerName, companyName, phone, email }, batchLeads);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: customerName, reason: dupCheck.message || 'Duplicate lead record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
         return;
       }
 
       const newLead: Lead = {
         id: `lead-import-${Date.now()}-${rowNum}`,
-        customerName: name,
+        customerName,
         companyName,
         phone,
         email,
         address,
         city,
-        solarCapacityKw: capacity,
-        estimatedValue: estValue,
+        solarCapacityKw,
+        estimatedValue,
         source,
         status,
-        notes: 'Imported via CSV',
+        notes,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      batchLeads.push(newLead);
       validRecords.push(newLead);
       successful++;
     } else if (module === 'Employees') {
-      const code = cols[0];
-      const name = cols[1];
-      const phone = cols[4] || '';
-      const email = cols[5] || '';
-      if (!code || !name) {
+      const name = (cols[empNameIdx] ?? '').trim();
+      let code = (cols[empCodeIdx] ?? '').trim();
+      const department = ((empDeptIdx >= 0 ? cols[empDeptIdx] : '')?.trim() || 'Operations') as Employee['department'];
+      const designation = (empDesigIdx >= 0 ? cols[empDesigIdx] : '')?.trim() || 'Staff';
+      const phone = (empPhoneIdx >= 0 ? cols[empPhoneIdx] : '')?.trim() || '';
+      let email = (empEmailIdx >= 0 ? cols[empEmailIdx] : '')?.trim().toLowerCase() || '';
+      const joiningDate = parseDateStr(empDateIdx >= 0 ? cols[empDateIdx] : '') || new Date().toISOString().slice(0, 10);
+      const rawSalary = (empSalIdx >= 0 ? cols[empSalIdx] : '')?.replace(/[^0-9.]/g, '');
+      const salaryMonthly = parseFloat(rawSalary) || 0;
+      const rawStatus = (empStatIdx >= 0 ? cols[empStatIdx] : '')?.trim().toUpperCase();
+      const status = (rawStatus === 'INACTIVE' || rawStatus === 'DISABLED' ? rawStatus : 'ACTIVE') as Employee['status'];
+      const systemRole = (empRoleIdx >= 0 ? cols[empRoleIdx] : '')?.trim() || 'Staff Member';
+      const isFieldWorker = (empFieldIdx >= 0 ? ['true', 'yes', '1'].includes(String(cols[empFieldIdx]).trim().toLowerCase()) : false);
+
+      if (!name) {
         failed++;
-        failedRecords.push({ row: rowNum, reason: 'Employee code and name are mandatory.' });
-        errors.push(`Row ${rowNum}: Employee code and name are mandatory.`);
+        failedRecords.push({ row: rowNum, reason: 'Employee name is mandatory.' });
+        errors.push(`Row ${rowNum}: Employee name is mandatory.`);
         return;
       }
+
+      if (!code) {
+        code = `EMP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+
+      if (!email) {
+        email = `${code.toLowerCase().replace(/[^a-z0-9]/g, '')}@rejoysolar.com`;
+      }
+
       const dupCheck = validateEmployee({ employeeCode: code, name, phone, email }, batchEmployees);
       if (!dupCheck.valid) {
         duplicate++;
         skippedRecords.push({ row: rowNum, name, reason: dupCheck.message || 'Duplicate employee' });
-        errors.push(`Row ${rowNum} Duplicate Employee: ${dupCheck.message}`);
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
         return;
       }
+
       const newEmp: Employee = {
-        id: `batch-e-${rowNum}`,
+        id: `batch-e-${Date.now()}-${rowNum}`,
         employeeCode: code,
         name,
-        department: (cols[2] as Employee['department']) || 'Operations',
-        designation: cols[3] || 'Staff',
+        department,
+        designation,
         phone,
         email,
-        joiningDate: cols[6] || new Date().toISOString().slice(0, 10),
-        salaryMonthly: Number(cols[7]) || 0,
-        status: 'ACTIVE',
+        joiningDate,
+        salaryMonthly,
+        status,
+        systemRole: systemRole as any,
+        isFieldWorker,
         photoUrl: '',
-        loginEnabled: false,
-        accountStatus: 'PENDING'
+        loginEnabled: true,
+        accountStatus: 'ACTIVE'
       };
       batchEmployees.push(newEmp);
       validRecords.push(newEmp);
@@ -520,13 +654,303 @@ export function parseAndValidateCSV(text: string, module: ExportModule): ImportV
       batchProjects.push(newProj);
       validRecords.push(newProj);
       successful++;
-    } else if (module === 'Payments') {
-      if (!cols[0] || isNaN(Number(cols[3]))) {
+    } else if (module === 'Products') {
+      const name = (cols[prodNameIdx] ?? '').trim();
+      const rawSku = (cols[prodSkuIdx] ?? '').trim();
+      const category = ((prodCatIdx >= 0 ? cols[prodCatIdx] : '')?.trim() || 'Solar Panels') as ProductItem['category'];
+      const brand = (prodBrandIdx >= 0 ? cols[prodBrandIdx] : '')?.trim() || 'Waaree';
+      const model = (prodModelIdx >= 0 ? cols[prodModelIdx] : '')?.trim() || '';
+      const unit = ((prodUnitIdx >= 0 ? cols[prodUnitIdx] : '')?.trim() || 'NOS') as ProductItem['unit'];
+      const hsnCode = (prodHsnIdx >= 0 ? cols[prodHsnIdx] : '')?.trim() || '85414011';
+      const rawGst = (prodGstIdx >= 0 ? cols[prodGstIdx] : '')?.replace(/[^0-9.]/g, '');
+      const gstRate = parseFloat(rawGst) || 18;
+      const rawPrice = (prodPriceIdx >= 0 ? cols[prodPriceIdx] : '')?.replace(/[^0-9.]/g, '');
+      const unitPrice = parseFloat(rawPrice) || 0;
+      const rawStock = (prodStockIdx >= 0 ? cols[prodStockIdx] : '')?.replace(/[^0-9.]/g, '');
+      const currentStock = parseFloat(rawStock) || 0;
+      const rawReorder = (prodReorderIdx >= 0 ? cols[prodReorderIdx] : '')?.replace(/[^0-9.]/g, '');
+      const reorderLevel = parseFloat(rawReorder) || 10;
+
+      if (!name) {
         failed++;
-        failedRecords.push({ row: rowNum, reason: 'Valid amount number is required.' });
-        errors.push(`Row ${rowNum}: Valid amount number is required.`);
+        failedRecords.push({ row: rowNum, reason: 'Product name is mandatory.' });
+        errors.push(`Row ${rowNum}: Product name is mandatory.`);
         return;
       }
+
+      const sku = rawSku || `PRD-${Date.now().toString().slice(-4)}-${rowNum}`;
+
+      const dupCheck = validateProduct({ sku, name }, batchProducts);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: `${name} (${sku})`, reason: dupCheck.message || 'Duplicate product record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const prodId = `prod-import-${Date.now()}-${rowNum}`;
+      const newProd: ProductItem = {
+        id: prodId,
+        sku,
+        name,
+        category,
+        brand,
+        model,
+        specification: `${brand} ${model}`.trim(),
+        unit,
+        hsnCode,
+        gstRate,
+        unitPrice,
+        sellingPrice: Math.round(unitPrice * 1.15),
+        currentStock,
+        minStockThreshold: reorderLevel,
+        reorderLevel,
+        location: 'Warehouse A - Bay 1',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      batchProducts.push(newProd);
+      validRecords.push(newProd);
+      successful++;
+    } else if (module === 'Vendors') {
+      const name = (cols[vndNameIdx] ?? '').trim();
+      const rawCode = (cols[vndCodeIdx] ?? '').trim();
+      const contactPerson = (vndContactIdx >= 0 ? cols[vndContactIdx] : '')?.trim() || 'Purchasing Manager';
+      const phone = (vndPhoneIdx >= 0 ? cols[vndPhoneIdx] : '')?.trim() || '';
+      const email = (vndEmailIdx >= 0 ? cols[vndEmailIdx] : '')?.trim() || '';
+      const address = (vndAddrIdx >= 0 ? cols[vndAddrIdx] : '')?.trim() || '';
+      const city = (vndCityIdx >= 0 ? cols[vndCityIdx] : '')?.trim() || 'Ahmedabad';
+      const state = (vndStateIdx >= 0 ? cols[vndStateIdx] : '')?.trim() || 'Gujarat';
+      const gstNumber = (vndGstIdx >= 0 ? cols[vndGstIdx] : '')?.trim().toUpperCase() || '';
+      const paymentTerms = (vndTermsIdx >= 0 ? cols[vndTermsIdx] : '')?.trim() || '30 Days Net';
+
+      if (!name) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: 'Vendor name is mandatory.' });
+        errors.push(`Row ${rowNum}: Vendor name is mandatory.`);
+        return;
+      }
+
+      const vendorCode = rawCode || `VND-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const dupCheck = validateVendor({ vendorCode, name, gstNumber, phone, email }, batchVendors);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: `${name} (${vendorCode})`, reason: dupCheck.message || 'Duplicate vendor record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const newVendor: Vendor = {
+        id: `vnd-import-${Date.now()}-${rowNum}`,
+        vendorCode,
+        name,
+        contactPerson,
+        phone,
+        email,
+        address,
+        city,
+        state,
+        gstNumber,
+        paymentTerms,
+        category: 'Modules',
+        rating: 4.5,
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      batchVendors.push(newVendor);
+      validRecords.push(newVendor);
+      successful++;
+    } else if (module === 'Payments') {
+      const rawAmt = (cols[payAmtIdx] ?? '').replace(/[^0-9.]/g, '');
+      const amount = parseFloat(rawAmt);
+      const customerName = (cols[payCustIdx] ?? '').trim() || 'Solar Client';
+      const rawRcpt = (cols[payRcptIdx] ?? '').trim();
+      const milestone = (payMileIdx >= 0 ? cols[payMileIdx] : '')?.trim() || 'Advance';
+      const rawStat = (payStatIdx >= 0 ? cols[payStatIdx] : '')?.trim().toUpperCase();
+      const status = (['PAID', 'PENDING', 'OVERDUE', 'CANCELLED'].includes(rawStat) ? rawStat : 'PAID') as PaymentRecord['status'];
+      const dueDate = parseDateStr(payDueIdx >= 0 ? cols[payDueIdx] : '') || new Date().toISOString().split('T')[0];
+      const paidDate = parseDateStr(payPaidIdx >= 0 ? cols[payPaidIdx] : '') || (status === 'PAID' ? new Date().toISOString().split('T')[0] : undefined);
+      const paymentMode = (payModeIdx >= 0 ? cols[payModeIdx] : '')?.trim() || 'Bank NEFT/RTGS';
+      const transactionReference = (payRefIdx >= 0 ? cols[payRefIdx] : '')?.trim() || '';
+
+      if (isNaN(amount) || amount <= 0) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: `Valid payment amount (> 0) is required (got "${cols[payAmtIdx] || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid payment amount (> 0) is required (got "${cols[payAmtIdx] || 'empty'}").`);
+        return;
+      }
+
+      const receiptNumber = rawRcpt || `RCPT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const dupCheck = validatePayment({ receiptNumber, transactionReference }, batchPayments);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: receiptNumber, reason: dupCheck.message || 'Duplicate payment record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      // Link to existing customer/project if matching
+      const matchedCust = batchCustomers.find(c => c.name.toLowerCase() === customerName.toLowerCase() || c.companyName?.toLowerCase() === customerName.toLowerCase());
+      const matchedProj = batchProjects.find(p => p.customerName.toLowerCase() === customerName.toLowerCase());
+
+      const newPayment: PaymentRecord = {
+        id: `pay-import-${Date.now()}-${rowNum}`,
+        receiptNumber,
+        projectId: matchedProj ? matchedProj.id : `proj-link-${Date.now()}-${rowNum}`,
+        customerId: matchedCust ? matchedCust.id : `cust-link-${Date.now()}-${rowNum}`,
+        customerName,
+        milestone,
+        amount,
+        status,
+        dueDate,
+        paidDate,
+        paymentMode,
+        transactionReference,
+        notes: 'Imported via CSV Hub',
+        tallySyncStatus: 'NOT SYNCED',
+        createdAt: new Date().toISOString()
+      };
+      batchPayments.push(newPayment);
+      validRecords.push(newPayment);
+      successful++;
+    } else if (module === 'Expenses') {
+      const rawAmt = (cols[expAmtIdx] ?? '').replace(/[^0-9.]/g, '');
+      const amount = parseFloat(rawAmt);
+      const vendorName = (cols[expVndIdx] ?? '').trim() || 'General Vendor';
+      const rawExpNo = (cols[expNumIdx] ?? '').trim();
+      const category = (expCatIdx >= 0 ? cols[expCatIdx] : '')?.trim() || 'Material - Cables & BOS';
+      const date = parseDateStr(expDateIdx >= 0 ? cols[expDateIdx] : '') || new Date().toISOString().split('T')[0];
+      const paymentMode = (expModeIdx >= 0 ? cols[expModeIdx] : '')?.trim() || 'Bank NEFT';
+      const referenceNo = (expRefIdx >= 0 ? cols[expRefIdx] : '')?.trim() || '';
+      const notes = (expNotesIdx >= 0 ? cols[expNotesIdx] : '')?.trim() || 'Imported via CSV Hub';
+
+      if (isNaN(amount) || amount <= 0) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: `Valid expense amount (> 0) is required (got "${cols[expAmtIdx] || 'empty'}").` });
+        errors.push(`Row ${rowNum}: Valid expense amount (> 0) is required (got "${cols[expAmtIdx] || 'empty'}").`);
+        return;
+      }
+
+      const expenseNumber = rawExpNo || `EXP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const dupCheck = validateExpense({ expenseNumber, referenceNo }, batchExpenses);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: expenseNumber, reason: dupCheck.message || 'Duplicate expense record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const newExpense: ExpenseRecord = {
+        id: `exp-import-${Date.now()}-${rowNum}`,
+        expenseNumber,
+        vendorName,
+        category,
+        amount,
+        date,
+        paymentMode,
+        referenceNo,
+        notes,
+        tallySyncStatus: 'NOT SYNCED',
+        createdAt: new Date().toISOString()
+      };
+      batchExpenses.push(newExpense);
+      validRecords.push(newExpense);
+      successful++;
+    } else if (module === 'Attendance') {
+      const employeeName = (cols[attNameIdx] ?? '').trim();
+      const attendanceDate = parseDateStr(attDateIdx >= 0 ? cols[attDateIdx] : '') || new Date().toISOString().split('T')[0];
+      const checkInTime = (attInIdx >= 0 ? cols[attInIdx] : '')?.trim() || '09:00:00';
+      const checkOutTime = (attOutIdx >= 0 ? cols[attOutIdx] : '')?.trim() || '18:00:00';
+      const rawStatus = (attStatIdx >= 0 ? cols[attStatIdx] : '')?.trim().toUpperCase();
+      const status = (['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE', 'ON_DUTY'].includes(rawStatus) ? rawStatus : 'PRESENT') as AttendanceRecord['status'];
+      const siteLocation = (attLocIdx >= 0 ? cols[attLocIdx] : '')?.trim() || 'Solar Site';
+
+      if (!employeeName) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: 'Employee name is mandatory.' });
+        errors.push(`Row ${rowNum}: Employee name is mandatory.`);
+        return;
+      }
+
+      const matchedEmp = batchEmployees.find(e => e.name.toLowerCase() === employeeName.toLowerCase() || e.employeeCode.toLowerCase() === employeeName.toLowerCase());
+      const employeeId = matchedEmp ? matchedEmp.id : `emp-${employeeName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+      const dupCheck = validateAttendance({ employeeName, employeeId, attendanceDate, date: attendanceDate }, batchAttendance);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: `${employeeName} (${attendanceDate})`, reason: dupCheck.message || 'Duplicate attendance record' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const newAttendance: AttendanceRecord = {
+        id: `att-import-${Date.now()}-${rowNum}`,
+        employeeId,
+        employeeName,
+        date: attendanceDate,
+        attendanceDate,
+        checkInTime,
+        checkOutTime,
+        status,
+        siteLocation,
+        siteProjectTitle: siteLocation,
+        createdAt: new Date().toISOString()
+      };
+      batchAttendance.push(newAttendance);
+      validRecords.push(newAttendance);
+      successful++;
+    } else if (module === 'Service') {
+      const rawTicketId = (cols[srvIdIdx] ?? '').trim();
+      const customerName = (cols[srvCustIdx] ?? '').trim();
+      const issue = (cols[srvIssueIdx] ?? '').trim();
+      const category = (srvCatIdx >= 0 ? cols[srvCatIdx] : '')?.trim() || 'INVERTER';
+      const rawPriority = (srvPriIdx >= 0 ? cols[srvPriIdx] : '')?.trim().toUpperCase();
+      const priority = (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(rawPriority) ? rawPriority : 'MEDIUM') as ServiceTicket['priority'];
+      const rawStatus = (srvStatIdx >= 0 ? cols[srvStatIdx] : '')?.trim().toUpperCase();
+      const status = (['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'].includes(rawStatus) ? rawStatus : 'OPEN') as ServiceTicket['status'];
+
+      if (!issue && !customerName) {
+        failed++;
+        failedRecords.push({ row: rowNum, reason: 'Customer name or issue description is mandatory.' });
+        errors.push(`Row ${rowNum}: Customer name or issue description is mandatory.`);
+        return;
+      }
+
+      const ticketId = rawTicketId || `SRV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const dupCheck = validateServiceTicket({ ticketId, ticketNumber: ticketId }, batchServiceTickets);
+      if (!dupCheck.valid) {
+        duplicate++;
+        skippedRecords.push({ row: rowNum, name: ticketId, reason: dupCheck.message || 'Duplicate service ticket' });
+        errors.push(`Row ${rowNum} Skipped (Duplicate): ${dupCheck.message}`);
+        return;
+      }
+
+      const matchedCust = batchCustomers.find(c => c.name.toLowerCase() === customerName.toLowerCase() || c.companyName?.toLowerCase() === customerName.toLowerCase());
+      const matchedProj = batchProjects.find(p => p.customerName.toLowerCase() === customerName.toLowerCase());
+
+      const newTicket: ServiceTicket = {
+        id: `srv-import-${Date.now()}-${rowNum}`,
+        ticketId,
+        ticketNumber: ticketId,
+        customerId: matchedCust ? matchedCust.id : `cust-link-${Date.now()}-${rowNum}`,
+        customerName: customerName || 'Solar Client',
+        projectId: matchedProj ? matchedProj.id : `proj-link-${Date.now()}-${rowNum}`,
+        projectTitle: matchedProj ? matchedProj.title : 'Solar Rooftop Installation',
+        issue: issue || 'Solar System Inspection',
+        title: issue || 'Solar System Inspection',
+        category,
+        priority,
+        status,
+        notes: 'Imported via CSV Hub',
+        createdAt: new Date().toISOString()
+      };
+      batchServiceTickets.push(newTicket);
+      validRecords.push(newTicket);
       successful++;
     } else {
       successful++;

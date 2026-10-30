@@ -15,11 +15,12 @@ import {
   Tag,
   DollarSign,
   Boxes,
-  MapPin
+  MapPin,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export const ProductCatalog: React.FC = () => {
-  const { refreshTrigger, triggerRefresh, showToast } = useApp();
+  const { refreshTrigger, triggerRefresh, showToast, openImportExportModal } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
@@ -198,14 +199,24 @@ export const ProductCatalog: React.FC = () => {
           </p>
         </div>
 
-        <button
-          id="btn-add-product"
-          onClick={handleOpenAdd}
-          className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-semibold shadow-xs transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add New Product
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openImportExportModal('Products')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs transition-colors cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+            <span>Excel Hub</span>
+          </button>
+          <button
+            id="btn-add-product"
+            onClick={handleOpenAdd}
+            className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-semibold shadow-xs transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Add New Product
+          </button>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
