@@ -23,7 +23,8 @@ import {
   Clock,
   ThumbsUp,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react';
 
 interface StageCardProps {
@@ -37,6 +38,7 @@ interface StageCardProps {
   isLocked?: boolean;
   previousStageTitle?: string;
   stageIndex?: number;
+  isReadOnly?: boolean;
 }
 
 export const StageCard: React.FC<StageCardProps> = ({
@@ -49,17 +51,30 @@ export const StageCard: React.FC<StageCardProps> = ({
   projectTitle,
   isLocked = false,
   previousStageTitle,
-  stageIndex
+  stageIndex,
+  isReadOnly = false
 }) => {
-  const { currentUser, canApproveStage } = useAuth();
+  const { currentUser, canApproveStage, isCustomer } = useAuth();
   const { openWhatsAppModal, showToast } = useApp();
   const [newNote, setNewNote] = useState('');
   const [isCapturingGPS, setIsCapturingGPS] = useState(false);
+
+  const isReadOnlyEffective = Boolean(
+    isReadOnly ||
+    isCustomer ||
+    (currentUser?.role as string) === 'Customer' ||
+    (currentUser as any)?.accountType === 'CUSTOMER'
+  );
 
   const completedChecklistCount = stage.checklist.filter(item => item.completed).length;
   const isAllChecklistDone = stage.checklist.length > 0 && completedChecklistCount === stage.checklist.length;
 
   const handleToggleChecklist = (itemId: string) => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot modify stage checklist items.', 'info');
+      return;
+    }
+
     if (isLocked) {
       showToast(`Stage "${stage.title}" is locked. Complete Stage ${stage.order - 1}${previousStageTitle ? ` (${previousStageTitle})` : ''} first.`, 'warning');
       return;
@@ -83,6 +98,11 @@ export const StageCard: React.FC<StageCardProps> = ({
   };
 
   const handleSimulatePhotoUpload = async () => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot upload stage photos.', 'warning');
+      return;
+    }
+
     if (isLocked) {
       showToast(`Cannot upload photo: Stage "${stage.title}" is locked until Stage ${stage.order - 1} is completed.`, 'warning');
       return;
@@ -116,6 +136,11 @@ export const StageCard: React.FC<StageCardProps> = ({
   };
 
   const handleAddNote = () => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot add operational notes.', 'warning');
+      return;
+    }
+
     if (isLocked) {
       showToast(`Cannot add note: Stage "${stage.title}" is locked.`, 'warning');
       return;
@@ -129,6 +154,11 @@ export const StageCard: React.FC<StageCardProps> = ({
   };
 
   const handleMarkCompleted = () => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot complete stages.', 'warning');
+      return;
+    }
+
     if (isLocked) {
       showToast(`Cannot complete stage: Stage "${stage.title}" is locked until Stage ${stage.order - 1} is finished.`, 'warning');
       return;
@@ -149,6 +179,11 @@ export const StageCard: React.FC<StageCardProps> = ({
   };
 
   const handleRequestApproval = () => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot submit stages for approval.', 'warning');
+      return;
+    }
+
     if (isLocked) {
       showToast(`Cannot submit for review: Stage "${stage.title}" is locked.`, 'warning');
       return;
@@ -166,6 +201,11 @@ export const StageCard: React.FC<StageCardProps> = ({
   };
 
   const handleApproveStage = () => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot approve stages.', 'warning');
+      return;
+    }
+
     if (isLocked) {
       showToast(`Cannot approve stage: Stage "${stage.title}" is locked until Stage ${stage.order - 1} is finished.`, 'warning');
       return;
@@ -190,6 +230,11 @@ export const StageCard: React.FC<StageCardProps> = ({
   };
 
   const handleReopenStage = () => {
+    if (isReadOnlyEffective) {
+      showToast('Read-only view: Customers cannot reopen stages.', 'warning');
+      return;
+    }
+
     onUpdateStage(stage.stageKey, {
       status: 'IN PROGRESS'
     });
@@ -307,25 +352,32 @@ export const StageCard: React.FC<StageCardProps> = ({
                 <CheckSquare className="w-3.5 h-3.5 text-amber-500" />
                 <span>Verification Checklist ({completedChecklistCount}/{stage.checklist.length})</span>
               </h4>
-              <span className="text-[11px] text-slate-500">Click to toggle item completion</span>
+              <span className="text-[11px] text-slate-500">
+                {isReadOnlyEffective ? 'Verified milestone checklist (Read-Only)' : 'Click to toggle item completion'}
+              </span>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
               {stage.checklist.map((item, idx) => (
                 <div
                   key={`${item.id}-${idx}`}
-                  role="checkbox"
+                  role={isReadOnlyEffective ? undefined : 'checkbox'}
                   aria-checked={item.completed}
-                  onClick={() => handleToggleChecklist(item.id)}
-                  className="p-3 flex items-start gap-3 hover:bg-slate-50 cursor-pointer transition-colors"
+                  onClick={() => !isReadOnlyEffective && handleToggleChecklist(item.id)}
+                  className={`p-3 flex items-start gap-3 transition-colors ${
+                    isReadOnlyEffective ? 'cursor-default' : 'hover:bg-slate-50 cursor-pointer'
+                  }`}
                 >
                   <button
                     type="button"
+                    disabled={isReadOnlyEffective}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleToggleChecklist(item.id);
+                      if (!isReadOnlyEffective) handleToggleChecklist(item.id);
                     }}
-                    className="mt-0.5 shrink-0 text-slate-400 hover:text-amber-600 focus:outline-hidden"
+                    className={`mt-0.5 shrink-0 ${
+                      isReadOnlyEffective ? 'cursor-default' : 'text-slate-400 hover:text-amber-600 focus:outline-hidden'
+                    }`}
                     aria-label={`Toggle ${item.label || item.title}`}
                   >
                     {item.completed ? (
@@ -359,19 +411,28 @@ export const StageCard: React.FC<StageCardProps> = ({
                 <Camera className="w-3.5 h-3.5 text-blue-500" />
                 <span>Site Photos & GPS Coordinate Verification ({stage.photos.length})</span>
               </h4>
-              <button
-                onClick={handleSimulatePhotoUpload}
-                disabled={isCapturingGPS}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold shadow-2xs transition-colors"
-              >
-                <Camera className="w-3.5 h-3.5 text-amber-500" />
-                <span>{isCapturingGPS ? 'Locating GPS...' : 'Capture Site Photo'}</span>
-              </button>
+              {!isReadOnlyEffective ? (
+                <button
+                  onClick={handleSimulatePhotoUpload}
+                  disabled={isCapturingGPS}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold shadow-2xs transition-colors"
+                >
+                  <Camera className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{isCapturingGPS ? 'Locating GPS...' : 'Capture Site Photo'}</span>
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                  <Camera className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Field Evidence Gallery ({stage.photos.length})</span>
+                </span>
+              )}
             </div>
 
             {stage.photos.length === 0 ? (
               <div className="p-6 bg-white rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-400">
-                No site photos uploaded for this stage yet. Click "Capture Site Photo" to record evidence with live GPS metadata.
+                {isReadOnlyEffective
+                  ? 'No site photos uploaded for this stage yet by project engineers.'
+                  : 'No site photos uploaded for this stage yet. Click "Capture Site Photo" to record evidence with live GPS metadata.'}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -430,95 +491,117 @@ export const StageCard: React.FC<StageCardProps> = ({
               <span>Field Engineering Notes & Log</span>
             </h4>
 
-            {stage.notes && (
+            {stage.notes ? (
               <div className="p-3.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-700 whitespace-pre-wrap font-sans leading-relaxed mb-3">
                 {stage.notes}
               </div>
-            )}
+            ) : isReadOnlyEffective ? (
+              <div className="p-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-400 italic mb-1">
+                No operational engineering notes recorded for this stage yet.
+              </div>
+            ) : null}
 
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
-                placeholder="Type operational field notes or inspection remark..."
-                className="flex-1 text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-              />
-              <button
-                onClick={handleAddNote}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-colors shrink-0"
-              >
-                Add Note
-              </button>
-            </div>
+            {!isReadOnlyEffective && (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
+                  placeholder="Type operational field notes or inspection remark..."
+                  className="flex-1 text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                />
+                <button
+                  onClick={handleAddNote}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-colors shrink-0"
+                >
+                  Add Note
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Operational Action Buttons */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-200">
-            <div className="flex items-center gap-2">
-              {/* WhatsApp Milestone Update */}
-              <button
-                onClick={() =>
-                  openWhatsAppModal(customerPhone, customerName, 'INSTALLATION_UPDATE', {
-                    projectTitle,
-                    stageTitle: stage.title
-                  })
-                }
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-colors"
-              >
-                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                <span>WhatsApp Client Update</span>
-              </button>
-
-              {stage.status === 'COMPLETED' && (
-                <button
-                  onClick={handleReopenStage}
-                  className="inline-flex items-center gap-1 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl text-xs font-medium transition-colors"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reopen Stage</span>
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {isLocked ? (
-                <div className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-500 font-medium select-none">
-                  <Lock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Locked: Finish Stage {stage.order - 1} first</span>
+            {isReadOnlyEffective ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 select-none">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Read-Only Stage View (Maintained by Rejoy Solar Engineering Team)</span>
+                  </div>
                 </div>
-              ) : stage.status !== 'COMPLETED' ? (
-                <>
-                  {canApproveStage() ? (
-                    <button
-                      onClick={handleApproveStage}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Approve & Complete Stage</span>
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        onClick={handleRequestApproval}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Submit for PM Approval</span>
-                      </button>
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={stage.status} size="sm" />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  {/* WhatsApp Milestone Update */}
+                  <button
+                    onClick={() =>
+                      openWhatsAppModal(customerPhone, customerName, 'INSTALLATION_UPDATE', {
+                        projectTitle,
+                        stageTitle: stage.title
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>WhatsApp Client Update</span>
+                  </button>
 
-                      <button
-                        onClick={handleMarkCompleted}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold shadow-2xs"
-                      >
-                        <span>Direct Complete</span>
-                      </button>
-                    </>
+                  {stage.status === 'COMPLETED' && (
+                    <button
+                      onClick={handleReopenStage}
+                      className="inline-flex items-center gap-1 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl text-xs font-medium transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reopen Stage</span>
+                    </button>
                   )}
-                </>
-              ) : null}
-            </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {isLocked ? (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-500 font-medium select-none">
+                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Locked: Finish Stage {stage.order - 1} first</span>
+                    </div>
+                  ) : stage.status !== 'COMPLETED' ? (
+                    <>
+                      {canApproveStage() ? (
+                        <button
+                          onClick={handleApproveStage}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Approve & Complete Stage</span>
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={handleRequestApproval}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Submit for PM Approval</span>
+                          </button>
+
+                          <button
+                            onClick={handleMarkCompleted}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold shadow-2xs"
+                          >
+                            <span>Direct Complete</span>
+                          </button>
+                        </>
+                      )}
+                    </>
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

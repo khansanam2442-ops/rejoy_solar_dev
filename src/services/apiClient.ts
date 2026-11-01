@@ -37,7 +37,16 @@ class ApiClient {
   private token: string | null = null;
 
   constructor() {
-    this.token = safeStorage.getItem('rejoysolar_auth_token');
+    this.token = null;
+    // Purge any legacy browser storage tokens to guarantee MySQL as sole source of truth
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('rejoysolar_auth_token');
+        localStorage.removeItem('rejoysolar_active_session');
+        sessionStorage.removeItem('rejoysolar_auth_token');
+        sessionStorage.removeItem('rejoysolar_active_session');
+      } catch {}
+    }
   }
 
   public getBaseUrl(): string {
@@ -46,17 +55,9 @@ class ApiClient {
 
   public setToken(token: string | null): void {
     this.token = token;
-    if (token) {
-      safeStorage.setItem('rejoysolar_auth_token', token);
-    } else {
-      safeStorage.removeItem('rejoysolar_auth_token');
-    }
   }
 
   public getToken(): string | null {
-    if (!this.token) {
-      this.token = safeStorage.getItem('rejoysolar_auth_token');
-    }
     return this.token;
   }
 
@@ -67,14 +68,6 @@ class ApiClient {
       headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
       headers['x-auth-token'] = t;
     }
-    try {
-      const raw = safeStorage.getItem('rejoysolar_active_session');
-      if (raw) {
-        const u = JSON.parse(raw);
-        if (u?.id) headers['x-user-id'] = u.id;
-        if (u?.role) headers['x-user-role'] = u.role;
-      }
-    } catch {}
     return headers;
   }
 

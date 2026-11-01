@@ -856,6 +856,13 @@ class StorageService {
     this.set(STORAGE_KEYS.PROJECTS, projects, project);
   }
 
+  setProjectsFromBackend(projects: SolarProject[]): void {
+    if (!Array.isArray(projects)) return;
+    this.memStore.set(STORAGE_KEYS.PROJECTS, projects);
+    safeStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(projects));
+    window.dispatchEvent(new Event('solarpulse_storage_updated'));
+  }
+
   deleteProject(id: string): void {
     const projects = this.getProjects().filter(p => p.id !== id);
     this.set(STORAGE_KEYS.PROJECTS, projects);
@@ -1125,6 +1132,13 @@ class StorageService {
     const project = this.getProjectById(projectId);
     if (!project) return null;
 
+    // Role-based protection: Customers have read-only access to project stages
+    const normalizedRole = (actorRole || '').toUpperCase();
+    if (normalizedRole === 'CUSTOMER' || normalizedRole === 'CLIENT') {
+      console.warn(`[Access Denied] Customer "${actorName}" attempted to modify stage "${stageIdOrKey}".`);
+      return project;
+    }
+
     const stageIndex = project.stages.findIndex(s => s.id === stageIdOrKey || s.stageKey === stageIdOrKey);
     if (stageIndex === -1) return null;
 
@@ -1236,6 +1250,16 @@ class StorageService {
     }
 
     this.saveProject(project);
+
+    if (typeof fetch !== 'undefined') {
+      fetch(`/api/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(stageIdOrKey)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(updates)
+      }).catch(err => console.warn('[Backend Stage Sync]:', err));
+    }
+
     return project;
   }
 
@@ -1249,6 +1273,13 @@ class StorageService {
   ): SolarProject | null {
     const project = this.getProjectById(projectId);
     if (!project) return null;
+
+    // Role-based protection: Customers have read-only access to checklists
+    const normalizedRole = (actorRole || '').toUpperCase();
+    if (normalizedRole === 'CUSTOMER' || normalizedRole === 'CLIENT') {
+      console.warn(`[Access Denied] Customer "${actorName}" attempted to toggle checklist "${checkItemId}".`);
+      return project;
+    }
 
     const stage = project.stages.find(s => s.id === stageIdOrKey || s.stageKey === stageIdOrKey);
     if (!stage) return null;

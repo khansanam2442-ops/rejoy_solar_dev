@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { ensureLocalMySqlRunning } from './mysqlDaemon';
+import { authService } from './services/authService';
 
 export interface DbConfig {
   host: string;
@@ -615,6 +616,7 @@ class MySqlDatabaseManager {
       }
 
       await this.ensureHashedPasswords();
+      await authService.initAuthSchema(this.pool);
     } catch (err: any) {
       console.error('[MySQL] Schema execution notice:', err?.message || err);
       throw err;
@@ -698,6 +700,10 @@ class MySqlDatabaseManager {
       dumpAvailable: fs.existsSync(path.join(process.cwd(), 'database.sql')),
       dumpPath: '/database.sql'
     };
+  }
+
+  public getPool(): mysql.Pool | null {
+    return this.isConnected ? this.pool : null;
   }
 
   private assertDbConnected(): void {
@@ -904,6 +910,23 @@ class MySqlDatabaseManager {
       activeProjectId
     ]);
 
+    // Synchronize customer credentials to centralized solar_auth_credentials
+    if (this.pool && email) {
+      try {
+        await authService.setCredential(this.pool, {
+          userId: `usr-${item.id}`,
+          email,
+          password: password,
+          role: 'Customer',
+          accountType: 'CUSTOMER',
+          linkedEntityId: item.id,
+          status
+        });
+      } catch (err: any) {
+        console.warn('[DB Manager] Notice syncing customer credential:', err.message);
+      }
+    }
+
     const items = this.getFallbackItems('customers');
     const idx = items.findIndex(c => c.id === item.id);
     if (idx >= 0) items[idx] = { ...items[idx], ...item };
@@ -914,7 +937,11 @@ class MySqlDatabaseManager {
 
   public async deleteCustomer(id: string): Promise<boolean> {
     this.assertDbConnected();
-    await this.pool!.query('DELETE FROM `solar_customers` WHERE `id` = ?', [id]);
+    if (this.pool) {
+      await this.pool.query('DELETE FROM `solar_customers` WHERE `id` = ?', [id]);
+      await this.pool.query('DELETE FROM `solar_auth_credentials` WHERE `user_id` = ? OR `linked_entity_id` = ?', [`usr-${id}`, id]).catch(() => {});
+      await this.pool.query('DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ?', [`usr-${id}`, id]).catch(() => {});
+    }
     const items = this.getFallbackItems('customers').filter(c => c.id !== id);
     this.setFallbackItems('customers', items);
     return true;
@@ -933,10 +960,11 @@ class MySqlDatabaseManager {
       this.setFallbackItems('customers', items);
     }
 
-    if (!this.isConnected) return true;
+    if (!this.isConnected || !this.pool) return true;
 
     this.assertDbConnected();
-    await this.pool!.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [hashed, customerId]);
+    await this.pool.query('UPDATE `solar_customers` SET `password` = ? WHERE `id` = ?', [hashed, customerId]);
+    await authService.updatePassword(this.pool, `usr-${customerId}`, clean);
     return true;
   }
 
@@ -1165,6 +1193,20 @@ class MySqlDatabaseManager {
           status,
           customerObj.activeProjectId
         ]);
+
+        if (email) {
+          try {
+            await authService.setCredential(this.pool, {
+              userId: `usr-${custId}`,
+              email,
+              password: rawPass,
+              role: 'Customer',
+              accountType: 'CUSTOMER',
+              linkedEntityId: custId,
+              status
+            });
+          } catch {}
+        }
       }
 
       phoneSet.set(phoneDigits, name);
@@ -1524,6 +1566,101 @@ class MySqlDatabaseManager {
     const items = this.getFallbackItems('projects').filter(p => p.id !== id);
     this.setFallbackItems('projects', items);
     return true;
+  }
+
+  public async updateStageInProject(
+    projectId: string,
+    stageKey: string,
+    updates: any,
+    actorName: string = 'Staff',
+    actorRole: string = 'Employee'
+  ): Promise<any> {
+    if (!this.isConnected) return null;
+    this.assertDbConnected();
+
+    const projects = await this.getProjects();
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return null;
+
+    const stages: any[] = project.stages || [];
+    const stageIndex = stages.findIndex(s => s.stageKey === stageKey || s.id === stageKey);
+    if (stageIndex === -1) return null;
+
+    const currentStage = stages[stageIndex];
+    const updatedStage = { ...currentStage, ...updates };
+
+    if (updates.status === 'COMPLETED' || updates.status === 'APPROVED') {
+      const today = new Date().toISOString().slice(0, 10);
+      updatedStage.completedDate = updatedStage.completedDate || today;
+      updatedStage.actualEndDate = updatedStage.actualEndDate || today;
+      if (updates.status === 'APPROVED') {
+        updatedStage.approvedBy = actorName;
+        updatedStage.approvedAt = today;
+      }
+      if (stageIndex + 1 < stages.length) {
+        const nextStage = stages[stageIndex + 1];
+        if (nextStage.status === 'NOT STARTED') {
+          nextStage.status = 'IN PROGRESS';
+          nextStage.startDate = today;
+          project.currentStageKey = nextStage.stageKey;
+        }
+      }
+    } else if (updates.status === 'IN PROGRESS') {
+      project.currentStageKey = currentStage.stageKey;
+      for (let j = stageIndex + 1; j < stages.length; j++) {
+        if (stages[j].status === 'IN PROGRESS' || stages[j].status === 'COMPLETED' || stages[j].status === 'APPROVED') {
+          stages[j].status = 'NOT STARTED';
+          stages[j].actualEndDate = null;
+          stages[j].completedDate = null;
+          stages[j].approvedBy = null;
+        }
+      }
+    }
+
+    stages[stageIndex] = updatedStage;
+    project.stages = stages;
+
+    const totalStages = stages.length;
+    const completedStages = stages.filter(s => s.status === 'COMPLETED' || s.status === 'APPROVED').length;
+    project.completionPercentage = totalStages > 0 ? Math.round((completedStages / totalStages) * 100) : 0;
+    project.progressPercentage = project.completionPercentage;
+
+    if (completedStages === totalStages && totalStages > 0) {
+      project.status = 'COMPLETED';
+    } else if (completedStages === 0) {
+      project.status = 'SURVEY';
+    } else if (completedStages < 4) {
+      project.status = 'DESIGN & APPROVALS';
+    } else if (completedStages < 10) {
+      project.status = 'CIVIL & STRUCTURE';
+    } else {
+      project.status = 'INSTALLATION';
+    }
+
+    const saved = await this.saveProject(project);
+    return saved;
+  }
+
+  public async updateProjectProgress(
+    projectId: string,
+    progressPercentage: number,
+    status?: string
+  ): Promise<any> {
+    if (!this.isConnected) return null;
+    this.assertDbConnected();
+
+    const projects = await this.getProjects();
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return null;
+
+    project.completionPercentage = Math.max(0, Math.min(100, Number(progressPercentage) || 0));
+    project.progressPercentage = project.completionPercentage;
+    if (status) {
+      project.status = status;
+    }
+
+    const saved = await this.saveProject(project);
+    return saved;
   }
 
   private generateDefaultProjectStages(projId: string, status: string): any[] {
@@ -2332,6 +2469,18 @@ class MySqlDatabaseManager {
                 record.phone, record.department, record.designation, record.employeeCode,
                 record.isFieldWorker ? 1 : 0, record.status
               ]);
+
+              if (record.email) {
+                await authService.setCredential(this.pool, {
+                  userId: record.id,
+                  email: record.email,
+                  password: raw.password || 'User@12345',
+                  role: record.systemRole || 'Technician',
+                  accountType: (record.systemRole === 'Admin' || record.systemRole === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE',
+                  linkedEntityId: record.id,
+                  status: record.status
+                }).catch(() => {});
+              }
             } catch (uErr: any) {
               console.warn('Notice syncing employee to users:', uErr.message);
             }
@@ -3678,6 +3827,17 @@ class MySqlDatabaseManager {
           isFieldWorker,
           userStatus
         ]);
+
+        // Also synchronize to centralized solar_auth_credentials table
+        await authService.setCredential(this.pool, {
+          userId: item.id,
+          email: email.toLowerCase(),
+          password: rawPass || undefined,
+          role: systemRole || 'Technician',
+          accountType: (systemRole === 'Admin' || systemRole === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE',
+          linkedEntityId: item.id,
+          status: (status === 'INACTIVE' || accountStatus === 'DISABLED' || !loginEnabled) ? 'DISABLED' : 'ACTIVE'
+        });
       } catch (syncErr: any) {
         console.warn('[DB Manager] Notice syncing user from employee:', syncErr?.message || syncErr);
       }
@@ -3702,6 +3862,8 @@ class MySqlDatabaseManager {
       await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `employee_id` = ?', [id]).catch(() => {});
       await this.pool.query('DELETE FROM `solar_employee` WHERE `id` = ?', [id]);
       await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ? OR `employee_id` = ?', [id, id]).catch(() => {});
+      await this.pool.query('DELETE FROM `solar_auth_credentials` WHERE `user_id` = ? OR `linked_entity_id` = ?', [id, id]).catch(() => {});
+      await this.pool.query('DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ?', [id, id]).catch(() => {});
     }
     const items = this.getFallbackItems('employees').filter(e => e.id !== id);
     this.setFallbackItems('employees', items);
@@ -5756,11 +5918,12 @@ class MySqlDatabaseManager {
     const hashed = await bcrypt.hash(cleanPass, 10);
     this.assertDbConnected();
     if (this.pool) {
-      const [res]: any = await this.pool.query(
+      await this.pool.query(
         'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ? OR LOWER(`email`) = ?',
         [hashed, cleanId, cleanId.toLowerCase()]
       );
-      return res?.affectedRows > 0;
+      await authService.updatePassword(this.pool, cleanId, cleanPass);
+      return true;
     }
     const items = this.getFallbackItems('users');
     const user = items.find(u => u.id === cleanId || (u.email && u.email.toLowerCase() === cleanId.toLowerCase()));
@@ -5789,6 +5952,16 @@ class MySqlDatabaseManager {
     }
 
     if (!currentHash) {
+      // Check solar_auth_credentials
+      if (this.pool) {
+        const [cRows]: any = await this.pool.query('SELECT id, password_hash FROM `solar_auth_credentials` WHERE `user_id` = ? LIMIT 1', [userId]);
+        if (Array.isArray(cRows) && cRows.length > 0) {
+          currentHash = cRows[0].password_hash;
+        }
+      }
+    }
+
+    if (!currentHash) {
       throw new Error('User account not found.');
     }
 
@@ -5806,6 +5979,7 @@ class MySqlDatabaseManager {
     const newHashed = await bcrypt.hash(newPass.trim(), 10);
     if (this.pool) {
       await this.pool.query('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?', [newHashed, userId]);
+      await authService.updatePassword(this.pool, userId, newPass.trim());
     }
     return { success: true, message: 'Password changed successfully.' };
   }
@@ -5819,17 +5993,16 @@ class MySqlDatabaseManager {
     const hashed = await bcrypt.hash(cleanPass, 10);
     this.assertDbConnected();
     if (this.pool) {
-      const [userRes]: any = await this.pool.query(
+      await this.pool.query(
         'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
         [hashed, cleanEmail]
       );
-      const [custRes]: any = await this.pool.query(
+      await this.pool.query(
         'UPDATE `solar_customers` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
         [hashed, cleanEmail]
       );
-      if ((userRes?.affectedRows || 0) > 0 || (custRes?.affectedRows || 0) > 0) {
-        return { success: true, message: `Password for ${cleanEmail} reset successfully in MySQL.` };
-      }
+      await authService.updatePassword(this.pool, cleanEmail, cleanPass);
+      return { success: true, message: `Password for ${cleanEmail} reset successfully in MySQL.` };
     }
     return { success: false, message: 'No user account found with that email address.' };
   }
@@ -6239,6 +6412,21 @@ class MySqlDatabaseManager {
       );
     } catch {}
 
+    // Synchronize admin credential to solar_auth_credentials
+    try {
+      await authService.setCredential(this.pool!, {
+        userId: userObj.id,
+        email: userObj.email,
+        password: cleanPass,
+        role: 'Admin',
+        accountType: 'ADMIN',
+        linkedEntityId: userObj.id,
+        status: 'ACTIVE'
+      });
+    } catch (err: any) {
+      console.warn('[DB Manager] Notice syncing admin credential:', err.message);
+    }
+
     const sanitized = {
       id: userObj.id,
       name: userObj.name,
@@ -6335,6 +6523,19 @@ class MySqlDatabaseManager {
     }
 
     this.assertDbConnected();
+
+    // 1. Authoritative check via centralized solar_auth_credentials
+    if (this.pool) {
+      try {
+        const authResult = await authService.authenticate(this.pool, cleanEmail, cleanPass);
+        if (authResult && authResult.user) {
+          return authResult.user;
+        }
+      } catch (authErr: any) {
+        if (authErr?.message?.includes('disabled')) throw authErr;
+        console.warn('[DB Manager] Centralized auth check notice:', authErr?.message || authErr);
+      }
+    }
 
     const [users]: any = await this.pool!.query('SELECT * FROM `solar_users` WHERE LOWER(email) = ?', [cleanEmail]);
     if (Array.isArray(users) && users.length > 0) {

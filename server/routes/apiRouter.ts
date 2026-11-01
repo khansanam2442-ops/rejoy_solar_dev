@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { dbManager, getDbConfigFromEnv } from '../mysqlDatabase';
 import { generateToken, verifyToken } from '../services/tokenService';
+import { authService } from '../services/authService';
 
 export const apiRouter = Router();
 
@@ -10,6 +11,85 @@ export const apiRouter = Router();
 dbManager.init().catch(err => {
   console.error('[DB Manager] Startup error connecting to MySQL:', err?.message || err);
 });
+
+// Role-based helper functions
+export function isCustomerUser(user: any): boolean {
+  if (!user) return false;
+  const accountType = String(user.accountType || '').toUpperCase();
+  const role = String(user.role || '').toUpperCase();
+  return accountType === 'CUSTOMER' || role === 'CUSTOMER' || role === 'CLIENT';
+}
+
+export function isStaffOrAdminUser(user: any): boolean {
+  if (!user) return false;
+  const accountType = String(user.accountType || '').toUpperCase();
+  const role = String(user.role || '').toUpperCase();
+  if (accountType === 'ADMIN' || accountType === 'EMPLOYEE') return true;
+  if (role === 'ADMIN' || role === 'SUPER ADMIN') return true;
+  const allowed = [
+    'PROJECT MANAGER', 'SITE ENGINEER', 'TECHNICIAN', 'QUALITY INSPECTOR',
+    'FIELD EXECUTIVE', 'OPERATIONS', 'SOLAR TECHNICIAN', 'ENGINEER',
+    'SALES EXECUTIVE', 'HR MANAGER', 'ACCOUNTANT', 'EMPLOYEE'
+  ];
+  return allowed.includes(role);
+}
+
+// Role-based authorization middleware
+export async function authenticateSessionMiddleware(req: Request, _res: Response, next: () => void) {
+  try {
+    const sessionCookie = req.cookies?.rejoysolar_session;
+    const authHeader = req.headers.authorization;
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (req.headers['x-auth-token'] as string);
+    const token = sessionCookie || headerToken;
+
+    const pool = dbManager.getPool();
+    if (sessionCookie && pool) {
+      const val = await authService.validateSession(pool, sessionCookie);
+      if (val.valid && val.user) {
+        (req as any).user = val.user;
+        return next();
+      }
+    }
+
+    if (token && pool) {
+      const val = await authService.validateSession(pool, token);
+      if (val.valid && val.user) {
+        (req as any).user = val.user;
+        return next();
+      }
+    }
+
+    if (headerToken) {
+      const jwtVal = verifyToken(headerToken);
+      if (jwtVal.valid && jwtVal.payload) {
+        const u = await dbManager.findUserByIdOrEmail(jwtVal.payload.sub || jwtVal.payload.email);
+        if (u) {
+          (req as any).user = u;
+          return next();
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Auth Middleware] Verification notice:', err?.message || err);
+  }
+  next();
+}
+
+// Mount session authenticator globally on API router
+apiRouter.use(authenticateSessionMiddleware);
+
+export function requireRole(allowedRoles: string[]) {
+  return (req: Request, res: Response, next: () => void) => {
+    const user = (req as any).user;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required. Please log in.' });
+    }
+    if (user.role === 'Admin' || user.role === 'Super Admin' || allowedRoles.includes(user.role)) {
+      return next();
+    }
+    return res.status(403).json({ success: false, message: 'Access denied: Insufficient privileges.' });
+  };
+}
 
 // Admin security check for sensitive database migration and dump endpoints
 function checkAdminAuth(req: Request, res: Response, next: () => void) {
@@ -139,6 +219,18 @@ apiRouter.post('/sync/push', async (req: Request, res: Response) => {
       return;
     }
 
+    // Role-based permission enforcement: Customers have read-only access to projects & stages
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      const restricted = ['projects', 'solar_projects', 'solar_project_stages', 'stages'];
+      if (restricted.includes(String(collection).toLowerCase())) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Customers have read-only access to project stages and progress.'
+        });
+      }
+    }
+
     // For singleton stores like settings and acl_config, allow passing either directly or via items
     if (!effectiveItem && (collection === 'settings' || collection === 'acl_config')) {
       effectiveItem = items || req.body.settings || req.body.config || req.body;
@@ -207,6 +299,7 @@ apiRouter.get(['/auth/registration-status', '/auth/registration-status/'], async
   }
 });
 
+
 apiRouter.post(['/auth/register', '/auth/register/'], async (req: Request, res: Response) => {
   try {
     const { name, email, password, confirmPassword, phone, department, designation } = req.body || {};
@@ -247,15 +340,26 @@ apiRouter.post(['/auth/register', '/auth/register/'], async (req: Request, res: 
       isAuthorizedByAdmin
     );
 
-    const sessionToken = generateToken(user);
-    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    const cookieFlags = [`Path=/`, `Max-Age=${7 * 24 * 3600}`, `SameSite=${isHttps ? 'None' : 'Lax'}`];
-    if (isHttps) cookieFlags.push('Secure', 'Partitioned');
-    res.setHeader('Set-Cookie', `rejoysolar_auth_token=${encodeURIComponent(sessionToken)}; ${cookieFlags.join('; ')}`);
+    const pool = dbManager.getPool();
+    let sessionToken = '';
+    if (pool) {
+      sessionToken = await authService.createSession(pool, {
+        userId: user.id,
+        email: user.email,
+        role: user.role || 'Admin',
+        accountType: 'ADMIN',
+        linkedEntityId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent']
+      });
+      authService.setSessionCookie(res, req, sessionToken);
+    } else {
+      sessionToken = generateToken(user);
+    }
 
     res.status(201).json({
       success: true,
-      message: 'Admin account created successfully.',
+      message: 'Admin account created successfully in MySQL.',
       user,
       token: sessionToken
     });
@@ -278,17 +382,58 @@ apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Respon
       return;
     }
 
-    const user = await dbManager.authenticateUser(email, password);
-    if (user) {
-      const sessionToken = generateToken(user);
-      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-      const cookieFlags = [`Path=/`, `Max-Age=${7 * 24 * 3600}`, `SameSite=${isHttps ? 'None' : 'Lax'}`];
-      if (isHttps) cookieFlags.push('Secure', 'Partitioned');
-      res.setHeader('Set-Cookie', `rejoysolar_auth_token=${encodeURIComponent(sessionToken)}; ${cookieFlags.join('; ')}`);
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPass = String(password).trim();
+    const pool = dbManager.getPool();
+
+    let authResult: { user: any; sessionToken: string } | null = null;
+
+    if (pool) {
+      try {
+        authResult = await authService.authenticate(pool, cleanEmail, cleanPass, {
+          ip: req.ip,
+          userAgent: req.headers['user-agent']
+        });
+      } catch (authErr: any) {
+        if (authErr?.message?.includes('disabled')) {
+          res.status(403).json({ success: false, message: authErr.message });
+          return;
+        }
+        console.warn('[Login] Centralized auth check notice:', authErr?.message || authErr);
+      }
+    }
+
+    // Fallback authentication via dbManager if needed
+    if (!authResult) {
+      const legacyUser = await dbManager.authenticateUser(cleanEmail, cleanPass);
+      if (legacyUser) {
+        let sessToken = '';
+        if (pool) {
+          sessToken = await authService.createSession(pool, {
+            userId: legacyUser.id,
+            email: legacyUser.email,
+            role: legacyUser.role || 'Admin',
+            accountType: legacyUser.role === 'Customer' ? 'CUSTOMER' : 'ADMIN',
+            linkedEntityId: legacyUser.customerId || legacyUser.employeeId || legacyUser.id,
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent']
+          });
+        } else {
+          sessToken = generateToken(legacyUser);
+        }
+        authResult = { user: legacyUser, sessionToken: sessToken };
+      }
+    }
+
+    if (authResult) {
+      // Set secure HttpOnly cookie on client response
+      authService.setSessionCookie(res, req, authResult.sessionToken);
+
+      // Return authenticated sanitized user (without sensitive credentials)
       res.json({
         success: true,
-        user,
-        token: sessionToken
+        user: authResult.user,
+        token: authResult.sessionToken
       });
     } else {
       res.status(401).json({
@@ -304,20 +449,39 @@ apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Respon
 // Session Verification & Current User Profile Endpoint (/api/auth/me & /api/auth/verify)
 apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async (req: Request, res: Response) => {
   try {
+    const sessionCookie = req.cookies?.rejoysolar_session;
     const authHeader = req.headers.authorization;
     const tokenHeader = (req.headers['x-auth-token'] as string) || (req.headers['x-session-token'] as string);
-    let cookieToken: string | null = null;
+    let legacyCookie: string | null = null;
     if (req.headers.cookie) {
       const match = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_auth_token=([^;]*)/);
-      if (match) cookieToken = decodeURIComponent(match[1]);
+      if (match) legacyCookie = decodeURIComponent(match[1]);
     }
-    const token = (authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (authHeader || tokenHeader)) || cookieToken;
+    const token = sessionCookie || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (authHeader || tokenHeader)) || legacyCookie;
 
     if (!token) {
       res.status(401).json({ success: false, message: 'Authentication required. No session token provided.' });
       return;
     }
 
+    const pool = dbManager.getPool();
+
+    // 1. Authoritative check via solar_auth_sessions table in MySQL
+    if (pool) {
+      const sessVerification = await authService.validateSession(pool, token);
+      if (sessVerification.valid && sessVerification.user) {
+        // Touch cookie freshness
+        authService.setSessionCookie(res, req, token);
+        res.json({
+          success: true,
+          user: sessVerification.user,
+          token
+        });
+        return;
+      }
+    }
+
+    // 2. Fallback verification via HMAC token
     const verification = verifyToken(token);
     if (!verification.valid || !verification.payload) {
       res.status(401).json({ success: false, message: verification.error || 'Session expired or invalid.' });
@@ -335,17 +499,10 @@ apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async 
       return;
     }
 
-    // Refresh token if more than half of the validity has elapsed
-    const now = Math.floor(Date.now() / 1000);
-    let refreshedToken = token;
-    if (verification.payload.exp - now < 3 * 24 * 3600) {
-      refreshedToken = generateToken(user);
-    }
-
     res.json({
       success: true,
       user,
-      token: refreshedToken
+      token
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Session verification failed' });
@@ -354,11 +511,12 @@ apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async 
 
 // Explicit Logout Endpoint (/api/auth/logout)
 apiRouter.post(['/auth/logout', '/auth/logout/'], async (req: Request, res: Response) => {
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  res.setHeader(
-    'Set-Cookie',
-    `rejoysolar_auth_token=; Path=/; Max-Age=0; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure; Partitioned' : ''}`
-  );
+  const sessionToken = req.cookies?.rejoysolar_session || req.headers.authorization?.slice(7);
+  const pool = dbManager.getPool();
+  if (sessionToken && pool) {
+    await authService.destroySession(pool, sessionToken).catch(() => {});
+  }
+  authService.clearSessionCookie(res, req);
   res.json({
     success: true,
     message: 'Session cleared and logged out successfully.'
@@ -634,7 +792,7 @@ apiRouter.delete('/leads/:id', async (req: Request, res: Response) => {
 // 6. PROJECTS MODULE API
 // ==========================================================
 
-apiRouter.get('/projects', async (_req: Request, res: Response) => {
+apiRouter.get(['/projects', '/projects/'], async (_req: Request, res: Response) => {
   try {
     const projects = await dbManager.getProjects();
     res.json({ success: true, count: projects.length, data: projects });
@@ -643,8 +801,30 @@ apiRouter.get('/projects', async (_req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/projects', async (req: Request, res: Response) => {
+apiRouter.get(['/projects/:id', '/projects/:id/'], async (req: Request, res: Response) => {
   try {
+    const { id } = req.params;
+    const projects = await dbManager.getProjects();
+    const proj = projects.find(p => p.id === id);
+    if (!proj) {
+      return res.status(404).json({ success: false, error: `Project "${id}" not found.` });
+    }
+    res.json({ success: true, data: proj });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch project' });
+  }
+});
+
+apiRouter.post(['/projects', '/projects/'], async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to projects and stages.'
+      });
+    }
+
     const payload = req.body;
     const newProj = {
       ...payload,
@@ -662,6 +842,14 @@ apiRouter.post('/projects', async (req: Request, res: Response) => {
 // Batch Project Import (Excel / CSV Hub)
 apiRouter.post(['/projects/import', '/projects/import/'], async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to projects.'
+      });
+    }
+
     const { projects, rows } = req.body || {};
     const list = Array.isArray(projects) ? projects : (Array.isArray(rows) ? rows : []);
     if (!list || list.length === 0) {
@@ -683,8 +871,16 @@ apiRouter.post(['/projects/import', '/projects/import/'], async (req: Request, r
   }
 });
 
-apiRouter.put('/projects/:id', async (req: Request, res: Response) => {
+apiRouter.put(['/projects/:id', '/projects/:id/'], async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to project stages and progress.'
+      });
+    }
+
     const { id } = req.params;
     const payload = req.body;
     const updated = await dbManager.saveProject({ ...payload, id });
@@ -694,13 +890,108 @@ apiRouter.put('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.delete('/projects/:id', async (req: Request, res: Response) => {
+apiRouter.delete(['/projects/:id', '/projects/:id/'], async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to projects.'
+      });
+    }
+
     const { id } = req.params;
     await dbManager.deleteProject(id);
     res.json({ success: true, message: 'Project deleted from MySQL.' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to delete project' });
+  }
+});
+
+// Dedicated Project Stage Update API (Protected: Read-only for Customers; Editable by Admins & Staff)
+apiRouter.put(['/projects/:id/stages/:stageKey', '/projects/:id/stages/:stageKey/'], async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to project stages and progress.'
+      });
+    }
+
+    const { id: projectId, stageKey } = req.params;
+    const updates = req.body || {};
+    const updated = await dbManager.updateStageInProject(
+      projectId,
+      stageKey,
+      updates,
+      user?.name || 'Administrator',
+      user?.role || 'Admin'
+    );
+    if (!updated) {
+      return res.status(404).json({ success: false, error: `Project "${projectId}" or stage "${stageKey}" not found.` });
+    }
+    res.json({ success: true, data: updated, message: `Stage "${stageKey}" updated successfully in MySQL.` });
+  } catch (err: any) {
+    console.error('[Update Stage Error]:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update stage in MySQL' });
+  }
+});
+
+apiRouter.patch(['/projects/:id/stages/:stageKey', '/projects/:id/stages/:stageKey/'], async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to project stages and progress.'
+      });
+    }
+
+    const { id: projectId, stageKey } = req.params;
+    const updates = req.body || {};
+    const updated = await dbManager.updateStageInProject(
+      projectId,
+      stageKey,
+      updates,
+      user?.name || 'Administrator',
+      user?.role || 'Admin'
+    );
+    if (!updated) {
+      return res.status(404).json({ success: false, error: `Project "${projectId}" or stage "${stageKey}" not found.` });
+    }
+    res.json({ success: true, data: updated, message: `Stage "${stageKey}" updated successfully in MySQL.` });
+  } catch (err: any) {
+    console.error('[Patch Stage Error]:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update stage in MySQL' });
+  }
+});
+
+// Dedicated Project Progress Update API
+apiRouter.put(['/projects/:id/progress', '/projects/:id/progress/'], async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (user && isCustomerUser(user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Customers have read-only access to project stages and progress.'
+      });
+    }
+
+    const { id: projectId } = req.params;
+    const { progressPercentage, status } = req.body || {};
+    const updated = await dbManager.updateProjectProgress(
+      projectId,
+      Number(progressPercentage),
+      status
+    );
+    if (!updated) {
+      return res.status(404).json({ success: false, error: `Project "${projectId}" not found.` });
+    }
+    res.json({ success: true, data: updated, message: 'Project progress updated successfully in MySQL.' });
+  } catch (err: any) {
+    console.error('[Update Progress Error]:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update project progress in MySQL' });
   }
 });
 

@@ -664,6 +664,48 @@ CREATE TABLE IF NOT EXISTS `solar_workforce_locations` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- --------------------------------------------------------
+-- Table structure for table `solar_auth_credentials`
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `solar_auth_credentials` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `user_id` VARCHAR(64) NOT NULL UNIQUE,
+  `email` VARCHAR(191) NOT NULL UNIQUE,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `role` VARCHAR(64) NOT NULL,
+  `account_type` ENUM('ADMIN', 'EMPLOYEE', 'CUSTOMER') NOT NULL,
+  `linked_entity_id` VARCHAR(64) DEFAULT NULL,
+  `status` VARCHAR(32) DEFAULT 'ACTIVE',
+  `failed_login_attempts` INT DEFAULT 0,
+  `last_login_at` TIMESTAMP NULL DEFAULT NULL,
+  `password_changed_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_auth_cred_role` (`role`),
+  INDEX `idx_auth_cred_type` (`account_type`),
+  INDEX `idx_auth_cred_linked` (`linked_entity_id`),
+  INDEX `idx_auth_cred_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Table structure for table `solar_auth_sessions`
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `solar_auth_sessions` (
+  `id` VARCHAR(128) PRIMARY KEY,
+  `user_id` VARCHAR(64) NOT NULL,
+  `email` VARCHAR(191) NOT NULL,
+  `role` VARCHAR(64) NOT NULL,
+  `account_type` VARCHAR(32) NOT NULL,
+  `linked_entity_id` VARCHAR(64) DEFAULT NULL,
+  `ip_address` VARCHAR(64) DEFAULT NULL,
+  `user_agent` TEXT DEFAULT NULL,
+  `expires_at` TIMESTAMP NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `last_active_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_auth_sess_user_id` (`user_id`),
+  INDEX `idx_auth_sess_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ==========================================================
 -- SYSTEM CONFIGURATION & AUTHORIZED AUTHENTICATION BASELINE
 -- ==========================================================

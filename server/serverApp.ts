@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
@@ -95,6 +96,7 @@ async function createServerApp() {
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(cookieParser());
 
   // Ensure persistent employee document and uploads directories exist
   const uploadsDir = path.resolve(process.cwd(), 'uploads');

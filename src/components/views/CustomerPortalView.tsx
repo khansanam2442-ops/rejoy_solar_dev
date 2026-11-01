@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storage';
@@ -23,11 +23,46 @@ import {
 export const CustomerPortalView: React.FC = () => {
   const { openCustomerControlCenter, setActiveView, showToast, refreshTrigger } = useApp();
   const { currentUser } = useAuth();
+  const [localCounter, setLocalCounter] = useState(0);
 
-  const projects = useMemo(() => storageService.getProjects(), [refreshTrigger]);
-  const myProject = projects[0] || null;
+  useEffect(() => {
+    // Fetch latest project progress directly from MySQL backend
+    fetch('/api/projects', { credentials: 'include' })
+      .then(res => res.json())
+      .then(res => {
+        if (res.success && Array.isArray(res.data)) {
+          storageService.setProjectsFromBackend(res.data);
+          setLocalCounter(prev => prev + 1);
+        }
+      })
+      .catch(err => console.warn('[CustomerPortal] Projects fetch warning:', err));
+  }, []);
 
-  const completedStagesCount = myProject ? (myProject.stages || []).filter(s => s && s.status === 'COMPLETED').length : 0;
+  const customers = useMemo(() => storageService.getCustomers(), [refreshTrigger, localCounter]);
+  const projects = useMemo(() => storageService.getProjects(), [refreshTrigger, localCounter]);
+
+  const currentCustomer = useMemo(() => {
+    if (!currentUser) return customers[0] || null;
+    return (
+      customers.find(c =>
+        (currentUser.customerId && c.id === currentUser.customerId) ||
+        (currentUser.email && c.email?.toLowerCase() === currentUser.email?.toLowerCase()) ||
+        (currentUser.phone && c.phone === currentUser.phone) ||
+        (c.id === (currentUser as any).linkedEntityId) ||
+        (currentUser.name && c.name?.toLowerCase() === currentUser.name?.toLowerCase())
+      ) || customers[0] || null
+    );
+  }, [customers, currentUser]);
+
+  const myProject = useMemo(() => {
+    if (currentCustomer) {
+      const match = projects.find(p => p.customerId === currentCustomer.id || p.customerName?.toLowerCase() === currentCustomer.name?.toLowerCase());
+      if (match) return match;
+    }
+    return projects[0] || null;
+  }, [projects, currentCustomer]);
+
+  const completedStagesCount = myProject ? (myProject.stages || []).filter(s => s && (s.status === 'COMPLETED' || s.status === 'APPROVED')).length : 0;
 
   if (!myProject) {
     return (

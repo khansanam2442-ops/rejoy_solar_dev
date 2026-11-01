@@ -240,38 +240,15 @@ const ACTIVE_SESSION_STORAGE_KEY = 'rejoysolar_active_session';
 const AUTH_TOKEN_KEY = 'rejoysolar_auth_token';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Synchronously initialize user from safe storage to prevent unwanted redirect or flash on refresh
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    try {
-      const savedSession = safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
-      if (savedSession) {
-        const parsed = JSON.parse(savedSession);
-        if (parsed && parsed.email && parsed.role) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('[Auth] Failed to parse initial session:', e);
-    }
-    return null;
-  });
-
+  // Production auth: Sole source of truth is MySQL via HttpOnly server session cookies
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Persist active user profile changes and session token
+  // In-memory user profile updater (no localStorage/sessionStorage credential storage)
   const saveUserProfile = (profile: UserProfile, token?: string) => {
     setCurrentUser(profile);
-    try {
-      if (profile.id) {
-        safeStorage.setItem(USER_PROFILE_STORAGE_KEY + profile.id, JSON.stringify(profile));
-      }
-      safeStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(profile));
-      if (token) {
-        safeStorage.setItem(AUTH_TOKEN_KEY, token);
-        apiClient.setToken(token);
-      }
-    } catch (e) {
-      console.warn('[Auth] Error saving user profile to storage:', e);
+    if (token) {
+      apiClient.setToken(token);
     }
   };
 
@@ -279,27 +256,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let isMounted = true;
 
+    // Purge any legacy client-side storage keys to enforce MySQL as sole source of truth
+    if (typeof window !== 'undefined') {
+      try {
+        safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+        safeStorage.removeItem(AUTH_TOKEN_KEY);
+        safeSessionStorage.clear();
+      } catch {}
+    }
+
     const restoreAndVerifySession = async () => {
       try {
-        const savedToken = safeStorage.getItem(AUTH_TOKEN_KEY);
-        const savedSession = safeStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
-
-        // Pre-populate currentUser from savedSession if present to prevent UI flicker
-        if (savedSession && !currentUser) {
-          try {
-            const parsed = JSON.parse(savedSession);
-            if (parsed && parsed.email && parsed.role) {
-              setCurrentUser(parsed);
-            }
-          } catch {}
-        }
-
-        if (savedToken) {
-          apiClient.setToken(savedToken);
-        }
-
-        // Authoritatively verify session with MySQL backend API
-        const verifyRes = await apiClient.verifySession(savedToken || undefined);
+        // Authoritatively verify session with MySQL backend API (/api/auth/me) with credentials: 'include'
+        const verifyRes = await apiClient.verifySession();
 
         if (verifyRes.success && verifyRes.user) {
           const u = verifyRes.user;
@@ -330,36 +299,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
 
           if (isMounted) {
-            saveUserProfile(verifiedProfile, verifyRes.token || savedToken || undefined);
+            saveUserProfile(verifiedProfile, verifyRes.token || undefined);
             storageService.hydrateFromBackend().catch(() => {});
           }
-        } else if (
-          verifyRes.message &&
-          (verifyRes.message.includes('expired') ||
-            verifyRes.message.includes('Invalid') ||
-            verifyRes.message.includes('not found') ||
-            verifyRes.message.includes('disabled') ||
-            verifyRes.message.includes('Malformed'))
-        ) {
-          // Token genuinely expired or invalidated by MySQL backend
-          console.warn('[Auth] Session invalidated by MySQL backend:', verifyRes.message);
-          safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
-          safeStorage.removeItem(AUTH_TOKEN_KEY);
-          apiClient.setToken(null);
+        } else {
           if (isMounted) {
             setCurrentUser(null);
           }
-        } else if (!savedToken && !savedSession) {
-          // No credentials found anywhere
-          if (isMounted) {
-            setCurrentUser(null);
-          }
-        } else if (savedSession) {
-          // Backend temporarily unreachable (e.g. offline standby), keep cached session
-          console.log('[Auth] Preserving cached session state during backend notice:', verifyRes.message);
         }
       } catch (err) {
-        console.warn('[Auth] Error verifying session with backend, keeping cached state:', err);
+        console.warn('[Auth] Error verifying session with backend:', err);
+        if (isMounted) {
+          setCurrentUser(null);
+        }
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -384,6 +336,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch(`${apiClient.getBaseUrl()}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: cleanEmail, password: cleanPass })
       });
 
