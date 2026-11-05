@@ -384,20 +384,26 @@ function createDbSession($pdo, $userId, $email, $role, $accountType, $linkedEnti
 
 // Helper: Authoritatively validate session in MySQL solar_auth_sessions
 function validateDbSession($pdo, $sessionToken) {
-    if (empty($sessionToken)) return null;
+    if (!$pdo || empty($sessionToken)) return null;
 
-    $stmt = $pdo->prepare("SELECT * FROM `solar_auth_sessions` WHERE `id` = ? LIMIT 1");
-    $stmt->execute([trim($sessionToken)]);
-    $sess = $stmt->fetch(PDO::FETCH_ASSOC);
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM `solar_auth_sessions` WHERE `id` = ? LIMIT 1");
+        $stmt->execute([trim($sessionToken)]);
+        $sess = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return null;
+    }
 
     if (!$sess) {
         return null;
     }
 
-    $expiresAt = strtotime($sess['expires_at']);
+    $expiresAt = strtotime($sess['expires_at'] ?? '');
     if ($expiresAt && time() > $expiresAt) {
-        $del = $pdo->prepare("DELETE FROM `solar_auth_sessions` WHERE `id` = ?");
-        $del->execute([$sessionToken]);
+        try {
+            $del = $pdo->prepare("DELETE FROM `solar_auth_sessions` WHERE `id` = ?");
+            $del->execute([$sessionToken]);
+        } catch (Exception $e) {}
         return null;
     }
 
@@ -2520,11 +2526,19 @@ if ($method === 'GET' && in_array($cleanPath, ['/auth/me', '/auth/me/', '/auth/v
     }
 
     $pdo = getDbConnection($dbConfig);
+    if (!$pdo) {
+        http_response_code(503);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Database connection temporarily unavailable. Session preserved in browser.'
+        ]);
+        exit;
+    }
     ensureRequiredTables($pdo);
 
     $user = validateDbSession($pdo, $token);
     if (!$user) {
-        clearServerSessionCookie();
+        // Do not clear cookie on query lookup failure; preserve credentials and reject request safely
         http_response_code(401);
         echo json_encode([
             'success' => false,
