@@ -654,8 +654,7 @@ export class AuthService {
     const maxAgeMs = 7 * 24 * 3600 * 1000; // 7 days
 
     if (isHttps) {
-      // In HTTPS / Cloud Run / iframe preview environments, SameSite=None, Secure, and Partitioned
-      // ensure browsers retain and transmit the cookie inside iframes, across refreshes, and on direct URL visits
+      // Primary cookie for iframes (SameSite=None, Secure, Partitioned)
       res.cookie('rejoysolar_session', sessionToken, {
         httpOnly: true,
         secure: true,
@@ -664,6 +663,15 @@ export class AuthService {
         maxAge: maxAgeMs,
         partitioned: true
       } as any);
+
+      // Fallback cookie for top-level browser direct navigation (SameSite=Lax, Secure)
+      res.cookie('rejoysolar_session_lax', sessionToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: maxAgeMs
+      });
     } else {
       // Local development over plain HTTP on localhost / 127.0.0.1
       res.cookie('rejoysolar_session', sessionToken, {
@@ -692,6 +700,12 @@ export class AuthService {
     }
 
     res.clearCookie('rejoysolar_session', cookieOpts);
+    res.clearCookie('rejoysolar_session_lax', {
+      httpOnly: true,
+      secure: isHttps,
+      sameSite: 'lax',
+      path: '/'
+    });
     // Also clear legacy tokens
     res.clearCookie('rejoysolar_auth_token', {
       ...cookieOpts,

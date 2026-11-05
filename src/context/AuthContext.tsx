@@ -268,7 +268,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const restoreAndVerifySession = async () => {
       try {
         // Authoritatively verify session with MySQL backend API (/api/auth/me) with credentials: 'include'
-        const verifyRes = await apiClient.verifySession();
+        let verifyRes = await apiClient.verifySession();
+
+        // If first attempt fails (e.g. cold start / network handshake), retry once after short delay
+        if (!verifyRes.success && verifyRes.message?.includes('network')) {
+          await new Promise(r => setTimeout(r, 300));
+          verifyRes = await apiClient.verifySession();
+        }
 
         if (verifyRes.success && verifyRes.user) {
           const u = verifyRes.user;

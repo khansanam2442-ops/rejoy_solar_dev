@@ -41,11 +41,20 @@ export function extractSessionToken(req: Request): string | null {
     const val = String(req.cookies.rejoysolar_session).trim();
     if (val && val !== 'null' && val !== 'undefined') return val;
   }
+  if (req.cookies && req.cookies.rejoysolar_session_lax) {
+    const val = String(req.cookies.rejoysolar_session_lax).trim();
+    if (val && val !== 'null' && val !== 'undefined') return val;
+  }
   // 2. Fallback to raw Cookie header regex for rejoysolar_session
   if (req.headers.cookie) {
     const match = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_session=([^;]*)/);
     if (match && match[1]) {
       const decoded = decodeURIComponent(match[1].trim());
+      if (decoded && decoded !== 'null' && decoded !== 'undefined') return decoded;
+    }
+    const laxMatch = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_session_lax=([^;]*)/);
+    if (laxMatch && laxMatch[1]) {
+      const decoded = decodeURIComponent(laxMatch[1].trim());
       if (decoded && decoded !== 'null' && decoded !== 'undefined') return decoded;
     }
     const legacyMatch = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_auth_token=([^;]*)/);
