@@ -10,6 +10,16 @@
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
+// Helper: HTTPS detection for Hostinger / LiteSpeed / Reverse Proxies
+function isRequestHttps() {
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') return true;
+    if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') return true;
+    if (isset($_SERVER['HTTP_X_FORWARDED_SSL']) && strtolower($_SERVER['HTTP_X_FORWARDED_SSL']) === 'on') return true;
+    if (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443) return true;
+    if (!empty($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'adduglobal.com') !== false) return true;
+    return false;
+}
+
 // 2. Strict JSON Response & Dynamic CORS Headers (Enables HttpOnly Cookies & Credentialed Sessions)
 header('Content-Type: application/json; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
@@ -20,7 +30,7 @@ if (!empty($reqOrigin)) {
     header('Access-Control-Allow-Credentials: true');
 } else {
     $serverHost = $_SERVER['HTTP_HOST'] ?? 'test.adduglobal.com';
-    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $proto = isRequestHttps() ? 'https' : 'http';
     header("Access-Control-Allow-Origin: {$proto}://{$serverHost}");
     header('Access-Control-Allow-Credentials: true');
 }
@@ -28,6 +38,9 @@ if (!empty($reqOrigin)) {
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, x-auth-token, x-session-token, x-admin-token, x-admin-key');
 header('Access-Control-Expose-Headers: Set-Cookie');
+header('Vary: Origin, Cookie, Authorization');
+header('Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     http_response_code(204);
@@ -258,20 +271,10 @@ function ensureRequiredTables($pdo) {
     $tablesVerified = true;
 }
 
-// Helper: HTTPS detection for Hostinger / LiteSpeed / Reverse Proxies
-function isRequestHttps() {
-    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') return true;
-    if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') return true;
-    if (isset($_SERVER['HTTP_X_FORWARDED_SSL']) && strtolower($_SERVER['HTTP_X_FORWARDED_SSL']) === 'on') return true;
-    if (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443) return true;
-    if (!empty($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'adduglobal.com') !== false) return true;
-    return false;
-}
-
 // Helper: Set production-grade HttpOnly session cookie across all environments
 function setServerSessionCookie($sessionToken) {
     $isHttps = isRequestHttps();
-    $maxAge = 7 * 24 * 3600; // 7 days (604800 seconds)
+    $maxAge = 14 * 24 * 3600; // 14 days (1209600 seconds)
     $expires = gmdate('D, d M Y H:i:s T', time() + $maxAge);
     $encToken = urlencode($sessionToken);
 
@@ -333,6 +336,21 @@ function extractIncomingSessionToken() {
         if ($t && $t !== 'null' && $t !== 'undefined') return $t;
     }
 
+    // 5. Apache / LiteSpeed getallheaders() fallback
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        $auth = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        if (preg_match('/Bearer\s+(\S+)/i', $auth, $matches)) {
+            $t = trim($matches[1]);
+            if ($t && $t !== 'null' && $t !== 'undefined') return $t;
+        }
+        $xTok = $headers['x-auth-token'] ?? $headers['X-Auth-Token'] ?? $headers['x-session-token'] ?? '';
+        if (!empty($xTok)) {
+            $t = trim($xTok);
+            if ($t && $t !== 'null' && $t !== 'undefined') return $t;
+        }
+    }
+
     return null;
 }
 
@@ -341,7 +359,7 @@ function createDbSession($pdo, $userId, $email, $role, $accountType, $linkedEnti
     $token = bin2hex(random_bytes(32));
     $ip = $_SERVER['REMOTE_ADDR'] ?? null;
     $ua = $_SERVER['HTTP_USER_AGENT'] ?? null;
-    $expiresAt = date('Y-m-d H:i:s', time() + 7 * 24 * 3600);
+    $expiresAt = date('Y-m-d H:i:s', time() + 14 * 24 * 3600);
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_auth_sessions` (
@@ -392,11 +410,23 @@ function validateDbSession($pdo, $sessionToken) {
     $userId = $sess['user_id'];
     $email = strtolower(trim($sess['email']));
 
-    // 1. Resolve via solar_employee
+    // 1. Resolve via solar_employees (and fallback to solar_employee)
     try {
-        $stmtEmp = $pdo->prepare("SELECT * FROM `solar_employee` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1");
-        $stmtEmp->execute([$userId, $email]);
-        $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
+        $emp = null;
+        try {
+            $stmtEmp = $pdo->prepare("SELECT * FROM `solar_employees` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1");
+            $stmtEmp->execute([$userId, $email]);
+            $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {}
+
+        if (!$emp) {
+            try {
+                $stmtEmpOld = $pdo->prepare("SELECT * FROM `solar_employee` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1");
+                $stmtEmpOld->execute([$userId, $email]);
+                $emp = $stmtEmpOld->fetch(PDO::FETCH_ASSOC);
+            } catch (Exception $e) {}
+        }
+
         if ($emp) {
             $isFw = (bool)($emp['is_field_worker'] ?? false) || in_array($emp['system_role'] ?? '', [
                 'Site Survey Engineer', 'Site Inspector', 'Civil Team', 'Structure Team', 'Installation Team', 'Electrical Team', 'Technician'
@@ -2259,9 +2289,20 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/login', '/auth/login/']))
                         'status' => $c['status'] ?? 'ACTIVE'
                     ];
                 } else {
-                    $stmtE = $pdo->prepare('SELECT * FROM `solar_employee` WHERE `id` = ? OR LOWER(email) = ? LIMIT 1');
-                    $stmtE->execute([$linkedEntityId, $email]);
-                    $emp = $stmtE->fetch(PDO::FETCH_ASSOC);
+                    $emp = null;
+                    try {
+                        $stmtE = $pdo->prepare('SELECT * FROM `solar_employees` WHERE `id` = ? OR LOWER(email) = ? LIMIT 1');
+                        $stmtE->execute([$linkedEntityId, $email]);
+                        $emp = $stmtE->fetch(PDO::FETCH_ASSOC);
+                    } catch (Exception $e) {}
+
+                    if (!$emp) {
+                        try {
+                            $stmtEOld = $pdo->prepare('SELECT * FROM `solar_employee` WHERE `id` = ? OR LOWER(email) = ? LIMIT 1');
+                            $stmtEOld->execute([$linkedEntityId, $email]);
+                            $emp = $stmtEOld->fetch(PDO::FETCH_ASSOC);
+                        } catch (Exception $e) {}
+                    }
 
                     if ($emp) {
                         $isFw = (bool)($emp['is_field_worker'] ?? false) || in_array($emp['system_role'] ?? '', [
@@ -2356,12 +2397,24 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/login', '/auth/login/']))
         }
     }
 
-    // 3. Tertiary fallback via solar_employee table
+    // 3. Tertiary fallback via solar_employees table
     if (!$authenticatedUser) {
         try {
-            $stmtEmp = $pdo->prepare('SELECT * FROM `solar_employee` WHERE LOWER(email) = ? LIMIT 1');
-            $stmtEmp->execute([$email]);
-            $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
+            $emp = null;
+            try {
+                $stmtEmp = $pdo->prepare('SELECT * FROM `solar_employees` WHERE LOWER(email) = ? LIMIT 1');
+                $stmtEmp->execute([$email]);
+                $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
+            } catch (Exception $e) {}
+
+            if (!$emp) {
+                try {
+                    $stmtEmpOld = $pdo->prepare('SELECT * FROM `solar_employee` WHERE LOWER(email) = ? LIMIT 1');
+                    $stmtEmpOld->execute([$email]);
+                    $emp = $stmtEmpOld->fetch(PDO::FETCH_ASSOC);
+                } catch (Exception $e) {}
+            }
+
             if ($emp) {
                 $ePass = $emp['password'] ?? 'User@12345';
                 $eMatches = password_verify($password, $ePass) || ($password === $ePass) || ($password === '123456');

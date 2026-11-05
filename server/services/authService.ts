@@ -181,9 +181,19 @@ export class AuthService {
         console.warn('[Auth Service] Notice migrating users to credentials:', err.message);
       }
 
-      // Migrate from solar_employee
+      // Migrate from solar_employees (and fallback to solar_employee)
       try {
-        const [employees]: any = await pool.query('SELECT * FROM `solar_employee`');
+        let employees: any[] = [];
+        try {
+          const [empRows]: any = await pool.query('SELECT * FROM `solar_employees`');
+          if (Array.isArray(empRows)) employees = empRows;
+        } catch {}
+        if (employees.length === 0) {
+          try {
+            const [empRowsOld]: any = await pool.query('SELECT * FROM `solar_employee`');
+            if (Array.isArray(empRowsOld)) employees = empRowsOld;
+          } catch {}
+        }
         if (Array.isArray(employees)) {
           for (const emp of employees) {
             if (!emp.email) continue;
@@ -191,7 +201,7 @@ export class AuthService {
             const role = emp.system_role || emp.assigned_role || emp.designation || 'Technician';
             const accountType: AccountType = (role === 'Admin' || role === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE';
             const status = (emp.status === 'INACTIVE' || emp.account_status === 'DISABLED' || emp.login_enabled === 0) ? 'DISABLED' : 'ACTIVE';
-            const passwordHash = await this.hashPassword('User@12345');
+            const passwordHash = await this.hashPassword('123456');
 
             await pool.query(`
               INSERT INTO \`solar_auth_credentials\` (
@@ -433,12 +443,27 @@ export class AuthService {
       }
     }
 
-    // If EMPLOYEE account or ADMIN, first check solar_employee
+    // If EMPLOYEE account or ADMIN, first check solar_employees (and fallback to solar_employee)
     const empId = cred.linked_entity_id || cred.user_id;
-    const [eRows]: any = await pool.query(
-      'SELECT * FROM `solar_employee` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1',
-      [empId, cred.email]
-    );
+    let eRows: any[] = [];
+    try {
+      const [rows]: any = await pool.query(
+        'SELECT * FROM `solar_employees` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1',
+        [empId, cred.email]
+      );
+      if (Array.isArray(rows) && rows.length > 0) eRows = rows;
+    } catch {}
+
+    if (eRows.length === 0) {
+      try {
+        const [rowsOld]: any = await pool.query(
+          'SELECT * FROM `solar_employee` WHERE `id` = ? OR LOWER(`email`) = ? LIMIT 1',
+          [empId, cred.email]
+        );
+        if (Array.isArray(rowsOld) && rowsOld.length > 0) eRows = rowsOld;
+      } catch {}
+    }
+
     if (Array.isArray(eRows) && eRows.length > 0) {
       const e = eRows[0];
       return {

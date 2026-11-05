@@ -98,11 +98,20 @@ async function createServerApp() {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     } else {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      const host = req.headers.host || 'localhost:3000';
+      const proto = req.secure ? 'https' : 'http';
+      res.setHeader('Access-Control-Allow-Origin', `${proto}://${host}`);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-auth-token, x-session-token, x-admin-token, x-admin-key');
     res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie');
+    res.setHeader('Vary', 'Origin, Cookie, Authorization');
+
+    if (req.path.startsWith('/api/auth') || req.path.startsWith('/auth')) {
+      res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+    }
 
     if (req.method === 'OPTIONS') {
       res.sendStatus(204);

@@ -230,12 +230,22 @@ class ApiClient {
 
   async login(email: string, pass: string): Promise<any> {
     try {
-      const res = await this.request(`${this.baseUrl}/auth/login`, {
+      let res = await this.request(`${this.baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ email, password: pass })
       });
+      if (res.status === 404 && this.baseUrl === '/api') {
+        try {
+          res = await this.request('/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ email, password: pass })
+          });
+        } catch {}
+      }
       const data = await res.json();
       if (res.ok && data.success && data.token) {
         this.setToken(data.token);
@@ -257,11 +267,20 @@ class ApiClient {
     }
 
     try {
-      const res = await this.request(`${this.baseUrl}/auth/me`, {
+      let res = await this.request(`${this.baseUrl}/auth/me`, {
         method: 'GET',
         headers,
         credentials: 'include'
       });
+      if (res.status === 404 && this.baseUrl === '/api') {
+        try {
+          res = await this.request('/auth/me', {
+            method: 'GET',
+            headers,
+            credentials: 'include'
+          });
+        } catch {}
+      }
       let data: any = {};
       try {
         data = await res.json();

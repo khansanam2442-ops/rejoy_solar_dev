@@ -229,7 +229,10 @@ class StorageService {
         }
       } catch {}
 
-      const res = await fetch(`${apiUrl}/bootstrap`, { headers });
+      const res = await fetch(`${apiUrl}/bootstrap`, {
+        headers,
+        credentials: 'include'
+      });
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {

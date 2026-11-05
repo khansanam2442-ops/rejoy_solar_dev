@@ -261,7 +261,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         safeStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
         safeStorage.removeItem(AUTH_TOKEN_KEY);
-        safeSessionStorage.clear();
+        safeSessionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+        safeSessionStorage.removeItem(AUTH_TOKEN_KEY);
       } catch {}
     }
 
@@ -270,9 +271,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Authoritatively verify session with MySQL backend API (/api/auth/me) with credentials: 'include'
         let verifyRes = await apiClient.verifySession();
 
-        // If first attempt fails (e.g. cold start / network handshake), retry once after short delay
-        if (!verifyRes.success && verifyRes.message?.includes('network')) {
-          await new Promise(r => setTimeout(r, 300));
+        // If first attempt fails and it is not an explicit credential refusal, retry with backoff
+        let retries = 0;
+        while (!verifyRes.success && retries < 2) {
+          const isExplicitAuthFailure = 
+            verifyRes.message?.includes('401') || 
+            verifyRes.message?.includes('403') || 
+            verifyRes.message?.includes('No session token') ||
+            verifyRes.message?.includes('Authentication required');
+
+          if (isExplicitAuthFailure) {
+            break; // No cookie or explicitly terminated session
+          }
+          retries++;
+          await new Promise(r => setTimeout(r, 250 * retries));
           verifyRes = await apiClient.verifySession();
         }
 
