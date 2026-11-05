@@ -34,22 +34,46 @@ export function isStaffOrAdminUser(user: any): boolean {
   return allowed.includes(role);
 }
 
+// Unified session token extractor from cookies (parsed or raw header), Bearer authorization, or custom header
+export function extractSessionToken(req: Request): string | null {
+  // 1. Direct cookie-parser
+  if (req.cookies && req.cookies.rejoysolar_session) {
+    const val = String(req.cookies.rejoysolar_session).trim();
+    if (val && val !== 'null' && val !== 'undefined') return val;
+  }
+  // 2. Fallback to raw Cookie header regex for rejoysolar_session
+  if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_session=([^;]*)/);
+    if (match && match[1]) {
+      const decoded = decodeURIComponent(match[1].trim());
+      if (decoded && decoded !== 'null' && decoded !== 'undefined') return decoded;
+    }
+    const legacyMatch = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_auth_token=([^;]*)/);
+    if (legacyMatch && legacyMatch[1]) {
+      const decoded = decodeURIComponent(legacyMatch[1].trim());
+      if (decoded && decoded !== 'null' && decoded !== 'undefined') return decoded;
+    }
+  }
+  // 3. Authorization Bearer header
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    const h = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+    if (h && h !== 'null' && h !== 'undefined') return h;
+  }
+  // 4. Custom token headers
+  const xAuth = (req.headers['x-auth-token'] as string) || (req.headers['x-session-token'] as string);
+  if (xAuth && typeof xAuth === 'string') {
+    const val = xAuth.trim();
+    if (val && val !== 'null' && val !== 'undefined') return val;
+  }
+  return null;
+}
+
 // Role-based authorization middleware
 export async function authenticateSessionMiddleware(req: Request, _res: Response, next: () => void) {
   try {
-    const sessionCookie = req.cookies?.rejoysolar_session;
-    const authHeader = req.headers.authorization;
-    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (req.headers['x-auth-token'] as string);
-    const token = sessionCookie || headerToken;
-
+    const token = extractSessionToken(req);
     const pool = dbManager.getPool();
-    if (sessionCookie && pool) {
-      const val = await authService.validateSession(pool, sessionCookie);
-      if (val.valid && val.user) {
-        (req as any).user = val.user;
-        return next();
-      }
-    }
 
     if (token && pool) {
       const val = await authService.validateSession(pool, token);
@@ -59,8 +83,8 @@ export async function authenticateSessionMiddleware(req: Request, _res: Response
       }
     }
 
-    if (headerToken) {
-      const jwtVal = verifyToken(headerToken);
+    if (token) {
+      const jwtVal = verifyToken(token);
       if (jwtVal.valid && jwtVal.payload) {
         const u = await dbManager.findUserByIdOrEmail(jwtVal.payload.sub || jwtVal.payload.email);
         if (u) {
@@ -449,15 +473,7 @@ apiRouter.post(['/auth/login', '/auth/login/'], async (req: Request, res: Respon
 // Session Verification & Current User Profile Endpoint (/api/auth/me & /api/auth/verify)
 apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async (req: Request, res: Response) => {
   try {
-    const sessionCookie = req.cookies?.rejoysolar_session;
-    const authHeader = req.headers.authorization;
-    const tokenHeader = (req.headers['x-auth-token'] as string) || (req.headers['x-session-token'] as string);
-    let legacyCookie: string | null = null;
-    if (req.headers.cookie) {
-      const match = req.headers.cookie.match(/(?:^|;\s*)rejoysolar_auth_token=([^;]*)/);
-      if (match) legacyCookie = decodeURIComponent(match[1]);
-    }
-    const token = sessionCookie || (authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : (authHeader || tokenHeader)) || legacyCookie;
+    const token = extractSessionToken(req);
 
     if (!token) {
       res.status(401).json({ success: false, message: 'Authentication required. No session token provided.' });
@@ -470,7 +486,7 @@ apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async 
     if (pool) {
       const sessVerification = await authService.validateSession(pool, token);
       if (sessVerification.valid && sessVerification.user) {
-        // Touch cookie freshness
+        // Touch cookie freshness and preserve session cookie in browser
         authService.setSessionCookie(res, req, token);
         res.json({
           success: true,
@@ -511,10 +527,10 @@ apiRouter.get(['/auth/me', '/auth/me/', '/auth/verify', '/auth/verify/'], async 
 
 // Explicit Logout Endpoint (/api/auth/logout)
 apiRouter.post(['/auth/logout', '/auth/logout/'], async (req: Request, res: Response) => {
-  const sessionToken = req.cookies?.rejoysolar_session || req.headers.authorization?.slice(7);
+  const token = extractSessionToken(req);
   const pool = dbManager.getPool();
-  if (sessionToken && pool) {
-    await authService.destroySession(pool, sessionToken).catch(() => {});
+  if (token && pool) {
+    await authService.destroySession(pool, token).catch(() => {});
   }
   authService.clearSessionCookie(res, req);
   res.json({

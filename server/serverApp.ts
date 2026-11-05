@@ -88,6 +88,29 @@ getPusherServer();
 async function createServerApp() {
   const app = express();
 
+  // Trust reverse proxies (Google Cloud Run / load balancers) so req.secure and req.protocol accurately reflect HTTPS
+  app.set('trust proxy', 1);
+
+  // CORS & Security headers to allow HttpOnly cookies and credentials in iframes and cross-site requests
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-auth-token, x-session-token, x-admin-token, x-admin-key');
+    res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie');
+
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   try {
     await dbManager.init();
   } catch (dbInitErr: any) {

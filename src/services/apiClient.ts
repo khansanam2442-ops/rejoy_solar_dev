@@ -71,11 +71,25 @@ class ApiClient {
     return headers;
   }
 
+  /**
+   * Unified fetch wrapper ensuring HttpOnly cookies and credentials are sent across
+   * all browser environments, iframes, page reloads, and cross-site requests
+   */
+  public async request(url: string, init: RequestInit = {}): Promise<Response> {
+    const customHeaders = (init.headers as Record<string, string>) || {};
+    const headers = this.getAuthHeaders(customHeaders);
+    return fetch(url, {
+      ...init,
+      headers,
+      credentials: 'include'
+    });
+  }
+
   // --- Database Management & Migration ---
 
   async getDbStatus(): Promise<DbStatusResponse> {
     try {
-      const res = await fetch(`${this.baseUrl}/db/status`);
+      const res = await this.request(`${this.baseUrl}/db/status`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (e: any) {
@@ -95,7 +109,7 @@ class ApiClient {
 
   async testDbConnection(config: { host: string; port?: number; user: string; password?: string; database: string }): Promise<{ success: boolean; message: string }> {
     try {
-      const res = await fetch(`${this.baseUrl}/db/test-connection`, {
+      const res = await this.request(`${this.baseUrl}/db/test-connection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -108,7 +122,7 @@ class ApiClient {
 
   async runMigration(config?: any): Promise<{ success: boolean; message: string; tablesCount?: number }> {
     try {
-      const res = await fetch(`${this.baseUrl}/db/migrate`, {
+      const res = await this.request(`${this.baseUrl}/db/migrate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config || {})
@@ -125,7 +139,7 @@ class ApiClient {
 
   async getRegistrationStatus(): Promise<{ success: boolean; allowPublicRegistration: boolean; adminCount: number }> {
     try {
-      const res = await fetch(`${this.baseUrl}/auth/registration-status`);
+      const res = await this.request(`${this.baseUrl}/auth/registration-status`);
       return await res.json();
     } catch {
       return { success: false, allowPublicRegistration: true, adminCount: 0 };
@@ -148,7 +162,7 @@ class ApiClient {
     if (adminAuthToken) {
       headers['Authorization'] = adminAuthToken.startsWith('Bearer ') ? adminAuthToken : `Bearer ${adminAuthToken}`;
     }
-    const res = await fetch(`${this.baseUrl}/auth/register`, {
+    const res = await this.request(`${this.baseUrl}/auth/register`, {
       method: 'POST',
       headers,
       body: JSON.stringify(data)
@@ -166,7 +180,7 @@ class ApiClient {
   }
 
   async wipeDatabase(confirmation: string): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/db/wipe`, {
+    const res = await this.request(`${this.baseUrl}/db/wipe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirmation })
@@ -181,7 +195,7 @@ class ApiClient {
   // --- Master Bootstrap Data ---
   async getBootstrapData(): Promise<Record<string, any> | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/bootstrap`);
+      const res = await this.request(`${this.baseUrl}/bootstrap`);
       if (!res.ok) return null;
       const json = await res.json();
       return json.data || null;
@@ -204,7 +218,7 @@ class ApiClient {
   }
 
   async syncPush(collection: string, payload: { item?: any; items?: any[]; action?: string }): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/sync/push`, {
+    const res = await this.request(`${this.baseUrl}/sync/push`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ collection, ...payload })
@@ -216,7 +230,7 @@ class ApiClient {
 
   async login(email: string, pass: string): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/auth/login`, {
+      const res = await this.request(`${this.baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -243,7 +257,7 @@ class ApiClient {
     }
 
     try {
-      const res = await fetch(`${this.baseUrl}/auth/me`, {
+      const res = await this.request(`${this.baseUrl}/auth/me`, {
         method: 'GET',
         headers,
         credentials: 'include'
@@ -273,7 +287,7 @@ class ApiClient {
       this.setToken(null);
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (t) headers['Authorization'] = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
-      const res = await fetch(`${this.baseUrl}/auth/logout`, {
+      const res = await this.request(`${this.baseUrl}/auth/logout`, {
         method: 'POST',
         headers,
         credentials: 'include'
@@ -286,7 +300,7 @@ class ApiClient {
 
   async updateCustomerPassword(customerId: string, newPassword: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/customers/${encodeURIComponent(customerId)}/password`, {
+      const res = await this.request(`${this.baseUrl}/customers/${encodeURIComponent(customerId)}/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: newPassword })
@@ -301,7 +315,7 @@ class ApiClient {
   // --- Customers ---
   async getCustomers(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/customers`);
+      const res = await this.request(`${this.baseUrl}/customers`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -311,7 +325,7 @@ class ApiClient {
 
   async saveCustomer(cust: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/customers`, {
+      const res = await this.request(`${this.baseUrl}/customers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cust)
@@ -334,7 +348,7 @@ class ApiClient {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch(`${this.baseUrl}/customers/import`, {
+    const res = await this.request(`${this.baseUrl}/customers/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ customers })
@@ -348,7 +362,7 @@ class ApiClient {
 
   async deleteCustomer(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/customers/${encodeURIComponent(id)}`, {
+      const res = await this.request(`${this.baseUrl}/customers/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
       return res.ok;
@@ -360,7 +374,7 @@ class ApiClient {
   // --- Leads ---
   async getLeads(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/leads`);
+      const res = await this.request(`${this.baseUrl}/leads`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -370,7 +384,7 @@ class ApiClient {
 
   async saveLead(lead: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/leads`, {
+      const res = await this.request(`${this.baseUrl}/leads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lead)
@@ -384,7 +398,7 @@ class ApiClient {
 
   async deleteLead(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/leads/${encodeURIComponent(id)}`, {
+      const res = await this.request(`${this.baseUrl}/leads/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
       return res.ok;
@@ -394,7 +408,7 @@ class ApiClient {
   }
 
   async importLeads(leads: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/leads/import`, {
+    const res = await this.request(`${this.baseUrl}/leads/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ leads })
@@ -409,7 +423,7 @@ class ApiClient {
   // --- Projects ---
   async getProjects(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/projects`);
+      const res = await this.request(`${this.baseUrl}/projects`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -419,7 +433,7 @@ class ApiClient {
 
   async saveProject(proj: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/projects`, {
+      const res = await this.request(`${this.baseUrl}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(proj)
@@ -433,7 +447,7 @@ class ApiClient {
 
   async deleteProject(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/projects/${encodeURIComponent(id)}`, {
+      const res = await this.request(`${this.baseUrl}/projects/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
       return res.ok;
@@ -453,7 +467,7 @@ class ApiClient {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch(`${this.baseUrl}/projects/import`, {
+    const res = await this.request(`${this.baseUrl}/projects/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ projects })
@@ -468,7 +482,7 @@ class ApiClient {
   // --- Employees ---
   async getEmployees(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/employees`);
+      const res = await this.request(`${this.baseUrl}/employees`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -478,7 +492,7 @@ class ApiClient {
 
   async saveEmployee(emp: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/employees`, {
+      const res = await this.request(`${this.baseUrl}/employees`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(emp)
@@ -492,7 +506,7 @@ class ApiClient {
 
   async deleteEmployee(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(id)}`, {
+      const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
       return res.ok;
@@ -502,7 +516,7 @@ class ApiClient {
   }
 
   async importEmployees(employees: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/employees/import`, {
+    const res = await this.request(`${this.baseUrl}/employees/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ employees })
@@ -523,7 +537,7 @@ class ApiClient {
     notes?: string;
     uploadedBy?: string;
   }): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents/upload`, {
+    const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents/upload`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(docData)
@@ -536,7 +550,7 @@ class ApiClient {
   }
 
   async deleteEmployeeDocument(employeeId: string, docId: string): Promise<boolean> {
-    const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(docId)}`, {
+    const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
       headers: this.getAuthHeaders()
     });
@@ -546,7 +560,7 @@ class ApiClient {
 
   async getEmployeeDocuments(employeeId: string): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents`, {
+      const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/documents`, {
         headers: this.getAuthHeaders()
       });
       const data = await res.json();
@@ -557,7 +571,7 @@ class ApiClient {
   }
 
   async uploadEmployeePhoto(employeeId: string, photoData: string, fileName?: string): Promise<string> {
-    const res = await fetch(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/photo/upload`, {
+    const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(employeeId)}/photo/upload`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ photoData, fileName })
@@ -572,7 +586,7 @@ class ApiClient {
   // --- Attendance ---
   async getAttendance(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/attendance`);
+      const res = await this.request(`${this.baseUrl}/attendance`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -582,7 +596,7 @@ class ApiClient {
 
   async saveAttendance(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/attendance`, {
+      const res = await this.request(`${this.baseUrl}/attendance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -596,7 +610,7 @@ class ApiClient {
 
   async deleteAttendance(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/attendance/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/attendance/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -604,7 +618,7 @@ class ApiClient {
   }
 
   async importAttendance(attendance: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/attendance/import`, {
+    const res = await this.request(`${this.baseUrl}/attendance/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ attendance })
@@ -619,7 +633,7 @@ class ApiClient {
   // --- Payroll / Payslips ---
   async getPayslips(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/payslips`);
+      const res = await this.request(`${this.baseUrl}/payslips`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -629,7 +643,7 @@ class ApiClient {
 
   async savePayslip(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/payslips`, {
+      const res = await this.request(`${this.baseUrl}/payslips`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -643,7 +657,7 @@ class ApiClient {
 
   async deletePayslip(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/payslips/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/payslips/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -653,7 +667,7 @@ class ApiClient {
   // --- Holidays ---
   async getHolidays(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/holidays`);
+      const res = await this.request(`${this.baseUrl}/holidays`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -663,7 +677,7 @@ class ApiClient {
 
   async saveHoliday(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/holidays`, {
+      const res = await this.request(`${this.baseUrl}/holidays`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -677,7 +691,7 @@ class ApiClient {
 
   async deleteHoliday(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/holidays/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/holidays/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -687,7 +701,7 @@ class ApiClient {
   // --- Products ---
   async getProducts(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/products`);
+      const res = await this.request(`${this.baseUrl}/products`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -697,7 +711,7 @@ class ApiClient {
 
   async saveProduct(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/products`, {
+      const res = await this.request(`${this.baseUrl}/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -711,7 +725,7 @@ class ApiClient {
 
   async deleteProduct(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -719,7 +733,7 @@ class ApiClient {
   }
 
   async importProducts(products: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/products/import`, {
+    const res = await this.request(`${this.baseUrl}/products/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ products })
@@ -734,7 +748,7 @@ class ApiClient {
   // --- Vendors ---
   async getVendors(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/vendors`);
+      const res = await this.request(`${this.baseUrl}/vendors`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -744,7 +758,7 @@ class ApiClient {
 
   async saveVendor(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/vendors`, {
+      const res = await this.request(`${this.baseUrl}/vendors`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -758,7 +772,7 @@ class ApiClient {
 
   async deleteVendor(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/vendors/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/vendors/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -766,7 +780,7 @@ class ApiClient {
   }
 
   async importVendors(vendors: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/vendors/import`, {
+    const res = await this.request(`${this.baseUrl}/vendors/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ vendors })
@@ -781,7 +795,7 @@ class ApiClient {
   // --- Purchase Orders ---
   async getPurchaseOrders(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/purchase-orders`);
+      const res = await this.request(`${this.baseUrl}/purchase-orders`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -791,7 +805,7 @@ class ApiClient {
 
   async savePurchaseOrder(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/purchase-orders`, {
+      const res = await this.request(`${this.baseUrl}/purchase-orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -805,7 +819,7 @@ class ApiClient {
 
   async deletePurchaseOrder(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/purchase-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/purchase-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -815,7 +829,7 @@ class ApiClient {
   // --- Bill of Materials (BOM) ---
   async getBOMs(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/boms`);
+      const res = await this.request(`${this.baseUrl}/boms`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -825,7 +839,7 @@ class ApiClient {
 
   async saveBOM(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/boms`, {
+      const res = await this.request(`${this.baseUrl}/boms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -839,7 +853,7 @@ class ApiClient {
 
   async deleteBOM(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/boms/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/boms/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -849,7 +863,7 @@ class ApiClient {
   // --- Sales Invoices ---
   async getSalesInvoices(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/sales-invoices`);
+      const res = await this.request(`${this.baseUrl}/sales-invoices`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -859,7 +873,7 @@ class ApiClient {
 
   async saveSalesInvoice(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/sales-invoices`, {
+      const res = await this.request(`${this.baseUrl}/sales-invoices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -873,7 +887,7 @@ class ApiClient {
 
   async deleteSalesInvoice(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/sales-invoices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/sales-invoices/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -883,7 +897,7 @@ class ApiClient {
   // --- Warehouses ---
   async getWarehouses(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/warehouses`);
+      const res = await this.request(`${this.baseUrl}/warehouses`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -893,7 +907,7 @@ class ApiClient {
 
   async saveWarehouse(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/warehouses`, {
+      const res = await this.request(`${this.baseUrl}/warehouses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -907,7 +921,7 @@ class ApiClient {
 
   async deleteWarehouse(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/warehouses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/warehouses/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -917,7 +931,7 @@ class ApiClient {
   // --- Stock Movements ---
   async getStockMovements(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/stock-movements`);
+      const res = await this.request(`${this.baseUrl}/stock-movements`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -927,7 +941,7 @@ class ApiClient {
 
   async saveStockMovement(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/stock-movements`, {
+      const res = await this.request(`${this.baseUrl}/stock-movements`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -942,7 +956,7 @@ class ApiClient {
   // --- Stock Audits ---
   async getStockAudits(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/stock-audits`);
+      const res = await this.request(`${this.baseUrl}/stock-audits`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -952,7 +966,7 @@ class ApiClient {
 
   async saveStockAudit(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/stock-audits`, {
+      const res = await this.request(`${this.baseUrl}/stock-audits`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -966,7 +980,7 @@ class ApiClient {
 
   async deleteStockAudit(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/stock-audits/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/stock-audits/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -976,7 +990,7 @@ class ApiClient {
   // --- Quotations ---
   async getQuotations(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/quotations`);
+      const res = await this.request(`${this.baseUrl}/quotations`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -986,7 +1000,7 @@ class ApiClient {
 
   async saveQuotation(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/quotations`, {
+      const res = await this.request(`${this.baseUrl}/quotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1000,7 +1014,7 @@ class ApiClient {
 
   async deleteQuotation(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/quotations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/quotations/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -1010,7 +1024,7 @@ class ApiClient {
   // --- Site Surveys ---
   async getSurveys(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/surveys`);
+      const res = await this.request(`${this.baseUrl}/surveys`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1020,7 +1034,7 @@ class ApiClient {
 
   async saveSurvey(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/surveys`, {
+      const res = await this.request(`${this.baseUrl}/surveys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1034,7 +1048,7 @@ class ApiClient {
 
   async deleteSurvey(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/surveys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/surveys/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -1044,7 +1058,7 @@ class ApiClient {
   // --- Payments ---
   async getPayments(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/payments`);
+      const res = await this.request(`${this.baseUrl}/payments`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1054,7 +1068,7 @@ class ApiClient {
 
   async savePayment(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/payments`, {
+      const res = await this.request(`${this.baseUrl}/payments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1068,7 +1082,7 @@ class ApiClient {
 
   async deletePayment(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/payments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/payments/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -1076,7 +1090,7 @@ class ApiClient {
   }
 
   async importPayments(payments: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/payments/import`, {
+    const res = await this.request(`${this.baseUrl}/payments/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ payments })
@@ -1091,7 +1105,7 @@ class ApiClient {
   // --- Expenses ---
   async getExpenses(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/expenses`);
+      const res = await this.request(`${this.baseUrl}/expenses`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1101,7 +1115,7 @@ class ApiClient {
 
   async saveExpense(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/expenses`, {
+      const res = await this.request(`${this.baseUrl}/expenses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1115,7 +1129,7 @@ class ApiClient {
 
   async deleteExpense(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/expenses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/expenses/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -1123,7 +1137,7 @@ class ApiClient {
   }
 
   async importExpenses(expenses: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/expenses/import`, {
+    const res = await this.request(`${this.baseUrl}/expenses/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ expenses })
@@ -1138,7 +1152,7 @@ class ApiClient {
   // --- Service Tickets ---
   async getServiceTickets(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/service-tickets`);
+      const res = await this.request(`${this.baseUrl}/service-tickets`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1148,7 +1162,7 @@ class ApiClient {
 
   async saveServiceTicket(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/service-tickets`, {
+      const res = await this.request(`${this.baseUrl}/service-tickets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1162,7 +1176,7 @@ class ApiClient {
 
   async deleteServiceTicket(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/service-tickets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/service-tickets/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -1170,7 +1184,7 @@ class ApiClient {
   }
 
   async importServiceTickets(tickets: any[]): Promise<BatchImportResult> {
-    const res = await fetch(`${this.baseUrl}/service-tickets/import`, {
+    const res = await this.request(`${this.baseUrl}/service-tickets/import`, {
       method: 'POST',
       headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ tickets })
@@ -1185,7 +1199,7 @@ class ApiClient {
   // --- AMC Contracts ---
   async getAMCContracts(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/amc-contracts`);
+      const res = await this.request(`${this.baseUrl}/amc-contracts`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1195,7 +1209,7 @@ class ApiClient {
 
   async saveAMCContract(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/amc-contracts`, {
+      const res = await this.request(`${this.baseUrl}/amc-contracts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1209,7 +1223,7 @@ class ApiClient {
 
   async deleteAMCContract(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/amc-contracts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await this.request(`${this.baseUrl}/amc-contracts/${encodeURIComponent(id)}`, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;
@@ -1219,7 +1233,7 @@ class ApiClient {
   // --- Notifications ---
   async getNotifications(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/notifications`);
+      const res = await this.request(`${this.baseUrl}/notifications`);
       const data = await res.json();
       return data.data || [];
     } catch {
@@ -1229,7 +1243,7 @@ class ApiClient {
 
   async saveNotification(item: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/notifications`, {
+      const res = await this.request(`${this.baseUrl}/notifications`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -1243,7 +1257,7 @@ class ApiClient {
 
   async markNotificationRead(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
+      const res = await this.request(`${this.baseUrl}/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
       return res.ok;
     } catch {
       return false;
@@ -1252,7 +1266,7 @@ class ApiClient {
 
   async markAllNotificationsRead(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/notifications/read-all`, { method: 'PUT' });
+      const res = await this.request(`${this.baseUrl}/notifications/read-all`, { method: 'PUT' });
       return res.ok;
     } catch {
       return false;
@@ -1262,7 +1276,7 @@ class ApiClient {
   // --- Settings ---
   async getSettings(): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/settings`);
+      const res = await this.request(`${this.baseUrl}/settings`);
       const data = await res.json();
       return data.data || null;
     } catch {
@@ -1272,7 +1286,7 @@ class ApiClient {
 
   async saveSettings(settings: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/settings`, {
+      const res = await this.request(`${this.baseUrl}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -1287,7 +1301,7 @@ class ApiClient {
   // --- Users & Passwords ---
   async getUsers(): Promise<any[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/users`, {
+      const res = await this.request(`${this.baseUrl}/users`, {
         headers: this.getAuthHeaders()
       });
       const data = await res.json();
@@ -1299,7 +1313,7 @@ class ApiClient {
 
   async saveUser(user: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/users`, {
+      const res = await this.request(`${this.baseUrl}/users`, {
         method: 'POST',
         headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(user)
@@ -1317,7 +1331,7 @@ class ApiClient {
 
   async updateUser(id: string, updates: any): Promise<any> {
     try {
-      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
+      const res = await this.request(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(updates)
@@ -1335,7 +1349,7 @@ class ApiClient {
 
   async updateUserPassword(id: string, password: string): Promise<{ success: boolean; message: string }> {
     try {
-      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}/password`, {
+      const res = await this.request(`${this.baseUrl}/users/${encodeURIComponent(id)}/password`, {
         method: 'PUT',
         headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ password })
@@ -1353,7 +1367,7 @@ class ApiClient {
 
   async changePassword(userId: string, oldPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
     try {
-      const res = await fetch(`${this.baseUrl}/auth/change-password`, {
+      const res = await this.request(`${this.baseUrl}/auth/change-password`, {
         method: 'POST',
         headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ userId, oldPassword, newPassword })
@@ -1371,7 +1385,7 @@ class ApiClient {
 
   async resetPassword(email: string, newPassword: string): Promise<{ success: boolean; message: string }> {
     try {
-      const res = await fetch(`${this.baseUrl}/auth/reset-password`, {
+      const res = await this.request(`${this.baseUrl}/auth/reset-password`, {
         method: 'POST',
         headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ email, newPassword })
@@ -1389,7 +1403,7 @@ class ApiClient {
 
   async deleteUser(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
+      const res = await this.request(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: this.getAuthHeaders()
       });

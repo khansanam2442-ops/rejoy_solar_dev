@@ -547,8 +547,16 @@ export class AuthService {
     }
 
     const sess = rows[0];
-    const expiryTime = new Date(sess.expires_at).getTime();
-    if (Date.now() > expiryTime) {
+    let expiryMs = 0;
+    if (sess.expires_at instanceof Date) {
+      expiryMs = sess.expires_at.getTime();
+    } else {
+      const str = String(sess.expires_at || '');
+      expiryMs = new Date(str.includes('Z') ? str : str.replace(' ', 'T') + 'Z').getTime();
+      if (isNaN(expiryMs)) expiryMs = new Date(sess.expires_at).getTime();
+    }
+
+    if (expiryMs > 0 && Date.now() > expiryMs) {
       await pool.query('DELETE FROM `solar_auth_sessions` WHERE `id` = ?', [cleanToken]).catch(() => {});
       return { valid: false, error: 'Session has expired.' };
     }
@@ -625,38 +633,69 @@ export class AuthService {
   }
 
   /**
-   * Attach HttpOnly, Secure, SameSite cookie to Express response
+   * Robust detection of HTTPS and Cloud Run / proxy environments
+   */
+  public isSecureRequest(req: Request): boolean {
+    if (req.secure) return true;
+    if (req.protocol === 'https') return true;
+    const proto = String(req.headers['x-forwarded-proto'] || '');
+    if (proto.toLowerCase().includes('https')) return true;
+    if (req.headers['x-forwarded-ssl'] === 'on') return true;
+    if (req.headers['x-cloud-trace-context']) return true;
+    if (process.env.NODE_ENV === 'production') return true;
+    return false;
+  }
+
+  /**
+   * Attach HttpOnly, Secure, SameSite, and Partitioned cookie to Express response
    */
   public setSessionCookie(res: Response, req: Request, sessionToken: string): void {
-    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    // Use res.cookie for express standard, and also set Set-Cookie header for robust proxy traversal
+    const isHttps = this.isSecureRequest(req);
     const maxAgeMs = 7 * 24 * 3600 * 1000; // 7 days
-    res.cookie('rejoysolar_session', sessionToken, {
-      httpOnly: true,
-      secure: isHttps,
-      sameSite: isHttps ? 'none' : 'lax',
-      path: '/',
-      maxAge: maxAgeMs
-    });
+
+    if (isHttps) {
+      // In HTTPS / Cloud Run / iframe preview environments, SameSite=None, Secure, and Partitioned
+      // ensure browsers retain and transmit the cookie inside iframes, across refreshes, and on direct URL visits
+      res.cookie('rejoysolar_session', sessionToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        path: '/',
+        maxAge: maxAgeMs,
+        partitioned: true
+      } as any);
+    } else {
+      // Local development over plain HTTP on localhost / 127.0.0.1
+      res.cookie('rejoysolar_session', sessionToken, {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: maxAgeMs
+      });
+    }
   }
 
   /**
    * Clear session cookie on Express response
    */
   public clearSessionCookie(res: Response, req: Request): void {
-    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    res.clearCookie('rejoysolar_session', {
+    const isHttps = this.isSecureRequest(req);
+    const cookieOpts: any = {
       httpOnly: true,
       secure: isHttps,
       sameSite: isHttps ? 'none' : 'lax',
       path: '/'
-    });
+    };
+    if (isHttps) {
+      cookieOpts.partitioned = true;
+    }
+
+    res.clearCookie('rejoysolar_session', cookieOpts);
     // Also clear legacy tokens
     res.clearCookie('rejoysolar_auth_token', {
-      httpOnly: false,
-      secure: isHttps,
-      sameSite: isHttps ? 'none' : 'lax',
-      path: '/'
+      ...cookieOpts,
+      httpOnly: false
     });
   }
 }
