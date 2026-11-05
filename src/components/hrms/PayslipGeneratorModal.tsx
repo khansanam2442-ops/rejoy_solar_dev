@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Employee, Payslip, AdditionalExpenseItem, DeductionItem } from '../../types/solar';
+import { Employee, Payslip, AdditionalExpenseItem, DeductionItem, AttendanceRecord } from '../../types/solar';
 import { storageService } from '../../services/storage';
 import { attendanceBelongsToEmployee } from '../../utils/employeeMatching';
 import {
@@ -44,6 +44,7 @@ interface PayslipGeneratorModalProps {
   existingPayslip?: Payslip | null;
   allEmployees: Employee[];
   initialMonth?: string;
+  attendanceLogs?: AttendanceRecord[];
 }
 
 interface EditableExpenseItem {
@@ -83,7 +84,8 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
   employee: initialEmployee,
   existingPayslip,
   allEmployees,
-  initialMonth
+  initialMonth,
+  attendanceLogs
 }) => {
   const isEditing = Boolean(existingPayslip);
   const defaultCurrentMonth = useMemo(() => getCurrentSalaryMonth(), []);
@@ -148,7 +150,10 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
     if (!currentEmployee || !salaryMonth) return [];
     const prefix = parsedPeriod.prefix; // e.g. "2026-10"
 
-    const allAttendance = storageService.getAttendance();
+    const allAttendance = (attendanceLogs && attendanceLogs.length > 0)
+      ? attendanceLogs
+      : storageService.getAttendance();
+
     return allAttendance.filter(a => {
       const isEmp = attendanceBelongsToEmployee(a, currentEmployee);
       if (!isEmp) return false;
@@ -169,13 +174,24 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
 
       return false;
     });
-  }, [currentEmployee, salaryMonth, parsedPeriod.prefix, isOpen]);
+  }, [currentEmployee, salaryMonth, parsedPeriod.prefix, isOpen, attendanceLogs]);
 
   const fuelAttendanceRecords = useMemo(() => {
     return monthAttendanceLogs.filter(a => {
       if (!a.fuelExpense) return false;
-      const km = Number(a.fuelExpense.totalKmDriven) || 0;
+      let km = Number(a.fuelExpense.totalKmDriven);
+      if (isNaN(km) || km <= 0) {
+        const init = Number(a.fuelExpense.initialOdometerReading);
+        const fin = Number(a.fuelExpense.finalOdometerReading);
+        if (!isNaN(init) && !isNaN(fin) && fin >= init) {
+          km = Math.round((fin - init) * 10) / 10;
+          a.fuelExpense.totalKmDriven = km;
+        } else {
+          return false;
+        }
+      }
       if (km <= 0) return false;
+      // Exclude only explicitly rejected fuel expenses
       if ((a.fuelExpense as any).approvalStatus === 'REJECTED') return false;
       return true;
     });
@@ -183,10 +199,17 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
 
   const totalFuelKmInMonth = useMemo(() => {
     return Math.round(
-      fuelAttendanceRecords.reduce(
-        (sum, a) => sum + (Number(a.fuelExpense?.totalKmDriven) || 0),
-        0
-      ) * 10
+      fuelAttendanceRecords.reduce((sum, a) => {
+        let km = Number(a.fuelExpense?.totalKmDriven) || 0;
+        if (km <= 0) {
+          const init = Number(a.fuelExpense?.initialOdometerReading);
+          const fin = Number(a.fuelExpense?.finalOdometerReading);
+          if (!isNaN(init) && !isNaN(fin) && fin >= init) {
+            km = fin - init;
+          }
+        }
+        return sum + km;
+      }, 0) * 10
     ) / 10;
   }, [fuelAttendanceRecords]);
 
@@ -197,7 +220,8 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
     const otherPayslip = allPayslips.find(p =>
       p &&
       p.id !== existingPayslip?.id &&
-      p.employeeId === currentEmployee.id &&
+      (p.employeeId === currentEmployee.id ||
+        (p.employeeCode && currentEmployee.employeeCode && p.employeeCode.trim().toUpperCase() === currentEmployee.employeeCode.trim().toUpperCase())) &&
       (p.month || '').trim().toLowerCase() === salaryMonth.trim().toLowerCase()
     );
 
@@ -597,6 +621,22 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
         bankReferenceNo: bankReferenceNo.trim() || undefined,
         notes: notes.trim() || undefined
       };
+
+      // Tag eligible attendance fuel records with payslip reimbursement tracking
+      if (fuelAttendanceRecords.length > 0) {
+        fuelAttendanceRecords.forEach(att => {
+          const updatedAtt: AttendanceRecord = {
+            ...att,
+            reimbursedInPayslipId: payslipId,
+            reimbursementStatus: 'REIMBURSED',
+            fuelExpense: att.fuelExpense ? {
+              ...att.fuelExpense,
+              approvalStatus: att.fuelExpense.approvalStatus || 'APPROVED'
+            } : undefined
+          };
+          storageService.saveAttendanceRecord(updatedAtt);
+        });
+      }
 
       onSave(finalPayslip);
       onClose();
@@ -1100,6 +1140,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                         <th className="pb-1.5 font-bold">Start Odo</th>
                         <th className="pb-1.5 font-bold">End Odo</th>
                         <th className="pb-1.5 font-bold">KM Driven</th>
+                        <th className="pb-1.5 font-bold">Status</th>
                         <th className="pb-1.5 font-bold text-right">Fuel Claim</th>
                         <th className="pb-1.5 font-bold text-center">Photos</th>
                       </tr>
@@ -1108,6 +1149,7 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                       {fuelAttendanceRecords.map(rec => {
                         const km = rec.fuelExpense?.totalKmDriven || 0;
                         const dayCost = Math.round(km * (parseFloat(String(reimbursementRatePerKm)) || 0) * 100) / 100;
+                        const status = rec.fuelExpense?.approvalStatus || 'APPROVED';
                         return (
                           <tr key={rec.id} className="hover:bg-amber-100/30">
                             <td className="py-1.5 font-mono text-slate-700">{rec.date}</td>
@@ -1126,6 +1168,17 @@ export const PayslipGeneratorModal: React.FC<PayslipGeneratorModalProps> = ({
                             </td>
                             <td className="py-1.5 font-mono font-bold text-emerald-800">
                               {km} km
+                            </td>
+                            <td className="py-1.5">
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                status === 'APPROVED'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : status === 'REJECTED'
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {status}
+                              </span>
                             </td>
                             <td className="py-1.5 font-mono font-bold text-slate-900 text-right">
                               {currencySymbol}{formatCurrency(dayCost)}

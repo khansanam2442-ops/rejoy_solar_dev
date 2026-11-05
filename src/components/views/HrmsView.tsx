@@ -461,6 +461,27 @@ export const HrmsView: React.FC = () => {
     });
   };
 
+  const handleUpdateFuelApproval = async (attendanceId: string, status: 'APPROVED' | 'REJECTED') => {
+    try {
+      const res = await fetch(`/api/attendance/${encodeURIComponent(attendanceId)}/fuel-approval`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          reviewedBy: currentUser?.name || 'HR Admin'
+        })
+      });
+      if (res.ok) {
+        showToast(`Fuel log marked as ${status} for payroll reimbursement.`, 'success');
+        triggerRefresh();
+      } else {
+        showToast('Failed to update fuel approval status.', 'error');
+      }
+    } catch {
+      showToast('Error communicating with server.', 'error');
+    }
+  };
+
   const getStatusBadge = (status: Employee['status']) => {
     switch (status) {
       case 'ACTIVE':
@@ -900,11 +921,40 @@ export const HrmsView: React.FC = () => {
                           {a.siteProjectTitle && (
                             <p className="text-[10px] text-slate-500 truncate">{a.siteProjectTitle}</p>
                           )}
-                          {Boolean(a.fuelExpense?.totalKmDriven) && (
-                            <div className="pt-0.5">
+                          {Boolean(a.fuelExpense) && (Number(a.fuelExpense?.totalKmDriven) > 0 || (Number(a.fuelExpense?.finalOdometerReading) > Number(a.fuelExpense?.initialOdometerReading))) && (
+                            <div className="pt-1 flex items-center gap-1.5 flex-wrap">
                               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
-                                <span>🚗 {a.fuelExpense?.totalKmDriven} km mileage</span>
+                                <span>🚗 {a.fuelExpense?.totalKmDriven || Math.max(0, Number(a.fuelExpense?.finalOdometerReading) - Number(a.fuelExpense?.initialOdometerReading))} km</span>
                               </span>
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                a.fuelExpense?.approvalStatus === 'APPROVED'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : a.fuelExpense?.approvalStatus === 'REJECTED'
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {a.fuelExpense?.approvalStatus || 'APPROVED'}
+                              </span>
+                              {isAdmin && a.fuelExpense?.approvalStatus !== 'APPROVED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateFuelApproval(a.id, 'APPROVED')}
+                                  title="Approve Fuel Expense for Payroll"
+                                  className="text-[9px] px-1.5 py-0.5 font-bold rounded bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              {isAdmin && a.fuelExpense?.approvalStatus !== 'REJECTED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateFuelApproval(a.id, 'REJECTED')}
+                                  title="Reject Fuel Expense"
+                                  className="text-[9px] px-1.5 py-0.5 font-bold rounded bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 cursor-pointer"
+                                >
+                                  Reject
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1354,6 +1404,7 @@ export const HrmsView: React.FC = () => {
           existingPayslip={payslipToEdit}
           allEmployees={employees}
           initialMonth={selectedCycle}
+          attendanceLogs={attendance}
         />
       )}
 

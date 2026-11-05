@@ -151,6 +151,9 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         id: recordToEdit ? recordToEdit.id : `att-${Date.now()}`,
         employeeId: formData.employeeId,
         employeeName: formData.employeeName,
+        authUid: recordToEdit?.authUid,
+        employeeCode: recordToEdit?.employeeCode,
+        employeeEmail: recordToEdit?.employeeEmail,
         date: formData.date,
         checkInTime: formData.checkInTime.trim(),
         checkOutTime: formData.checkOutTime.trim() || undefined,
@@ -162,7 +165,10 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
           latitude: formData.latitude,
           longitude: formData.longitude,
           locationName: formData.siteLocation.trim() || 'Verified Solar Site'
-        }
+        },
+        fuelExpense: recordToEdit?.fuelExpense,
+        reimbursedInPayslipId: recordToEdit?.reimbursedInPayslipId,
+        reimbursementStatus: recordToEdit?.reimbursementStatus
       };
 
       onSave(finalRecord);

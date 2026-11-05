@@ -13,121 +13,9 @@
     "tallyStatus": "NOT CONFIGURED",
     "whatsAppStatus": "SANDBOX_READY"
   },
-  "customers": [
-    {
-      "id": "cust-test-1793509906664",
-      "customerCode": "CUST-T-6664",
-      "name": "Shreeji Textiles Ltd",
-      "companyName": "Shreeji Textiles Ltd",
-      "customerType": "Commercial",
-      "phone": "+91 98250 88888",
-      "email": "client.1793509906664@rejoysolar.com",
-      "siteAddress": "Survey 102, GIDC Vatva",
-      "city": "Ahmedabad",
-      "state": "Gujarat",
-      "pincode": "",
-      "gstNumber": "",
-      "electricityConsumerNo": "",
-      "sanctionedLoadKw": 0,
-      "status": "ACTIVE",
-      "activeProjectId": null,
-      "createdAt": "2026-11-01T05:11:46.000Z",
-      "updatedAt": "2026-11-01T05:39:55.070Z"
-    }
-  ],
+  "customers": [],
   "leads": [],
-  "projects": [
-    {
-      "id": "proj-test-perm-1",
-      "projectCode": "SOL-TEST-001",
-      "customerId": "cust-test-1793509906664",
-      "customerName": "Shreeji Textiles Ltd",
-      "title": "50 kWp Industrial Rooftop Solar Plant",
-      "capacityKw": 50,
-      "totalValue": 2500000,
-      "status": "COMPLETED",
-      "currentStageKey": "panel_installation",
-      "completionPercentage": 100,
-      "progressPercentage": 100,
-      "projectManagerId": "",
-      "projectManagerName": "",
-      "siteAddress": "GIDC Industrial Estate, Phase 2",
-      "city": "Surat",
-      "inverterModel": "",
-      "panelModel": "",
-      "structureType": "Elevated GI Structure",
-      "startDate": null,
-      "expectedCompletionDate": null,
-      "notes": "",
-      "assignedUsers": [],
-      "stages": [
-        {
-          "id": "proj-test-perm-1-site_survey",
-          "stageKey": "site_survey",
-          "title": "Site Survey & Feasibility",
-          "order": 1,
-          "department": "Engineering",
-          "assignedRole": "Site Survey Engineer",
-          "assignedEmployeeId": "",
-          "assignedEmployeeName": "",
-          "assignedToName": "",
-          "status": "COMPLETED",
-          "priority": "HIGH",
-          "startDate": null,
-          "dueDate": null,
-          "completedDate": null,
-          "checklist": [
-            {
-              "id": "chk-1",
-              "title": "Roof integrity inspection",
-              "completed": true,
-              "completedBy": "Rajesh Kumar"
-            }
-          ],
-          "photos": [],
-          "documents": [],
-          "notes": "Initial survey completed successfully.",
-          "approvedBy": "",
-          "approvedAt": null,
-          "rejectionReason": "",
-          "activities": []
-        },
-        {
-          "id": "proj-test-perm-1-panel_installation",
-          "stageKey": "panel_installation",
-          "title": "Solar Panel Installation",
-          "order": 2,
-          "department": "Installation",
-          "assignedRole": "Technician",
-          "assignedEmployeeId": "",
-          "assignedEmployeeName": "",
-          "assignedToName": "",
-          "status": "COMPLETED",
-          "priority": "HIGH",
-          "startDate": null,
-          "dueDate": null,
-          "completedDate": "1899-11-30T00:00:00.000Z",
-          "checklist": [
-            {
-              "id": "chk-2",
-              "title": "Clamp torque calibration",
-              "completed": true,
-              "completedBy": "Test Technician"
-            }
-          ],
-          "photos": [],
-          "documents": [],
-          "notes": "Technician completed torque tightening for 120 modules.",
-          "approvedBy": "",
-          "approvedAt": null,
-          "rejectionReason": "",
-          "activities": []
-        }
-      ],
-      "createdAt": "2026-11-01T05:40:34.000Z",
-      "updatedAt": "2026-11-01T05:41:18.000Z"
-    }
-  ],
+  "projects": [],
   "employees": [
     {
       "id": "emp-1",
@@ -140,7 +28,7 @@
       "assignedRole": "Admin",
       "phone": "+91 98250 11223",
       "email": "admin@rejoysolar.com",
-      "joiningDate": "2001-11-01",
+      "joiningDate": "2001-11-05",
       "salaryMonthly": 0,
       "status": "ACTIVE",
       "currentSiteLocation": "",
@@ -149,8 +37,8 @@
       "systemRole": "Admin",
       "isFieldWorker": false,
       "accountStatus": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:05.000Z",
-      "updatedAt": "2026-11-01T05:20:37.000Z"
+      "createdAt": "2026-11-05T13:05:25.000Z",
+      "updatedAt": "2026-11-05T13:29:40.000Z"
     },
     {
       "id": "usr-kunal",
@@ -163,7 +51,7 @@
       "assignedRole": "Admin",
       "phone": "+91 98250 11223",
       "email": "kunaldas2442@gmail.com",
-      "joiningDate": "2001-11-01",
+      "joiningDate": "2001-11-05",
       "salaryMonthly": 0,
       "status": "ACTIVE",
       "currentSiteLocation": "",
@@ -172,8 +60,8 @@
       "systemRole": "Admin",
       "isFieldWorker": false,
       "accountStatus": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:05.000Z",
-      "updatedAt": "2026-11-01T05:20:37.000Z"
+      "createdAt": "2026-11-05T13:05:25.000Z",
+      "updatedAt": "2026-11-05T13:29:40.000Z"
     },
     {
       "id": "usr-admin-fallback",
@@ -186,7 +74,7 @@
       "assignedRole": "Admin",
       "phone": "+91 98250 11223",
       "email": "dasest404@gmail.com",
-      "joiningDate": "2001-11-01",
+      "joiningDate": "2001-11-05",
       "salaryMonthly": 0,
       "status": "ACTIVE",
       "currentSiteLocation": "",
@@ -195,31 +83,8 @@
       "systemRole": "Admin",
       "isFieldWorker": false,
       "accountStatus": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:05.000Z",
-      "updatedAt": "2026-11-01T05:20:37.000Z"
-    },
-    {
-      "id": "emp-test-1793509906348",
-      "employeeCode": "EMP-T-6348",
-      "name": "Test Technician",
-      "photoUrl": "",
-      "documents": [],
-      "department": "Service",
-      "designation": "Solar Technician",
-      "assignedRole": "Technician",
-      "phone": "+91 98250 99999",
-      "email": "tech.1793509906348@rejoysolar.com",
-      "joiningDate": "2026-05-10",
-      "salaryMonthly": 35000,
-      "status": "ACTIVE",
-      "currentSiteLocation": "",
-      "loginEnabled": true,
-      "authUid": "emp-test-1793509906348",
-      "systemRole": "Technician",
-      "isFieldWorker": false,
-      "accountStatus": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:46.000Z",
-      "updatedAt": "2026-11-01T05:20:37.000Z"
+      "createdAt": "2026-11-05T13:05:25.000Z",
+      "updatedAt": "2026-11-05T13:29:40.000Z"
     }
   ],
   "payments": [],
@@ -228,8 +93,114 @@
   "vendors": [],
   "purchase_orders": [],
   "sales_invoices": [],
-  "attendance": [],
-  "payslips": [],
+  "attendance": [
+    {
+      "id": "multi-test-att-e2-1-1793886948692",
+      "employeeId": "usr-admin-fallback",
+      "employeeName": "Admin System Fallback",
+      "date": "2026-11-02",
+      "attendanceDate": "2026-11-02",
+      "checkInTime": "08:30 AM",
+      "checkOutTime": "05:30 PM",
+      "siteProjectId": "",
+      "siteProjectTitle": "Mundra Transmission Line Inspection",
+      "status": "FIELD VISIT",
+      "fuelExpense": {
+        "initialOdometerReading": 25000,
+        "finalOdometerReading": 25135,
+        "totalKmDriven": 135,
+        "approvalStatus": "APPROVED",
+        "submittedAt": "2026-11-02T11:00:00Z"
+      },
+      "createdAt": "2026-11-05T13:55:48.000Z"
+    },
+    {
+      "id": "multi-test-att-e1-2-1793886948692",
+      "employeeId": "emp-1",
+      "employeeName": "Vikram Patel",
+      "date": "2026-10-18",
+      "attendanceDate": "2026-10-18",
+      "checkInTime": "09:30 AM",
+      "checkOutTime": "06:30 PM",
+      "siteProjectId": "",
+      "siteProjectTitle": "Sanand Rooftop Inverter Commissioning",
+      "status": "PRESENT",
+      "fuelExpense": {
+        "initialOdometerReading": 10100,
+        "finalOdometerReading": 10160,
+        "totalKmDriven": 60,
+        "approvalStatus": "APPROVED",
+        "submittedAt": "2026-10-18T12:00:00Z"
+      },
+      "createdAt": "2026-11-05T13:55:48.000Z"
+    },
+    {
+      "id": "multi-test-att-e1-1-1793886948692",
+      "employeeId": "emp-1",
+      "employeeName": "Vikram Patel",
+      "date": "2026-10-05",
+      "attendanceDate": "2026-10-05",
+      "checkInTime": "09:00 AM",
+      "checkOutTime": "06:00 PM",
+      "siteProjectId": "",
+      "siteProjectTitle": "Dholera Solar Park Site Survey",
+      "status": "FIELD VISIT",
+      "fuelExpense": {
+        "initialOdometerReading": 10000,
+        "finalOdometerReading": 10090,
+        "totalKmDriven": 90,
+        "approvalStatus": "APPROVED",
+        "submittedAt": "2026-10-05T12:00:00Z"
+      },
+      "createdAt": "2026-11-05T13:55:48.000Z"
+    }
+  ],
+  "payslips": [
+    {
+      "id": "pay-test-oct2026-emp-1",
+      "payslipNumber": "PAY-OCT2026-EMP001",
+      "employeeId": "emp-1",
+      "employeeName": "Vikram Patel",
+      "employeeCode": "EMP001",
+      "month": "October 2026",
+      "year": 2026,
+      "baseSalary": 35000,
+      "basicSalary": 35000,
+      "allowances": 0,
+      "overtimeAmount": 0,
+      "overtimeType": "DIRECT",
+      "overtimeHours": 0,
+      "overtimeRatePerHour": 0,
+      "totalAdditionalExpenses": 1500,
+      "additionalExpenses": [
+        {
+          "id": "exp-fuel-auto-emp-1",
+          "description": "Daily Fuel & Mileage Reimbursement (300 km @ ₹5/km)",
+          "amount": 1500
+        }
+      ],
+      "deductions": [
+        {
+          "id": "ded-pf-1",
+          "description": "Provident Fund (PF Employee)",
+          "amount": 1800
+        }
+      ],
+      "totalDeductions": 1800,
+      "grossEarnings": 36500,
+      "netPay": 34700,
+      "netSalary": 33200,
+      "paymentStatus": "GENERATED",
+      "status": "GENERATED",
+      "paymentDate": null,
+      "paymentMode": "NEFT/RTGS Bank Transfer",
+      "bankReferenceNo": "",
+      "notes": "",
+      "createdAt": "2026-11-05T13:54:35.000Z",
+      "department": "Administration",
+      "designation": "Managing Director & Admin"
+    }
+  ],
   "holidays": [],
   "quotations": [],
   "surveys": [],
@@ -842,8 +813,8 @@
       "employeeId": "EMP001",
       "isFieldWorker": false,
       "status": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:04.000Z",
-      "updatedAt": "2026-11-01T05:39:53.000Z"
+      "createdAt": "2026-11-05T13:05:22.000Z",
+      "updatedAt": "2026-11-05T13:54:43.000Z"
     },
     {
       "id": "usr-kunal",
@@ -856,8 +827,8 @@
       "employeeId": "EMP000",
       "isFieldWorker": false,
       "status": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:04.000Z",
-      "updatedAt": "2026-11-01T05:39:54.000Z"
+      "createdAt": "2026-11-05T13:05:23.000Z",
+      "updatedAt": "2026-11-05T13:54:44.000Z"
     },
     {
       "id": "usr-admin-fallback",
@@ -870,22 +841,8 @@
       "employeeId": "EMP-ADM-404",
       "isFieldWorker": false,
       "status": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:04.000Z",
-      "updatedAt": "2026-11-01T05:39:54.000Z"
-    },
-    {
-      "id": "emp-test-1793509906348",
-      "name": "Test Technician",
-      "email": "tech.1793509906348@rejoysolar.com",
-      "role": "Technician",
-      "phone": "+91 98250 99999",
-      "department": "Service",
-      "designation": "Solar Technician",
-      "employeeId": "EMP-T-6348",
-      "isFieldWorker": false,
-      "status": "ACTIVE",
-      "createdAt": "2026-11-01T05:11:46.000Z",
-      "updatedAt": "2026-11-01T05:11:47.000Z"
+      "createdAt": "2026-11-05T13:05:23.000Z",
+      "updatedAt": "2026-11-05T13:54:44.000Z"
     }
   ],
   "workforce_locations": [

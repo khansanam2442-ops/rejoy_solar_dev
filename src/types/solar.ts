@@ -560,6 +560,8 @@ export interface AttendanceRecord {
     locationName: string;
   };
   fuelExpense?: DailyFuelExpense;
+  reimbursedInPayslipId?: string;
+  reimbursementStatus?: 'PENDING' | 'REIMBURSED';
   createdAt?: string;
   updatedAt?: string;
 }

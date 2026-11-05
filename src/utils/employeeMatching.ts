@@ -52,9 +52,18 @@ export function attendanceBelongsToEmployee(
     return true;
   }
 
+  // Normalized alphanumeric code matching (e.g. EMP-001 vs EMP001)
+  const stripSeparators = (s: string) => s.replace(/[\s\-_]/g, '').toUpperCase();
+  if (attEmpId && empCode && stripSeparators(attEmpId) === stripSeparators(empCode)) {
+    return true;
+  }
+  if (attEmpId && empId && stripSeparators(attEmpId) === stripSeparators(empId)) {
+    return true;
+  }
+
   // 4. Normalized email or employee-code match only when those values are available in the attendance data
   const attCode = (attendance.employeeCode || '').trim().toUpperCase();
-  if (attCode && empCode && attCode === empCode) {
+  if (attCode && empCode && (attCode === empCode || stripSeparators(attCode) === stripSeparators(empCode))) {
     return true;
   }
 

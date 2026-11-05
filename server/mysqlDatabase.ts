@@ -4959,12 +4959,35 @@ class MySqlDatabaseManager {
           fuelExpense = typeof r.fuel_expense_json === 'string' ? JSON.parse(r.fuel_expense_json) : r.fuel_expense_json;
         } catch {}
       }
+
+      // Format date strictly as YYYY-MM-DD regardless of mysql2 Date object or string format
+      let formattedDate = '';
+      if (r.attendance_date instanceof Date) {
+        const y = r.attendance_date.getFullYear();
+        const m = String(r.attendance_date.getMonth() + 1).padStart(2, '0');
+        const d = String(r.attendance_date.getDate()).padStart(2, '0');
+        formattedDate = `${y}-${m}-${d}`;
+      } else if (r.attendance_date) {
+        const s = String(r.attendance_date).trim();
+        formattedDate = s.includes('T') ? s.split('T')[0] : (s.length >= 10 ? s.slice(0, 10) : s);
+      }
+
+      // If fuelExpense has initial & final readings but missing totalKmDriven, compute it
+      if (fuelExpense) {
+        if (fuelExpense.totalKmDriven == null && fuelExpense.finalOdometerReading != null && fuelExpense.initialOdometerReading != null) {
+          const diff = Number(fuelExpense.finalOdometerReading) - Number(fuelExpense.initialOdometerReading);
+          if (diff >= 0) {
+            fuelExpense.totalKmDriven = Math.round(diff * 10) / 10;
+          }
+        }
+      }
+
       return {
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.employee_name,
-        date: r.attendance_date ? String(r.attendance_date).split('T')[0] : '',
-        attendanceDate: r.attendance_date ? String(r.attendance_date).split('T')[0] : '',
+        date: formattedDate,
+        attendanceDate: formattedDate,
         checkInTime: r.check_in_time,
         checkOutTime: r.check_out_time,
         checkInGPS: r.check_in_gps_json ? JSON.parse(r.check_in_gps_json) : undefined,
@@ -4982,7 +5005,20 @@ class MySqlDatabaseManager {
 
   public async saveAttendance(item: any): Promise<any> {
     this.assertDbConnected();
-    const attDate = item.attendanceDate ? String(item.attendanceDate).split('T')[0] : (item.date ? String(item.date).split('T')[0] : new Date().toISOString().split('T')[0]);
+    let attDate = '';
+    const rawDate = item.attendanceDate || item.date;
+    if (rawDate instanceof Date) {
+      const y = rawDate.getFullYear();
+      const m = String(rawDate.getMonth() + 1).padStart(2, '0');
+      const d = String(rawDate.getDate()).padStart(2, '0');
+      attDate = `${y}-${m}-${d}`;
+    } else if (rawDate) {
+      const s = String(rawDate).trim();
+      attDate = s.includes('T') ? s.split('T')[0] : (s.length >= 10 ? s.slice(0, 10) : s);
+    } else {
+      attDate = new Date().toISOString().split('T')[0];
+    }
+
     const fuelExpenseJson = item.fuelExpense
       ? JSON.stringify(item.fuelExpense)
       : (item.fuel_expense_json ? (typeof item.fuel_expense_json === 'string' ? item.fuel_expense_json : JSON.stringify(item.fuel_expense_json)) : null);

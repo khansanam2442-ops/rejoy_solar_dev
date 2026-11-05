@@ -87,20 +87,55 @@ export const parseSalaryMonth = (
     };
   }
 
-  const parts = periodStr.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    const rawMonth = parts[0].toLowerCase();
-    const rawYear = parseInt(parts[1], 10);
-    const foundIdx = MONTH_NAMES.findIndex(m => m.toLowerCase() === rawMonth);
+  const str = periodStr.trim();
 
-    if (foundIdx !== -1 && !isNaN(rawYear) && rawYear > 1900 && rawYear < 3000) {
-      const num = String(foundIdx + 1).padStart(2, '0');
+  // 1. Check for ISO or hyphenated format: "YYYY-MM" or "YYYY-MM-DD"
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})/);
+  if (isoMatch) {
+    const yr = parseInt(isoMatch[1], 10);
+    const mNum = parseInt(isoMatch[2], 10);
+    if (yr >= 1900 && yr <= 3000 && mNum >= 1 && mNum <= 12) {
+      const idx = mNum - 1;
+      const numStr = String(mNum).padStart(2, '0');
       return {
-        month: MONTH_NAMES[foundIdx],
-        year: rawYear,
-        monthIndex: foundIdx,
+        month: MONTH_NAMES[idx],
+        year: yr,
+        monthIndex: idx,
+        monthNumber: numStr,
+        prefix: `${yr}-${numStr}`
+      };
+    }
+  }
+
+  // 2. Check for "Month YYYY" or "Month, YYYY" or "YYYY Month"
+  const cleanStr = str.replace(/,/g, ' ');
+  const parts = cleanStr.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    // Standard: "October 2026"
+    const foundIdx1 = MONTH_NAMES.findIndex(m => m.toLowerCase() === parts[0].toLowerCase());
+    const rawYear1 = parseInt(parts[1], 10);
+    if (foundIdx1 !== -1 && !isNaN(rawYear1) && rawYear1 > 1900 && rawYear1 < 3000) {
+      const num = String(foundIdx1 + 1).padStart(2, '0');
+      return {
+        month: MONTH_NAMES[foundIdx1],
+        year: rawYear1,
+        monthIndex: foundIdx1,
         monthNumber: num,
-        prefix: `${rawYear}-${num}`
+        prefix: `${rawYear1}-${num}`
+      };
+    }
+
+    // Inverted: "2026 October"
+    const rawYear2 = parseInt(parts[0], 10);
+    const foundIdx2 = MONTH_NAMES.findIndex(m => m.toLowerCase() === parts[1].toLowerCase());
+    if (foundIdx2 !== -1 && !isNaN(rawYear2) && rawYear2 > 1900 && rawYear2 < 3000) {
+      const num = String(foundIdx2 + 1).padStart(2, '0');
+      return {
+        month: MONTH_NAMES[foundIdx2],
+        year: rawYear2,
+        monthIndex: foundIdx2,
+        monthNumber: num,
+        prefix: `${rawYear2}-${num}`
       };
     }
   }

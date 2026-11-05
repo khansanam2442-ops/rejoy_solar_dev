@@ -1289,6 +1289,39 @@ apiRouter.put('/attendance/:id', async (req: Request, res: Response) => {
   }
 });
 
+apiRouter.put('/attendance/:id/fuel-approval', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { approvalStatus, approvedBy, notes } = req.body || {};
+    const attendanceRecords = await dbManager.getAttendance();
+    const existing = attendanceRecords.find((a: any) => a.id === id);
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found.' });
+    }
+
+    const currentFuel = existing.fuelExpense || {};
+    const updatedFuel = {
+      ...currentFuel,
+      approvalStatus: approvalStatus || 'APPROVED',
+      approvedBy: approvedBy || (req as any).user?.name || 'Administrator',
+      approvedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      approvalNotes: notes || currentFuel.approvalNotes
+    };
+
+    const updatedRecord = {
+      ...existing,
+      fuelExpense: updatedFuel
+    };
+
+    const saved = await dbManager.saveAttendance(updatedRecord);
+    res.json({ success: true, data: saved, message: `Fuel log marked as ${approvalStatus || 'APPROVED'}.` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update fuel approval status' });
+  }
+});
+
 apiRouter.delete('/attendance/:id', async (req: Request, res: Response) => {
   try {
     await dbManager.deleteAttendance(req.params.id);

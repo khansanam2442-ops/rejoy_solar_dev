@@ -251,6 +251,7 @@ export const TodayAttendanceCard: React.FC<TodayAttendanceCardProps> = ({
       initialOdometerImageName: initialOdoImgName || undefined,
       finalOdometerImageUrl: finalOdoImg || undefined,
       finalOdometerImageName: finalOdoImgName || undefined,
+      approvalStatus: todayRecord.fuelExpense?.approvalStatus || 'APPROVED',
       submittedAt: todayRecord.fuelExpense?.submittedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -468,6 +469,7 @@ export const TodayAttendanceCard: React.FC<TodayAttendanceCardProps> = ({
         finalOdometerImageUrl: finalOdoImg || todayRecord.fuelExpense?.finalOdometerImageUrl,
         finalOdometerImageName: finalOdoImgName || todayRecord.fuelExpense?.finalOdometerImageName,
         totalKmDriven: kmDriven,
+        approvalStatus: todayRecord.fuelExpense?.approvalStatus || 'APPROVED',
         updatedAt: new Date().toISOString()
       } : todayRecord.fuelExpense;
 
