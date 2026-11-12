@@ -37,7 +37,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   };
 
   private handleHardReset = () => {
-    if (window.confirm('This will clear local session storage and re-initialize with fresh demo data. Continue?')) {
+    if (window.confirm('This will clear local cache and reload from the server. Continue?')) {
       try {
         safeStorage.clear();
         safeSessionStorage.clear();

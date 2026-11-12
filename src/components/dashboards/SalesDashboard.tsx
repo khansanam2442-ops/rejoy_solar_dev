@@ -178,27 +178,33 @@ export const SalesDashboard: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            {followUps.map(lead => (
-              <div
-                key={lead.id}
-                onClick={() => setActiveView('crm_leads')}
-                className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/50 border border-slate-200/80 hover:border-blue-300 transition-all cursor-pointer"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-slate-900 truncate">
-                    {lead.customerName}
-                  </span>
-                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100/60 px-1.5 py-0.5 rounded">
-                    {lead.solarCapacityKw || '5'} kW
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 truncate">{lead.city || 'Gujarat'} • {lead.phone}</p>
-                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>Status: <strong className="text-slate-700">{lead.status}</strong></span>
-                  <span className="text-blue-600 font-bold">Call / WhatsApp →</span>
-                </div>
+            {followUps.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                No pending customer follow-ups in database.
               </div>
-            ))}
+            ) : (
+              followUps.map(lead => (
+                <div
+                  key={lead.id}
+                  onClick={() => setActiveView('crm_leads')}
+                  className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/50 border border-slate-200/80 hover:border-blue-300 transition-all cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-slate-900 truncate">
+                      {lead.customerName}
+                    </span>
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100/60 px-1.5 py-0.5 rounded">
+                      {lead.solarCapacityKw ? `${lead.solarCapacityKw} kW` : '—'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 truncate">{lead.city ? `${lead.city} • ` : ''}{lead.phone}</p>
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>Status: <strong className="text-slate-700">{lead.status}</strong></span>
+                    <span className="text-blue-600 font-bold">Call / WhatsApp →</span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -229,39 +235,47 @@ export const SalesDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {leads.slice(0, 6).map(lead => (
-                  <tr key={lead.id} className="hover:bg-slate-50/80">
-                    <td className="py-3 px-3">
-                      <span className="font-bold text-slate-900 block">{lead.customerName}</span>
-                      <span className="text-[11px] text-slate-400">{lead.phone}</span>
-                    </td>
-                    <td className="py-3 px-3 font-semibold text-slate-700">
-                      {lead.solarCapacityKw || 10} kWp
-                    </td>
-                    <td className="py-3 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        lead.status === 'WON'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : lead.status === 'PROPOSAL'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {lead.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 font-mono font-bold text-slate-800">
-                      ₹{((lead.estimatedValue || 450000) / 1000).toLocaleString('en-IN')}k
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      <button
-                        onClick={() => setActiveView('crm_leads')}
-                        className="text-blue-600 hover:text-blue-800 font-bold text-[11px]"
-                      >
-                        Details
-                      </button>
+                {leads.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-xs text-slate-400">
+                      No customer leads or sales opportunities found in MySQL database.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  leads.slice(0, 6).map(lead => (
+                    <tr key={lead.id} className="hover:bg-slate-50/80">
+                      <td className="py-3 px-3">
+                        <span className="font-bold text-slate-900 block">{lead.customerName}</span>
+                        <span className="text-[11px] text-slate-400">{lead.phone}</span>
+                      </td>
+                      <td className="py-3 px-3 font-semibold text-slate-700">
+                        {lead.solarCapacityKw ? `${lead.solarCapacityKw} kWp` : '—'}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          lead.status === 'WON'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : lead.status === 'PROPOSAL'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {lead.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 font-mono font-bold text-slate-800">
+                        {lead.estimatedValue ? `₹${(lead.estimatedValue / 1000).toLocaleString('en-IN')}k` : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <button
+                          onClick={() => setActiveView('crm_leads')}
+                          className="text-blue-600 hover:text-blue-800 font-bold text-[11px]"
+                        >
+                          Details
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

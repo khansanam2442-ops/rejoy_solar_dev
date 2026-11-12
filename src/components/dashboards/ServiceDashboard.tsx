@@ -149,38 +149,44 @@ export const ServiceDashboard: React.FC = () => {
         </div>
 
         <div className="space-y-3">
-          {tickets.slice(0, 5).map(ticket => (
-            <div
-              key={ticket.id}
-              onClick={() => setActiveView('service')}
-              className="p-3.5 rounded-xl bg-slate-50 hover:bg-yellow-50/50 border border-slate-200/80 hover:border-yellow-300 transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-900">{ticket.issue || ticket.category}</span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    ticket.priority === 'URGENT'
-                      ? 'bg-rose-100 text-rose-800'
-                      : ticket.priority === 'HIGH'
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-slate-200 text-slate-700'
-                  }`}>
-                    {ticket.priority}
+          {tickets.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+              No open service or maintenance tickets in MySQL database.
+            </div>
+          ) : (
+            tickets.slice(0, 5).map(ticket => (
+              <div
+                key={ticket.id}
+                onClick={() => setActiveView('service')}
+                className="p-3.5 rounded-xl bg-slate-50 hover:bg-yellow-50/50 border border-slate-200/80 hover:border-yellow-300 transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-900">{ticket.issue || ticket.category}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      ticket.priority === 'URGENT'
+                        ? 'bg-rose-100 text-rose-800'
+                        : ticket.priority === 'HIGH'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {ticket.priority}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">{ticket.customerName} • {ticket.projectTitle || 'Solar Site'}</p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-slate-600">
+                    Technician: <strong className="text-slate-800">{ticket.assignedTechnicianName || ticket.assignedToName || 'Unassigned'}</strong>
+                  </span>
+                  <span className="text-xs font-bold text-amber-700 hover:underline">
+                    Resolve Ticket →
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1">{ticket.customerName} • {ticket.projectTitle || 'Solar Site'}</p>
               </div>
-
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-slate-600">
-                  Technician: <strong className="text-slate-800">{ticket.assignedTechnicianName || ticket.assignedToName || 'Unassigned'}</strong>
-                </span>
-                <span className="text-xs font-bold text-amber-700 hover:underline">
-                  Resolve Ticket →
-                </span>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>

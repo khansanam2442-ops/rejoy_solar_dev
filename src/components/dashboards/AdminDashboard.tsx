@@ -442,22 +442,30 @@ export const AdminDashboard: React.FC = () => {
             </span>
           </div>
           <div className="space-y-3.5">
-            {activities.slice(0, 5).map(act => (
-              <div key={act.id} className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-800 leading-snug truncate">
-                    {act.action}
-                  </p>
-                  <p className="text-[11px] text-slate-500 truncate">
-                    {act.details || 'System event'}
-                  </p>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
+            {activities.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400">
+                <Activity className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-slate-500">No activity recorded</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Events and actions will appear here in real time.</p>
               </div>
-            ))}
+            ) : (
+              activities.slice(0, 5).map(act => (
+                <div key={act.id} className="flex items-start gap-3">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-800 leading-snug truncate">
+                      {act.action}
+                    </p>
+                    <p className="text-[11px] text-slate-500 truncate">
+                      {act.details || 'System event'}
+                    </p>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

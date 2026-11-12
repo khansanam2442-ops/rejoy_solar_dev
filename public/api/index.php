@@ -2004,6 +2004,16 @@ if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
         }
     } catch (Exception $e) {}
 
+    $tableCounts = [];
+    foreach ($tables as $t) {
+        try {
+            $cntStmt = $pdo->query("SELECT COUNT(*) FROM `{$t}`");
+            $tableCounts[$t] = (int)$cntStmt->fetchColumn();
+        } catch (Exception $e) {
+            $tableCounts[$t] = -1;
+        }
+    }
+
     http_response_code(200);
     echo json_encode([
         'success' => true,
@@ -2013,7 +2023,8 @@ if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
         'database' => $meta['database'],
         'version' => $meta['version'],
         'tables' => $tables,
-        'tablesCount' => count($tables)
+        'tablesCount' => count($tables),
+        'counts' => $tableCounts
     ]);
     exit;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ProjectStage, UserRole } from '../../types/solar';
 import { StatusBadge } from '../common/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
@@ -97,7 +97,9 @@ export const StageCard: React.FC<StageCardProps> = ({
     showToast(`Checklist item updated`, 'info');
   };
 
-  const handleSimulatePhotoUpload = async () => {
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCaptureClick = () => {
     if (isReadOnlyEffective) {
       showToast('Read-only view: Customers cannot upload stage photos.', 'warning');
       return;
@@ -108,31 +110,46 @@ export const StageCard: React.FC<StageCardProps> = ({
       return;
     }
 
-    setIsCapturingGPS(true);
-    const gps = await getCurrentGPSPosition();
-    setIsCapturingGPS(false);
+    photoInputRef.current?.click();
+  };
 
-    // Simulated high-quality solar site photo
-    const samplePhotos = [
-      'https://images.unsplash.com/photo-1509391365360-2e959784a276?w=600&q=80',
-      'https://images.unsplash.com/photo-1508514177221-188b1cf16e9d?w=600&q=80',
-      'https://images.unsplash.com/photo-1559302504-64aae6ca6b6f?w=600&q=80',
-      'https://images.unsplash.com/photo-1545208942-e1c9c916524b?w=600&q=80'
-    ];
-    const randomUrl = samplePhotos[Math.floor(Math.random() * samplePhotos.length)];
+  const handleRealPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const newPhoto = {
-      id: `photo-${Date.now()}`,
-      url: randomUrl,
-      caption: `Field Verification: ${stage.title}`,
-      uploadedBy: currentUser.name,
-      uploadedAt: new Date().toISOString(),
-      gpsCoordinates: `${gps.latitude}, ${gps.longitude} (${gps.locationName})`
-    };
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid image file', 'warning');
+      return;
+    }
 
-    const updatedPhotos = [...stage.photos, newPhoto];
-    onUpdateStage(stage.stageKey, { photos: updatedPhotos });
-    showToast(`Photo captured with GPS coordinates (${gps.latitude}°, ${gps.longitude}°)`, 'success');
+    try {
+      setIsCapturingGPS(true);
+      const gps = await getCurrentGPSPosition();
+      setIsCapturingGPS(false);
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const newPhoto = {
+          id: `photo-${Date.now()}`,
+          url: dataUrl,
+          caption: `${file.name.replace(/\.[^/.]+$/, '')} (${stage.title})`,
+          uploadedBy: currentUser.name,
+          uploadedAt: new Date().toISOString(),
+          gpsCoordinates: `${gps.latitude}, ${gps.longitude} (${gps.locationName})`
+        };
+
+        const updatedPhotos = [...stage.photos, newPhoto];
+        onUpdateStage(stage.stageKey, { photos: updatedPhotos });
+        showToast(`Photo captured with GPS coordinates (${gps.latitude}°, ${gps.longitude}°)`, 'success');
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setIsCapturingGPS(false);
+      showToast(err?.message || 'Failed to capture photo', 'error');
+    } finally {
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
   };
 
   const handleAddNote = () => {
@@ -412,14 +429,24 @@ export const StageCard: React.FC<StageCardProps> = ({
                 <span>Site Photos & GPS Coordinate Verification ({stage.photos.length})</span>
               </h4>
               {!isReadOnlyEffective ? (
-                <button
-                  onClick={handleSimulatePhotoUpload}
-                  disabled={isCapturingGPS}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold shadow-2xs transition-colors"
-                >
-                  <Camera className="w-3.5 h-3.5 text-amber-500" />
-                  <span>{isCapturingGPS ? 'Locating GPS...' : 'Capture Site Photo'}</span>
-                </button>
+                <>
+                  <input
+                    type="file"
+                    ref={photoInputRef}
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleRealPhotoUpload}
+                  />
+                  <button
+                    onClick={handleCaptureClick}
+                    disabled={isCapturingGPS}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold shadow-2xs transition-colors"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{isCapturingGPS ? 'Locating GPS...' : 'Capture Site Photo'}</span>
+                  </button>
+                </>
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
                   <Camera className="w-3.5 h-3.5 text-blue-500" />

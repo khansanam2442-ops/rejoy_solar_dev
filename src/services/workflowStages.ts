@@ -15,15 +15,12 @@ interface StageBlueprint {
   order: number;
   department: string;
   assignedRole: UserRole;
-  assignedEmployeeId: string;
-  assignedEmployeeName: string;
+  assignedEmployeeId?: string;
+  assignedEmployeeName?: string;
   priority: Priority;
   plannedDaysFromStart: number;
   checklistTitles: string[];
   description: string;
-  demoPhotos?: PhotoAttachment[];
-  demoComments?: string;
-  demoApprovalBy?: string;
 }
 
 const STAGE_BLUEPRINTS: StageBlueprint[] = [
@@ -33,8 +30,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 1,
     department: 'Engineering',
     assignedRole: 'Site Survey Engineer',
-    assignedEmployeeId: 'emp-3',
-    assignedEmployeeName: 'Rajesh Kumar',
     priority: 'HIGH',
     plannedDaysFromStart: 2,
     description: 'Preliminary physical inspection, structural load estimation, shadow obstruction mapping, and grid interconnection feasibility.',
@@ -45,28 +40,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Structural load bearing & slab condition check',
       'Cable routing distance to LT panel measured',
       'Site panoramic photos captured'
-    ],
-    demoComments: 'Site survey completed. Roof RCC is sound. 100 kW recommended with south orientation.',
-    demoApprovalBy: 'Amit Sharma (PM)',
-    demoPhotos: [
-      {
-        id: 'p-1',
-        url: 'https://images.unsplash.com/photo-1508514177221-188b1cf16e9d?auto=format&fit=crop&q=80&w=400',
-        caption: 'Rooftop South view prior to installation',
-        type: 'BEFORE',
-        uploadedAt: '2026-08-14T11:40:00Z',
-        uploadedBy: 'Rajesh Kumar',
-        gpsCoordinates: '22.9868, 72.3789'
-      },
-      {
-        id: 'p-2',
-        url: 'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?auto=format&fit=crop&q=80&w=400',
-        caption: 'LT panel room measurement inspection',
-        type: 'DURING',
-        uploadedAt: '2026-08-14T12:00:00Z',
-        uploadedBy: 'Rajesh Kumar',
-        gpsCoordinates: '22.9868, 72.3789'
-      }
     ]
   },
   {
@@ -75,8 +48,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 2,
     department: 'Sales & Engineering',
     assignedRole: 'Project Manager',
-    assignedEmployeeId: 'emp-2',
-    assignedEmployeeName: 'Amit Sharma',
     priority: 'HIGH',
     plannedDaysFromStart: 5,
     description: 'Detailed design sign-off, Single Line Diagram (SLD) acceptance, commercial contract execution, and advance milestone confirmation.',
@@ -86,9 +57,7 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Quotation & Payment milestone contract executed',
       'Advance milestone payment confirmed',
       'BOM generation & procurement requisition raised'
-    ],
-    demoComments: '3D shadow simulation & SLD approved by client. Advance payment of ₹2,00,000 cleared.',
-    demoApprovalBy: 'Amit Sharma (PM)'
+    ]
   },
   {
     stageKey: 'civil_work',
@@ -96,8 +65,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 3,
     department: 'Civil',
     assignedRole: 'Civil Team',
-    assignedEmployeeId: 'emp-3',
-    assignedEmployeeName: 'Rajesh Kumar',
     priority: 'HIGH',
     plannedDaysFromStart: 10,
     description: 'RCC pedestal casting, chemical anchoring, foundation structural curing, and roof membrane waterproofing verification.',
@@ -107,19 +74,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Casting of RCC pedestals with M25 concrete grade',
       'Curing period of 7 days completed',
       'Waterproofing chemical coating around pedestals'
-    ],
-    demoComments: 'RCC foundation casting completed and cured. Waterproofing verified with zero leaks.',
-    demoApprovalBy: 'Amit Sharma (PM)',
-    demoPhotos: [
-      {
-        id: 'p-3',
-        url: 'https://images.unsplash.com/photo-1590381105924-c72589b9ef3f?auto=format&fit=crop&q=80&w=400',
-        caption: 'M25 RCC Pedestals with chemical waterproofing coat',
-        type: 'DURING',
-        uploadedAt: '2026-08-20T16:00:00Z',
-        uploadedBy: 'Rajesh Kumar',
-        gpsCoordinates: '22.9868, 72.3789'
-      }
     ]
   },
   {
@@ -128,8 +82,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 4,
     department: 'Structure',
     assignedRole: 'Structure Team',
-    assignedEmployeeId: 'emp-6',
-    assignedEmployeeName: 'Dinesh Yadav',
     priority: 'HIGH',
     plannedDaysFromStart: 15,
     description: 'Hot Dip Galvanized (HDG) column erection, rafters/purlins installation, tilt angle calibration, and high-tensile torque checks.',
@@ -139,19 +91,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Tilt angle verification with digital inclinometer (23° South)',
       'Torque tightening of high tensile grade 8.8 bolts',
       'Corrosion inspection and cold galvanizing spray applied'
-    ],
-    demoComments: 'HDG structure erected and torque inspected. 80-micron zinc coating confirmed.',
-    demoApprovalBy: 'Amit Sharma (PM)',
-    demoPhotos: [
-      {
-        id: 'p-4',
-        url: 'https://images.unsplash.com/photo-1545208942-e1c9c916524b?auto=format&fit=crop&q=80&w=400',
-        caption: 'HDG 80 Micron elevated structure assembled',
-        type: 'DURING',
-        uploadedAt: '2026-08-25T14:30:00Z',
-        uploadedBy: 'Dinesh Yadav',
-        gpsCoordinates: '22.9868, 72.3789'
-      }
     ]
   },
   {
@@ -160,8 +99,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 5,
     department: 'Electrical',
     assignedRole: 'Electrical Team',
-    assignedEmployeeId: 'emp-8',
-    assignedEmployeeName: 'Ankit Joshi',
     priority: 'MEDIUM',
     plannedDaysFromStart: 18,
     description: 'Early Streamer Emission (ESE) or conventional lightning protection terminal erection with dedicated down conductors.',
@@ -171,9 +108,7 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Insulator standoff clamping at 1 meter intervals',
       'Direct path to designated LA earthing pit without bends',
       'Strike counter and test link mounted'
-    ],
-    demoComments: 'Lightning mast erected with dedicated down conductor to earth pit.',
-    demoApprovalBy: 'Amit Sharma (PM)'
+    ]
   },
   {
     stageKey: 'cdc_earthing',
@@ -181,8 +116,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 6,
     department: 'Electrical',
     assignedRole: 'Electrical Team',
-    assignedEmployeeId: 'emp-8',
-    assignedEmployeeName: 'Ankit Joshi',
     priority: 'HIGH',
     plannedDaysFromStart: 21,
     description: 'Continuous DC earthing routing, module frame bonding, tray grounding, and bimetallic transition washers.',
@@ -192,9 +125,7 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Perforated cable trays with covers installed',
       'Inverter chassis body earthing interconnection',
       'Bimetallic washers used on aluminium-copper transitions'
-    ],
-    demoComments: 'Earthing strip continuous loop connected to all module tables.',
-    demoApprovalBy: 'Amit Sharma (PM)'
+    ]
   },
   {
     stageKey: 'earthing_pits',
@@ -202,8 +133,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 7,
     department: 'Electrical',
     assignedRole: 'Electrical Team',
-    assignedEmployeeId: 'emp-8',
-    assignedEmployeeName: 'Ankit Joshi',
     priority: 'HIGH',
     plannedDaysFromStart: 24,
     description: 'Boring, electrode insertion, backfill compound filling, and earth resistance calibration to below 2 Ohms.',
@@ -213,19 +142,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Backfilling with eco-friendly conductive compound (BFC)',
       'Civil inspection chamber & heavy duty pit covers installed',
       'Earth resistance measurement with digital earth tester (< 2 Ohm)'
-    ],
-    demoComments: 'All chemical earth pits measured below 1.4 Ohms with calibrated digital tester.',
-    demoApprovalBy: 'Amit Sharma (PM)',
-    demoPhotos: [
-      {
-        id: 'p-5',
-        url: 'https://images.unsplash.com/photo-1559302504-64aae6ca6b6f?auto=format&fit=crop&q=80&w=400',
-        caption: 'Chemical earth pit chamber with digital resistance test',
-        type: 'AFTER',
-        uploadedAt: '2026-08-30T17:00:00Z',
-        uploadedBy: 'Ankit Joshi',
-        gpsCoordinates: '22.9868, 72.3789'
-      }
     ]
   },
   {
@@ -234,8 +150,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 8,
     department: 'Installation',
     assignedRole: 'Installation Team',
-    assignedEmployeeId: 'emp-7',
-    assignedEmployeeName: 'Manoj Tiwari',
     priority: 'HIGH',
     plannedDaysFromStart: 28,
     description: 'Tier-1 Mono PERC Bifacial module clamping, string wiring, MC4 connector crimping, and Voc/Isc validation.',
@@ -245,18 +159,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'MC4 connector crimping with professional ratchet tool',
       'String Voc and Isc measurement with calibrated multimeter',
       'String cable dressing and UV zip-tying under modules'
-    ],
-    demoComments: 'Waaree 540Wp modules 80% clamped. String Voc measured at 642V DC.',
-    demoPhotos: [
-      {
-        id: 'p-6',
-        url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=400',
-        caption: 'Solar panel string array mounting underway',
-        type: 'DURING',
-        uploadedAt: '2026-09-03T11:15:00Z',
-        uploadedBy: 'Manoj Tiwari',
-        gpsCoordinates: '22.9868, 72.3789'
-      }
     ]
   },
   {
@@ -265,8 +167,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 9,
     department: 'Electrical',
     assignedRole: 'Electrical Team',
-    assignedEmployeeId: 'emp-8',
-    assignedEmployeeName: 'Ankit Joshi',
     priority: 'HIGH',
     plannedDaysFromStart: 31,
     description: 'String inverter mounting, canopy weatherproofing, DC string terminations, and RS485 communication line routing.',
@@ -276,8 +176,7 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'AC output termination with heavy duty copper lugs',
       'Communication RS485 / Modbus cabling routed',
       'Inverter body and surge protection double earthing verified'
-    ],
-    demoComments: 'Sungrow 100kW Inverter fixed on weather canopy.'
+    ]
   },
   {
     stageKey: 'meter_synchronisation',
@@ -285,8 +184,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 10,
     department: 'Engineering & Liaisoning',
     assignedRole: 'Project Manager',
-    assignedEmployeeId: 'emp-2',
-    assignedEmployeeName: 'Amit Sharma',
     priority: 'HIGH',
     plannedDaysFromStart: 35,
     description: 'Discom liaisoning, bi-directional net meter testing, CT/PT inspection, sealing, and grid synchronisation paperwork.',
@@ -296,8 +193,7 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
       'Bi-directional electronic trivector meter installed',
       'Discom official seals applied on meter box and CT/PT',
       'Net metering connectivity certificate issued by Discom'
-    ],
-    demoComments: 'Discom meter inspection and bi-directional meter synchronization.'
+    ]
   },
   {
     stageKey: 'inverter_wifi_pairing',
@@ -305,8 +201,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 11,
     department: 'Service',
     assignedRole: 'Service Manager',
-    assignedEmployeeId: 'emp-11',
-    assignedEmployeeName: 'Rohit Verma',
     priority: 'MEDIUM',
     plannedDaysFromStart: 37,
     description: 'Telemetry datalogger insertion, cloud monitoring platform onboarding, and customer mobile app setup.',
@@ -324,8 +218,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 12,
     department: 'Electrical',
     assignedRole: 'Electrical Team',
-    assignedEmployeeId: 'emp-8',
-    assignedEmployeeName: 'Ankit Joshi',
     priority: 'HIGH',
     plannedDaysFromStart: 39,
     description: 'IP65 distribution box mounting, Type-II surge arrestor integration, busbar ferrule labeling, and cable glanding.',
@@ -343,8 +235,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 13,
     department: 'Electrical',
     assignedRole: 'Electrical Team',
-    assignedEmployeeId: 'emp-8',
-    assignedEmployeeName: 'Ankit Joshi',
     priority: 'HIGH',
     plannedDaysFromStart: 41,
     description: 'Armoured cable pulling from inverter to main LT panel, phase sequence testing, and breaker integration.',
@@ -362,8 +252,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 14,
     department: 'Operations',
     assignedRole: 'Project Manager',
-    assignedEmployeeId: 'emp-2',
-    assignedEmployeeName: 'Amit Sharma',
     priority: 'HIGH',
     plannedDaysFromStart: 43,
     description: 'Statutory electrical inspector safety approval, anti-islanding trip tests, insulation Megger checks, and thermography.',
@@ -381,8 +269,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 15,
     department: 'Management',
     assignedRole: 'Project Manager',
-    assignedEmployeeId: 'emp-2',
-    assignedEmployeeName: 'Amit Sharma',
     priority: 'HIGH',
     plannedDaysFromStart: 45,
     description: 'Formal plant energization, performance handover dossier delivery, customer operations training, and project sign-off.',
@@ -400,8 +286,6 @@ const STAGE_BLUEPRINTS: StageBlueprint[] = [
     order: 16,
     department: 'Service',
     assignedRole: 'Service Manager',
-    assignedEmployeeId: 'emp-11',
-    assignedEmployeeName: 'Rohit Verma',
     priority: 'MEDIUM',
     plannedDaysFromStart: 48,
     description: 'Warranty activation, scheduled annual maintenance planning, emergency breakdown protocol, and generation monitoring.',

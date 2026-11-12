@@ -683,7 +683,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         joiningDate: formData.joiningDate,
         salaryMonthly: Number(formData.salaryMonthly),
         status: formData.status,
-        photoUrl: formData.photoUrl.trim() || `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`,
+        photoUrl: formData.photoUrl.trim() || undefined,
         currentSiteLocation: formData.currentSiteLocation.trim() || undefined,
 
         // Safe account linkage fields only

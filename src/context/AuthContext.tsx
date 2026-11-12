@@ -518,12 +518,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetPassword = async (email: string): Promise<void> => {
     const clean = email.trim().toLowerCase();
-    const employees = storageService.getEmployees();
-    const linkedEmp = employees.find(e => e.email && e.email.trim().toLowerCase() === clean);
-    const demo = DEMO_ACCOUNTS.find(d => d.email.toLowerCase() === clean);
-
-    if (!linkedEmp && !demo && !clean.includes('rejoy')) {
-      throw new Error('No user account found with that email address.');
+    try {
+      const res = await apiClient.resetPassword(clean, DEMO_DEFAULT_PASSWORD);
+      if (!res.success) {
+        throw new Error(res.message || 'No user account found with that email address.');
+      }
+    } catch (err: any) {
+      throw new Error(err?.message || 'Failed to reset password. Please check your email or contact system admin.');
     }
   };
 

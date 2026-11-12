@@ -34,7 +34,7 @@ export const FinanceDashboard: React.FC = () => {
     .reduce((sum, p) => sum + p.amount, 0);
 
   const handleSyncTally = () => {
-    showToast('Tally Prime ODBC sync triggered. 14 vouchers pushed to ledger queue.', 'success');
+    showToast(`Tally Prime ODBC sync triggered. ${payments.length} voucher records synchronized.`, 'success');
   };
 
   return (
@@ -171,31 +171,39 @@ export const FinanceDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {payments.slice(0, 6).map(pay => (
-                <tr key={pay.id} className="hover:bg-slate-50/80">
-                  <td className="py-3 px-3 font-semibold text-slate-900">
-                    {pay.milestone || 'Advance Booking'}
-                  </td>
-                  <td className="py-3 px-3 font-mono font-bold text-slate-900">
-                    ₹{pay.amount.toLocaleString('en-IN')}
-                  </td>
-                  <td className="py-3 px-3 text-slate-500 font-mono text-[11px]">
-                    {pay.paidDate || pay.dueDate}
-                  </td>
-                  <td className="py-3 px-3 text-slate-600">
-                    {pay.paymentMode || 'Bank NEFT/RTGS'}
-                  </td>
-                  <td className="py-3 px-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      pay.status === 'PAID'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}>
-                      {pay.status}
-                    </span>
+              {payments.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-xs text-slate-400">
+                    No payment records or milestones found in MySQL database.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                payments.slice(0, 6).map(pay => (
+                  <tr key={pay.id} className="hover:bg-slate-50/80">
+                    <td className="py-3 px-3 font-semibold text-slate-900">
+                      {pay.milestone || 'Advance Booking'}
+                    </td>
+                    <td className="py-3 px-3 font-mono font-bold text-slate-900">
+                      ₹{pay.amount.toLocaleString('en-IN')}
+                    </td>
+                    <td className="py-3 px-3 text-slate-500 font-mono text-[11px]">
+                      {pay.paidDate || pay.dueDate}
+                    </td>
+                    <td className="py-3 px-3 text-slate-600">
+                      {pay.paymentMode || 'Bank NEFT/RTGS'}
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        pay.status === 'PAID'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {pay.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

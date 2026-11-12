@@ -28,36 +28,48 @@ export const FieldDashboard: React.FC = () => {
 
   const projects = useMemo(() => storageService.getProjects(), [refreshTrigger]);
 
-  // Tasks relevant to field engineering
-  const [tasks, setTasks] = useState([
-    {
-      id: 't-1',
-      title: 'Site Shadow & Solar Radiance Audit',
-      project: 'Shree Krishna Textiles (150 kWp)',
-      location: 'Plot 42, GIDC Sachin, Surat',
-      time: '10:30 AM',
-      status: 'IN_PROGRESS',
-      checklist: '8/12 items checked'
-    },
-    {
-      id: 't-2',
-      title: 'MMS Structure Leveling & Torque Verification',
-      project: 'Patel Cold Storage (75 kWp)',
-      location: 'National Highway 48, Navsari',
-      time: '02:00 PM',
-      status: 'PENDING',
-      checklist: 'Pending on-site arrival'
-    },
-    {
-      id: 't-3',
-      title: 'Inverter Cable Termination & Earth Pit Megger Test',
-      project: 'GreenField Agro Farm (25 kWp)',
-      location: 'Bardoli Rural Substation, Bardoli',
-      time: '04:30 PM',
-      status: 'SCHEDULED',
-      checklist: 'Single line diagram ready'
-    }
-  ]);
+  // Derive site work orders dynamically from projects persisted in MySQL
+  const fieldTasks = useMemo(() => {
+    const list: Array<{
+      id: string;
+      title: string;
+      project: string;
+      location: string;
+      time: string;
+      status: string;
+      checklist: string;
+      projectId: string;
+      customerId: string;
+    }> = [];
+
+    projects.forEach(p => {
+      p.stages?.forEach(s => {
+        const isAssigned =
+          s.assignedEmployeeId === currentUser?.employeeId ||
+          s.assignedEmployeeName === currentUser?.name ||
+          s.assignedRole === currentUser?.role ||
+          s.status === 'IN PROGRESS';
+
+        if (isAssigned && s.status !== 'COMPLETED') {
+          const completedCount = s.checklist?.filter(c => c.completed).length || 0;
+          const totalChecklist = s.checklist?.length || 0;
+          list.push({
+            id: `${p.id}-${s.id || s.stageKey}`,
+            title: s.title,
+            project: `${p.title} (${p.capacityKw} kWp)`,
+            location: p.siteAddress || p.location || 'Site Location',
+            time: s.dueDate || 'Today',
+            status: s.status === 'IN PROGRESS' ? 'IN_PROGRESS' : 'PENDING',
+            checklist: totalChecklist > 0 ? `${completedCount}/${totalChecklist} checklist items` : 'Checklist pending',
+            projectId: p.id,
+            customerId: p.customerId
+          });
+        }
+      });
+    });
+
+    return list;
+  }, [projects, currentUser]);
 
   const handleUploadPhotos = () => {
     showToast('Photo upload portal opened. Geolocated photos attached with GPS metadata.', 'success');
@@ -118,59 +130,71 @@ export const FieldDashboard: React.FC = () => {
               <p className="text-xs text-slate-500">Scheduled site visits, quality audits and technical tasks</p>
             </div>
             <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-              3 Tasks Today
+              {fieldTasks.length} {fieldTasks.length === 1 ? 'Task' : 'Tasks'} Active
             </span>
           </div>
 
           <div className="space-y-3.5">
-            {tasks.map(task => (
-              <div
-                key={task.id}
-                className="p-4 rounded-xl bg-slate-50 hover:bg-amber-50/40 border border-slate-200/80 hover:border-amber-300 transition-all"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-amber-500" />
-                    <h4 className="text-xs font-bold text-slate-900">{task.title}</h4>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-slate-400" /> {task.time}
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      task.status === 'IN_PROGRESS'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-slate-200 text-slate-700'
-                    }`}>
-                      {task.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <span className="font-semibold text-slate-800">{task.project}</span>
-                  <span className="flex items-center gap-1 text-slate-500">
-                    <MapPin className="w-3 h-3 text-slate-400" /> {task.location}
-                  </span>
-                </div>
-
-                <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    Checklist: <strong className="text-slate-800">{task.checklist}</strong>
-                  </span>
-
-                  <button
-                    onClick={() => {
-                      showToast(`Opened checklist for ${task.title}`, 'info');
-                    }}
-                    className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>Execute Checklist</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+            {fieldTasks.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-slate-500">No active work orders</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Assigned solar project milestones and site checklists will appear here.</p>
               </div>
-            ))}
+            ) : (
+              fieldTasks.map(task => (
+                <div
+                  key={task.id}
+                  className="p-4 rounded-xl bg-slate-50 hover:bg-amber-50/40 border border-slate-200/80 hover:border-amber-300 transition-all"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      <h4 className="text-xs font-bold text-slate-900">{task.title}</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-400" /> {task.time}
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        task.status === 'IN_PROGRESS'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        {task.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <span className="font-semibold text-slate-800">{task.project}</span>
+                    <span className="flex items-center gap-1 text-slate-500">
+                      <MapPin className="w-3 h-3 text-slate-400" /> {task.location}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Checklist: <strong className="text-slate-800">{task.checklist}</strong>
+                    </span>
+
+                    <button
+                      onClick={() => {
+                        if (task.customerId && task.projectId) {
+                          openCustomerControlCenter(task.customerId, task.projectId);
+                        } else {
+                          setActiveView('projects_all');
+                        }
+                      }}
+                      className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Execute Checklist</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 

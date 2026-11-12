@@ -592,12 +592,18 @@ export const ProjectAssignmentModal: React.FC<ProjectAssignmentModalProps> = ({
           {selectedEmployee && (
             <div className="p-3.5 bg-linear-to-r from-amber-50/40 to-slate-50 border border-amber-200/70 rounded-2xl flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <img
-                  src={selectedEmployee.photoUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
-                  alt={selectedEmployee.name}
-                  referrerPolicy="no-referrer"
-                  className="w-11 h-11 rounded-xl object-cover border border-white shadow-2xs shrink-0"
-                />
+                {selectedEmployee.photoUrl ? (
+                  <img
+                    src={selectedEmployee.photoUrl}
+                    alt={selectedEmployee.name}
+                    referrerPolicy="no-referrer"
+                    className="w-11 h-11 rounded-xl object-cover border border-white shadow-2xs shrink-0"
+                  />
+                ) : (
+                  <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm flex items-center justify-center border border-white shadow-2xs shrink-0">
+                    {selectedEmployee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'EMP'}
+                  </div>
+                )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-black text-slate-900 truncate">{selectedEmployee.name}</span>
