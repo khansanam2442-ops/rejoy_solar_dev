@@ -22,6 +22,9 @@ export const HrDashboard: React.FC = () => {
   const { currentUser } = useAuth();
 
   const employees = useMemo(() => storageService.getEmployees(), [refreshTrigger]);
+  const attendance = useMemo(() => storageService.getAttendance(), [refreshTrigger]);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayPresentCount = attendance.filter(a => a && (a.date === todayStr || (a as any).attendanceDate === todayStr) && a.status !== 'ABSENT').length;
 
   const totalEmployees = employees.length;
   const activeStaff = employees.filter(e => e.status === 'ACTIVE' && e.accountStatus !== 'DISABLED');
@@ -99,9 +102,9 @@ export const HrDashboard: React.FC = () => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-emerald-700 tracking-tight">
-              {totalEmployees === 0 ? 0 : Math.max(0, activeStaff.length - onLeaveStaff.length)} <span className="text-xs font-bold text-emerald-600">checked in</span>
+              {todayPresentCount} <span className="text-xs font-bold text-emerald-600">checked in</span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 font-medium">{totalEmployees === 0 ? 'No active roster' : 'Active team attendance'}</p>
+            <p className="text-xs text-slate-500 mt-1 font-medium">{totalEmployees === 0 ? 'No active roster' : 'Logged today in system'}</p>
           </div>
         </div>
 

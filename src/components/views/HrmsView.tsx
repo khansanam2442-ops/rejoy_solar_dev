@@ -143,7 +143,7 @@ export const HrmsView: React.FC = () => {
       return {
         employee: emp,
         payslip,
-        daysPresent: Math.max(daysPresent, 24) // realistic working days
+        daysPresent: daysPresent
       };
     });
   }, [employees, payslips, selectedCycle, attendance]);

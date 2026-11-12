@@ -173,7 +173,7 @@ export const ServiceDashboard: React.FC = () => {
 
               <div className="flex items-center gap-3">
                 <span className="text-xs font-medium text-slate-600">
-                  Technician: <strong className="text-slate-800">{ticket.assignedTechnicianName || ticket.assignedToName || 'Ketan Solanki'}</strong>
+                  Technician: <strong className="text-slate-800">{ticket.assignedTechnicianName || ticket.assignedToName || 'Unassigned'}</strong>
                 </span>
                 <span className="text-xs font-bold text-amber-700 hover:underline">
                   Resolve Ticket →

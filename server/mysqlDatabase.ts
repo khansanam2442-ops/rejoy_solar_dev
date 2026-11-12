@@ -162,123 +162,6 @@ class MySqlDatabaseManager {
           employeeId: 'EMP-ADM-404',
           isFieldWorker: false,
           status: 'ACTIVE'
-        },
-        {
-          id: 'emp-2',
-          name: 'Amit Sharma',
-          email: 'projectmanager@rejoysolar.com',
-          password: '123456',
-          role: 'Project Manager',
-          phone: '+91 98250 22334',
-          department: 'Operations',
-          designation: 'Senior Project Manager',
-          employeeId: 'EMP002',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-3',
-          name: 'Rajesh Kumar',
-          email: 'survey@rejoysolar.com',
-          password: '123456',
-          role: 'Site Survey Engineer',
-          phone: '+91 98250 33445',
-          department: 'Engineering',
-          designation: 'Site Survey Engineer',
-          employeeId: 'EMP003',
-          isFieldWorker: true,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-4',
-          name: 'Priya Verma',
-          email: 'salesmanager@rejoysolar.com',
-          password: '123456',
-          role: 'Sales Manager',
-          phone: '+91 98250 44556',
-          department: 'Sales',
-          designation: 'Sales Manager',
-          employeeId: 'EMP004',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-5',
-          name: 'Rahul Mehta',
-          email: 'sales@rejoysolar.com',
-          password: '123456',
-          role: 'Sales Executive',
-          phone: '+91 98250 55667',
-          department: 'Sales',
-          designation: 'Senior Sales Executive',
-          employeeId: 'EMP005',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-10',
-          name: 'Sneha Kulkarni',
-          email: 'accountant@rejoysolar.com',
-          password: '123456',
-          role: 'Accountant',
-          phone: '+91 98250 66778',
-          department: 'Finance',
-          designation: 'Chief Accountant',
-          employeeId: 'EMP010',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-11',
-          name: 'Neha Gupta',
-          email: 'hr@rejoysolar.com',
-          password: '123456',
-          role: 'HR Manager',
-          phone: '+91 98250 77889',
-          department: 'HR',
-          designation: 'HR & Payroll Lead',
-          employeeId: 'EMP011',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-12',
-          name: 'Rohit Verma',
-          email: 'service@rejoysolar.com',
-          password: '123456',
-          role: 'Service Manager',
-          phone: '+91 98250 88990',
-          department: 'Service',
-          designation: 'Operations & Service Head',
-          employeeId: 'EMP012',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-13',
-          name: 'Ketan Solanki',
-          email: 'technician@rejoysolar.com',
-          password: '123456',
-          role: 'Technician',
-          phone: '+91 98250 99001',
-          department: 'Service',
-          designation: 'Solar O&M Technician',
-          employeeId: 'EMP013',
-          isFieldWorker: true,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'emp-14',
-          name: 'Suresh Patel',
-          email: 'civil@rejoysolar.com',
-          password: '123456',
-          role: 'Civil Team',
-          phone: '+91 98251 00112',
-          department: 'Civil',
-          designation: 'Civil Engineer',
-          employeeId: 'EMP014',
-          isFieldWorker: true,
-          status: 'ACTIVE'
         }
       ];
 
@@ -286,33 +169,6 @@ class MySqlDatabaseManager {
 
       // Load authoritative records from persistent disk storage
       this.loadDiskSnapshot();
-
-      // Ensure customer demo account exists if not loaded
-      const customers = this.getFallbackItems('customers');
-      if (!customers.some(c => c && c.email && c.email.toLowerCase() === 'customer@rejoysolar.com')) {
-        customers.push({
-          id: 'cust-demo-rejoy',
-          customerCode: 'CUST-REJOY-01',
-          name: 'ABC Industries Ltd.',
-          companyName: 'ABC Industries Ltd.',
-          customerType: 'Commercial',
-          phone: '+91 98250 12345',
-          email: 'customer@rejoysolar.com',
-          password: '123456',
-          siteAddress: 'Plot 42, GIDC Industrial Estate',
-          city: 'Ahmedabad',
-          state: 'Gujarat',
-          pincode: '382445',
-          gstNumber: '24AAACA0000A1Z5',
-          electricityConsumerNo: 'UGVCL-889922',
-          sanctionedLoadKw: 50,
-          status: 'ACTIVE',
-          activeProjectId: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-        this.setFallbackItems('customers', customers);
-      }
     } catch (e) {
       console.warn('[DB Manager] Notice loading initial collections:', e);
     }
@@ -1664,23 +1520,23 @@ class MySqlDatabaseManager {
   }
 
   private generateDefaultProjectStages(projId: string, status: string): any[] {
-    const stageDefs = [
-      { key: 'site_survey', title: 'Site Survey', order: 1, dept: 'Engineering', role: 'Site Survey Engineer', name: 'Rajesh Kumar' },
-      { key: 'cad_design', title: 'CAD & 3D Engineering Design', order: 2, dept: 'Engineering', role: 'Design Engineer', name: 'Sneha Patel' },
-      { key: 'statutory_approvals', title: 'Statutory Approvals & CEIG', order: 3, dept: 'Liaisoning', role: 'Liaisoning Officer', name: 'Vikas Sharma' },
-      { key: 'procurement', title: 'BOM Procurement & Dispatch', order: 4, dept: 'Procurement', role: 'Procurement Manager', name: 'Pooja Mehta' },
-      { key: 'civil_foundations', title: 'Civil Foundations & Pier Casting', order: 5, dept: 'Civil', role: 'Civil Supervisor', name: 'Hardik Joshi' },
-      { key: 'structure_assembly', title: 'Module Mounting Structure (MMS)', order: 6, dept: 'Mechanical', role: 'Mechanical Team', name: 'Ramesh Solanki' },
-      { key: 'earthing_pits', title: 'Chemical Earthing Pits', order: 7, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
-      { key: 'solar_installation', title: 'Solar Module Installation', order: 8, dept: 'Installation', role: 'Installation Team', name: 'Manoj Tiwari' },
-      { key: 'dc_cabling', title: 'DC Cabling & Array Combiner Box', order: 9, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
-      { key: 'inverter_installation', title: 'Grid-Tie Inverter & PCU Mounting', order: 10, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
-      { key: 'ac_distribution', title: 'AC Distribution Board (ACDB) & LT Panel', order: 11, dept: 'Electrical', role: 'Electrical Team', name: 'Ankit Joshi' },
-      { key: 'testing_commissioning', title: 'Pre-Commissioning Testing & Insulation Resistance', order: 12, dept: 'Quality & Testing', role: 'Quality Inspector', name: 'Deepak Varma' },
-      { key: 'discom_inspection', title: 'DISCOM Joint Inspection & Net Metering', order: 13, dept: 'Liaisoning', role: 'Liaisoning Officer', name: 'Vikas Sharma' },
-      { key: 'grid_synchronization', title: 'Grid Synchronization & Power Flow Test', order: 14, dept: 'Electrical', role: 'Commissioning Lead', name: 'Deepak Varma' },
-      { key: 'scada_rms', title: 'SCADA & IoT Remote Monitoring Setup', order: 15, dept: 'Instrumentation', role: 'IoT Specialist', name: 'Sneha Patel' },
-      { key: 'handover_documentation', title: 'Client Handover, Warranty & O&M Manuals', order: 16, dept: 'Project Management', role: 'Project Manager', name: 'Amit Sharma' }
+      const stageDefs = [
+      { key: 'site_survey', title: 'Site Survey', order: 1, dept: 'Engineering', role: 'Site Survey Engineer' },
+      { key: 'cad_design', title: 'CAD & 3D Engineering Design', order: 2, dept: 'Engineering', role: 'Design Engineer' },
+      { key: 'statutory_approvals', title: 'Statutory Approvals & CEIG', order: 3, dept: 'Liaisoning', role: 'Liaisoning Officer' },
+      { key: 'procurement', title: 'BOM Procurement & Dispatch', order: 4, dept: 'Procurement', role: 'Procurement Manager' },
+      { key: 'civil_foundations', title: 'Civil Foundations & Pier Casting', order: 5, dept: 'Civil', role: 'Civil Supervisor' },
+      { key: 'structure_assembly', title: 'Module Mounting Structure (MMS)', order: 6, dept: 'Mechanical', role: 'Mechanical Team' },
+      { key: 'earthing_pits', title: 'Chemical Earthing Pits', order: 7, dept: 'Electrical', role: 'Electrical Team' },
+      { key: 'solar_installation', title: 'Solar Module Installation', order: 8, dept: 'Installation', role: 'Installation Team' },
+      { key: 'dc_cabling', title: 'DC Cabling & Array Combiner Box', order: 9, dept: 'Electrical', role: 'Electrical Team' },
+      { key: 'inverter_installation', title: 'Grid-Tie Inverter & PCU Mounting', order: 10, dept: 'Electrical', role: 'Electrical Team' },
+      { key: 'ac_distribution', title: 'AC Distribution Board (ACDB) & LT Panel', order: 11, dept: 'Electrical', role: 'Electrical Team' },
+      { key: 'testing_commissioning', title: 'Pre-Commissioning Testing & Insulation Resistance', order: 12, dept: 'Quality & Testing', role: 'Quality Inspector' },
+      { key: 'discom_inspection', title: 'DISCOM Joint Inspection & Net Metering', order: 13, dept: 'Liaisoning', role: 'Liaisoning Officer' },
+      { key: 'grid_synchronization', title: 'Grid Synchronization & Power Flow Test', order: 14, dept: 'Electrical', role: 'Commissioning Lead' },
+      { key: 'scada_rms', title: 'SCADA & IoT Remote Monitoring Setup', order: 15, dept: 'Instrumentation', role: 'IoT Specialist' },
+      { key: 'handover_documentation', title: 'Client Handover, Warranty & O&M Manuals', order: 16, dept: 'Project Management', role: 'Project Manager' }
     ];
 
     const isCompleted = status === 'COMPLETED';
@@ -1705,15 +1561,15 @@ class MySqlDatabaseManager {
         order: def.order,
         department: def.dept,
         assignedRole: def.role,
-        assignedEmployeeId: `emp-${def.order}`,
-        assignedEmployeeName: def.name,
-        assignedToName: def.name,
+        assignedEmployeeId: null,
+        assignedEmployeeName: 'Unassigned',
+        assignedToName: 'Unassigned',
         status: stStatus,
         priority: 'MEDIUM',
         startDate: stStatus !== 'NOT STARTED' ? new Date().toISOString().split('T')[0] : null,
         dueDate: new Date(Date.now() + def.order * 3 * 86400000).toISOString().split('T')[0],
         completedDate: stStatus === 'COMPLETED' ? new Date().toISOString().split('T')[0] : null,
-        approvedBy: stStatus === 'COMPLETED' ? 'Amit Sharma (PM)' : null,
+        approvedBy: null,
         checklist: [
           { title: `${def.title} engineering verification completed`, completed: stStatus === 'COMPLETED' },
           { title: `${def.title} quality checklist signed off`, completed: stStatus === 'COMPLETED' }

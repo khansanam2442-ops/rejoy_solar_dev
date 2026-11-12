@@ -498,26 +498,9 @@ export function buildStandardWorkflowStages(
 
     // Build checklist items
     const checklist = bp.checklistTitles.map((title, idx) => {
-      let completed = false;
-      let completedAt: string | undefined = undefined;
-      let completedBy: string | undefined = undefined;
-
-      if (isStageCompleted) {
-        completed = true;
-        completedAt = '2026-08-16';
-        completedBy = bp.assignedEmployeeName;
-      } else if (isStageInProgress && is68 && bp.order === 8) {
-        completed = idx < 3;
-        completedAt = completed ? '2026-09-02' : undefined;
-        completedBy = completed ? bp.assignedEmployeeName : undefined;
-      } else if (isStageInProgress && is68 && bp.order === 9) {
-        completed = idx < 1;
-        completedAt = completed ? '2026-09-04' : undefined;
-        completedBy = completed ? bp.assignedEmployeeName : undefined;
-      } else {
-        // STRICT RULE: All items NOT completed for new stages or fresh in-progress stages
-        completed = false;
-      }
+      const completed = isStageCompleted;
+      const completedAt = isStageCompleted ? todayStr : undefined;
+      const completedBy = isStageCompleted ? 'Project Team' : undefined;
 
       return {
         id: `chk-${bp.order}-${idx + 1}`,
@@ -535,57 +518,37 @@ export function buildStandardWorkflowStages(
       activities.push(
         {
           id: `${projectId}-act-${bp.order}-1`,
-          timestamp: '2026-08-14 10:00 AM',
-          user: bp.assignedEmployeeName,
+          timestamp: new Date().toLocaleString(),
+          user: 'Project Team',
           role: bp.assignedRole,
-          action: `Completed all checklist verification items for "${bp.title}".`
-        },
-        {
-          id: `${projectId}-act-${bp.order}-2`,
-          timestamp: '2026-08-15 05:00 PM',
-          user: bp.demoApprovalBy || 'Amit Sharma',
-          role: 'Project Manager',
-          action: `Approved "${bp.title}" and unlocked subsequent stage.`
+          action: `Completed checklist verification for "${bp.title}".`
         }
       );
     } else if (isStageInProgress) {
       activities.push({
         id: `${projectId}-act-${bp.order}-init`,
         timestamp: new Date().toLocaleString(),
-        user: 'Workflow Automation',
+        user: 'Workflow System',
         role: 'System',
         action: `Stage ${bp.order} ("${bp.title}") is currently active.`
       });
     }
 
     const startDate = isStageCompleted
-      ? '2026-08-12'
+      ? todayStr
       : isStageInProgress
       ? todayStr
       : undefined;
 
     const dueDate = isStageCompleted
-      ? '2026-08-15'
+      ? todayStr
       : isStageInProgress
       ? new Date(Date.now() + bp.plannedDaysFromStart * 86400000).toISOString().split('T')[0]
       : undefined;
 
-    const completedDate = isStageCompleted ? '2026-08-15' : undefined;
-    const approvedBy = isStageCompleted ? (bp.demoApprovalBy || 'Amit Sharma (PM)') : undefined;
-    const approvalDate = isStageCompleted ? '2026-08-15' : undefined;
-
-    const photos = isStageCompleted && bp.demoPhotos ? bp.demoPhotos : [];
-    const documents = isStageCompleted && bp.order === 1 ? [
-      {
-        id: `doc-${bp.order}`,
-        name: `Site_Survey_Report_${projectId}.pdf`,
-        url: '#',
-        fileType: 'pdf',
-        sizeMb: 2.8,
-        uploadedAt: '2026-08-14',
-        uploadedBy: bp.assignedEmployeeName
-      }
-    ] : [];
+    const completedDate = isStageCompleted ? todayStr : undefined;
+    const approvedBy = isStageCompleted ? 'Authorized Lead' : undefined;
+    const approvalDate = isStageCompleted ? todayStr : undefined;
 
     return {
       id: `${projectId}-stage-${bp.order}`,
@@ -594,9 +557,9 @@ export function buildStandardWorkflowStages(
       order: bp.order,
       department: bp.department,
       assignedRole: bp.assignedRole,
-      assignedEmployeeId: bp.assignedEmployeeId,
-      assignedEmployeeName: bp.assignedEmployeeName,
-      assignedToName: bp.assignedEmployeeName,
+      assignedEmployeeId: undefined,
+      assignedEmployeeName: 'Unassigned',
+      assignedToName: 'Unassigned',
       status,
       priority: bp.priority,
       startDate,
@@ -607,11 +570,11 @@ export function buildStandardWorkflowStages(
       approvedBy,
       approvalDate,
       approvedAt: approvalDate,
-      comments: isStageCompleted ? (bp.demoComments || '') : '',
+      comments: '',
       description: bp.description,
       checklist,
-      photos,
-      documents,
+      photos: [],
+      documents: [],
       activities
     };
   });

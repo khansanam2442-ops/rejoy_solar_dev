@@ -341,7 +341,7 @@ export const PayslipViewModal: React.FC<PayslipViewModalProps> = ({
           <div className="pt-8 grid grid-cols-3 gap-6 text-center text-xs text-slate-600 border-t border-slate-200">
             <div>
               <div className="h-12 border-b border-dashed border-slate-300 flex items-center justify-center font-serif text-slate-400 italic text-[11px]">
-                Rahul Sharma (HR Lead)
+                Authorized Signatory
               </div>
               <p className="mt-2 font-bold text-slate-800">Prepared By</p>
               <p className="text-[10px] text-slate-400">HR & Payroll Dept</p>
@@ -349,10 +349,10 @@ export const PayslipViewModal: React.FC<PayslipViewModalProps> = ({
 
             <div>
               <div className="h-12 border-b border-dashed border-slate-300 flex items-center justify-center font-serif text-slate-400 italic text-[11px]">
-                Sneha Kulkarni (Finance Head)
+                Finance Authority
               </div>
               <p className="mt-2 font-bold text-slate-800">Verified & Approved By</p>
-              <p className="text-[10px] text-slate-400">Chief Accountant</p>
+              <p className="text-[10px] text-slate-400">Accounts & Finance</p>
             </div>
 
             <div>

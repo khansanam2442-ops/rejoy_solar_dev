@@ -46,17 +46,15 @@ export const SettingsView: React.FC = () => {
     }, 800);
   };
 
-  const handleResetData = () => {
-    if (window.confirm('Reset all demo data back to original realistic Solar EPC defaults?')) {
-      storageService.resetAllData();
-      showToast('System data reset to initial Solar EPC demonstration state', 'success');
-      triggerRefresh();
+  const handleRefreshCache = () => {
+    if (window.confirm('Clear local browser cache and reload all live records directly from production MySQL database?')) {
+      storageService.clearLocalCacheAndRefresh();
     }
   };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
-      {/* Header & Reset */}
+      {/* Header & Sync */}
       <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -72,11 +70,11 @@ export const SettingsView: React.FC = () => {
         </div>
 
         <button
-          onClick={handleResetData}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors shadow-2xs self-start sm:self-auto"
+          onClick={handleRefreshCache}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors shadow-2xs self-start sm:self-auto cursor-pointer"
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset Demo Data</span>
+          <span>Sync & Refresh Cache</span>
         </button>
       </div>
 

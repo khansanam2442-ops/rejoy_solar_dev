@@ -68,32 +68,32 @@ export {
 };
 
 const STORAGE_KEYS = {
-  LEADS: 'solar_erp_leads_v2',
-  CUSTOMERS: 'solar_erp_customers_v2',
-  PROJECTS: 'solar_erp_projects_v2',
-  PAYMENTS: 'solar_erp_payments_v2',
-  EXPENSES: 'solar_erp_expenses_v2',
-  EMPLOYEES: 'solar_erp_employees_v2',
-  ATTENDANCE: 'solar_erp_attendance_v2',
-  PAYSLIPS: 'solar_erp_payslips_v2',
-  HOLIDAYS: 'solar_erp_holidays_v2',
-  SERVICE_TICKETS: 'solar_erp_service_tickets_v2',
-  AMC_CONTRACTS: 'solar_erp_amc_contracts_v2',
-  NOTIFICATIONS: 'solar_erp_notifications_v2',
-  SETTINGS: 'solar_erp_settings_v2',
-  SURVEYS: 'solar_erp_surveys_v2',
-  QUOTATIONS: 'solar_erp_quotations_v2',
-  PRODUCTS: 'solar_erp_products_v2',
-  VENDORS: 'solar_erp_vendors_v2',
-  PURCHASE_ORDERS: 'solar_erp_purchase_orders_v2',
-  BOMS: 'solar_erp_boms_v2',
-  SALES_INVOICES: 'solar_erp_sales_invoices_v2',
-  STOCK_MOVEMENTS: 'solar_erp_stock_movements_v2',
-  ACL_CONFIG: 'solar_erp_acl_config_v2',
-  ACL_AUDIT_LOGS: 'solar_erp_acl_audit_logs_v2',
-  WAREHOUSES: 'solar_erp_warehouses_v2',
-  STOCK_AUDITS: 'solar_erp_stock_audits_v2',
-  USERS: 'solar_erp_users_v2',
+  LEADS: 'solar_erp_leads_v3',
+  CUSTOMERS: 'solar_erp_customers_v3',
+  PROJECTS: 'solar_erp_projects_v3',
+  PAYMENTS: 'solar_erp_payments_v3',
+  EXPENSES: 'solar_erp_expenses_v3',
+  EMPLOYEES: 'solar_erp_employees_v3',
+  ATTENDANCE: 'solar_erp_attendance_v3',
+  PAYSLIPS: 'solar_erp_payslips_v3',
+  HOLIDAYS: 'solar_erp_holidays_v3',
+  SERVICE_TICKETS: 'solar_erp_service_tickets_v3',
+  AMC_CONTRACTS: 'solar_erp_amc_contracts_v3',
+  NOTIFICATIONS: 'solar_erp_notifications_v3',
+  SETTINGS: 'solar_erp_settings_v3',
+  SURVEYS: 'solar_erp_surveys_v3',
+  QUOTATIONS: 'solar_erp_quotations_v3',
+  PRODUCTS: 'solar_erp_products_v3',
+  VENDORS: 'solar_erp_vendors_v3',
+  PURCHASE_ORDERS: 'solar_erp_purchase_orders_v3',
+  BOMS: 'solar_erp_boms_v3',
+  SALES_INVOICES: 'solar_erp_sales_invoices_v3',
+  STOCK_MOVEMENTS: 'solar_erp_stock_movements_v3',
+  ACL_CONFIG: 'solar_erp_acl_config_v3',
+  ACL_AUDIT_LOGS: 'solar_erp_acl_audit_logs_v3',
+  WAREHOUSES: 'solar_erp_warehouses_v3',
+  STOCK_AUDITS: 'solar_erp_stock_audits_v3',
+  USERS: 'solar_erp_users_v3',
 };
 
 const initialWarehouses: Warehouse[] = [];
@@ -172,16 +172,22 @@ class StorageService {
   constructor() {
     if (typeof window !== 'undefined') {
       try {
-        // Clean only legacy v1 keys, strictly preserving all v2 authoritative keys
-        const legacyV1Keys = [
+        // Clean all legacy v1 and v2 keys, strictly enforcing clean v3 authoritative keys from MySQL
+        const legacyKeys = [
           'solar_erp_leads', 'solar_erp_customers', 'solar_erp_projects', 'solar_erp_payments',
           'solar_erp_expenses', 'solar_erp_employees', 'solar_erp_attendance', 'solar_erp_payslips',
           'solar_erp_holidays', 'solar_erp_service_tickets', 'solar_erp_amc_contracts', 'solar_erp_notifications',
           'solar_erp_surveys', 'solar_erp_quotations', 'solar_erp_products', 'solar_erp_vendors',
           'solar_erp_purchase_orders', 'solar_erp_boms', 'solar_erp_sales_invoices', 'solar_erp_stock_movements',
-          'solar_erp_warehouses', 'solar_erp_stock_audits', 'solar_erp_acl_audit_logs', 'solar_erp_settings'
+          'solar_erp_warehouses', 'solar_erp_stock_audits', 'solar_erp_acl_audit_logs', 'solar_erp_settings', 'solar_erp_users',
+          'solar_erp_leads_v2', 'solar_erp_customers_v2', 'solar_erp_projects_v2', 'solar_erp_payments_v2',
+          'solar_erp_expenses_v2', 'solar_erp_employees_v2', 'solar_erp_attendance_v2', 'solar_erp_payslips_v2',
+          'solar_erp_holidays_v2', 'solar_erp_service_tickets_v2', 'solar_erp_amc_contracts_v2', 'solar_erp_notifications_v2',
+          'solar_erp_surveys_v2', 'solar_erp_quotations_v2', 'solar_erp_products_v2', 'solar_erp_vendors_v2',
+          'solar_erp_purchase_orders_v2', 'solar_erp_boms_v2', 'solar_erp_sales_invoices_v2', 'solar_erp_stock_movements_v2',
+          'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2', 'solar_erp_settings_v2', 'solar_erp_users_v2'
         ];
-        legacyV1Keys.forEach(k => {
+        legacyKeys.forEach(k => {
           safeStorage.removeItem(k);
           safeSessionStorage.removeItem(k);
         });
@@ -426,8 +432,8 @@ class StorageService {
       solarCapacityKw: Number(leadData.solarCapacityKw) || 10,
       estimatedValue: Number(leadData.estimatedValue) || 450000,
       source: leadData.source || 'Direct Call',
-      assignedSalespersonId: leadData.assignedSalespersonId || leadData.assignedToId || 'emp-4',
-      assignedSalespersonName: leadData.assignedSalespersonName || leadData.assignedToName || 'Priya Verma',
+      assignedSalespersonId: leadData.assignedSalespersonId || leadData.assignedToId || undefined,
+      assignedSalespersonName: leadData.assignedSalespersonName || leadData.assignedToName || 'Unassigned',
       status: (leadData.status as LeadStatus) || 'NEW',
       notes: leadData.notes || '',
       nextFollowUpDate: leadData.nextFollowUpDate || new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10),
@@ -501,9 +507,9 @@ class StorageService {
         {
           id: `asgn-${Date.now()}-lead`,
           projectId: projectId,
-          userId: 'emp-5',
-          userName: convertedByName || 'Rahul Mehta',
-          employeeCode: 'EMP005',
+          userId: 'usr-admin',
+          userName: convertedByName || 'System Admin',
+          employeeCode: 'ADM-001',
           role: 'Sales Executive',
           department: 'Sales',
           assignedAt: new Date().toISOString(),
@@ -1439,28 +1445,11 @@ class StorageService {
   getEmployees(): Employee[] {
     const list = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, initialEmployees);
     const safeList = Array.isArray(list) ? list : initialEmployees;
-    const DEFAULT_AUTH_MAP: Record<string, string> = {
-      'emp-1': 'demo-usr-1',
-      'emp-2': 'demo-usr-4',
-      'emp-3': 'demo-usr-5',
-      'emp-4': 'demo-usr-2',
-      'emp-5': 'demo-usr-3',
-      'emp-6': 'demo-usr-8',
-      'emp-7': 'demo-usr-9',
-      'emp-8': 'demo-usr-10',
-      'emp-9': 'demo-usr-11',
-      'emp-10': 'demo-usr-14',
-      'emp-11': 'demo-usr-12',
-      'emp-12': 'demo-usr-13',
-      'emp-13': 'demo-usr-6',
-      'emp-14': 'demo-usr-7'
-    };
 
     const employeeMap = new Map<string, Employee>();
 
     safeList.filter(Boolean).forEach(emp => {
-      const defaultAuthUid = emp?.id ? DEFAULT_AUTH_MAP[emp.id] : undefined;
-      const authUid = emp.authUid || defaultAuthUid;
+      const authUid = emp.authUid || emp.id;
       const salaryMonthly = Number(emp.salaryMonthly ?? (emp as any).salary_monthly ?? (emp as any).salary) || 0;
       const safeEmp: Employee = {
         ...emp,
@@ -2885,20 +2874,22 @@ class StorageService {
     return { success: true };
   }
 
-  // Reset demo data to default fresh state
-  resetAllData(): void {
+  // Clear local browser cache and refresh state from production MySQL
+  clearLocalCacheAndRefresh(): void {
     this.memStore.clear();
     if (typeof window !== 'undefined') {
-      fetch('/api/db/migrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}'
-      })
-        .catch(() => {})
-        .finally(() => {
-          window.location.reload();
+      try {
+        Object.values(STORAGE_KEYS).forEach(k => {
+          safeStorage.removeItem(k);
+          safeSessionStorage.removeItem(k);
         });
+      } catch {}
+      window.location.reload();
     }
+  }
+
+  resetAllData(): void {
+    this.clearLocalCacheAndRefresh();
   }
 }
 
