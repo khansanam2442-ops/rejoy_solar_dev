@@ -40,6 +40,7 @@ import {
 import { SystemAclConfig, AclAuditLogEntry } from '../types/acl';
 import { DEFAULT_SYSTEM_ACL_CONFIG } from './aclDefaults';
 import { safeStorage, safeSessionStorage } from './safeStorage';
+import { apiClient } from './apiClient';
 import { buildStandardWorkflowStages, WorkflowProgressLevel } from './workflowStages';
 import { getCurrentSalaryMonth } from '../utils/payrollPeriods';
 import {
@@ -208,24 +209,17 @@ class StorageService {
     try {
       const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
         ? (window as any).__SOLAR_API_URL__
-        : ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
-          ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
-          : '/api');
+        : apiClient.getBaseUrl();
 
-      const authToken = safeStorage.getItem('rejoysolar_auth_token');
-      const headers: Record<string, string> = {};
+      const authToken = apiClient.getToken();
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      };
       if (authToken) {
         headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
         headers['x-auth-token'] = authToken;
       }
-      try {
-        const raw = safeStorage.getItem('rejoysolar_active_session');
-        if (raw) {
-          const u = JSON.parse(raw);
-          if (u?.id) headers['x-user-id'] = u.id;
-          if (u?.role) headers['x-user-role'] = u.role;
-        }
-      } catch {}
 
       const res = await fetch(`${apiUrl}/bootstrap`, {
         headers,
@@ -240,7 +234,7 @@ class StorageService {
               if (Array.isArray(backendItems)) {
                 let cleaned = backendItems.filter(Boolean);
                 if (collectionKey === 'attendance') {
-                  cleaned = cleaned.map((a: any) => ({
+                   cleaned = cleaned.map((a: any) => ({
                     ...a,
                     date: a.date || a.attendanceDate || (a.createdAt ? String(a.createdAt).slice(0, 10) : ''),
                     attendanceDate: a.attendanceDate || a.date
@@ -280,53 +274,114 @@ class StorageService {
     return defaultValue;
   }
 
-  private set<T>(key: string, data: T, singleItem?: any): void {
+  public async setSync<T>(key: string, data: T, singleItem?: any): Promise<any> {
+    const collection = KEY_TO_COLLECTION[key];
     this.memStore.set(key, data);
-    if (typeof window !== 'undefined') {
-      const collection = KEY_TO_COLLECTION[key];
-      if (collection) {
-        fetch('/api/sync/push', {
+
+    if (typeof window !== 'undefined' && collection) {
+      try {
+        const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+          ? (window as any).__SOLAR_API_URL__
+          : apiClient.getBaseUrl();
+
+        const token = apiClient.getToken();
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        };
+        if (token) {
+          headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+          headers['x-auth-token'] = token;
+        }
+
+        const res = await fetch(`${apiUrl}/sync/push`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
+          credentials: 'include',
           body: JSON.stringify({ collection, item: singleItem, items: singleItem ? undefined : data })
-        })
-          .then(async (res) => {
-            if (!res.ok) {
-              const err = await res.json().catch(() => ({}));
-              console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, err.error || err.message || res.statusText);
-              window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error || err.message || res.statusText } }));
+        });
+
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.success === false) {
+          const errMsg = json.error || json.message || `Failed to persist ${collection} in MySQL (HTTP ${res.status})`;
+          console.error(`[MySQL Storage Error] ${errMsg}`);
+          await this.hydrateFromBackend();
+          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: errMsg } }));
+          throw new Error(errMsg);
+        }
+
+        if (singleItem && json.data) {
+          const currentList = this.memStore.get(key);
+          if (Array.isArray(currentList)) {
+            const idx = currentList.findIndex((it: any) => it.id === singleItem.id || it.id === json.data.id);
+            if (idx >= 0) {
+              currentList[idx] = json.data;
+              this.memStore.set(key, [...currentList]);
             }
-          })
-          .catch((e) => {
-            console.error(`[MySQL Network Error] Failed to sync ${collection}:`, e);
-            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: e.message } }));
-          });
+          }
+        }
+
         window.dispatchEvent(new Event('solarpulse_storage_updated'));
+        return json.data || data;
+      } catch (err: any) {
+        console.error(`[MySQL Network Error] Failed to sync ${collection}:`, err);
+        await this.hydrateFromBackend();
+        throw err;
       }
     }
+
+    window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    return data;
   }
 
-  private deleteSync(collection: string, id: string): void {
+  private set<T>(key: string, data: T, singleItem?: any): void {
+    this.memStore.set(key, data);
+    this.setSync(key, data, singleItem).catch(e => {
+      console.warn(`[Storage Sync Warning] Sync failed for ${key}:`, e?.message);
+    });
+  }
+
+  private async deleteSync(collection: string, id: string): Promise<boolean> {
     if (typeof window !== 'undefined') {
-      fetch('/api/sync/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collection, item: { id }, action: 'delete' })
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            console.error(`[MySQL Storage Error] Failed to sync delete for ${collection}:`, err.error || res.statusText);
-            this.hydrateFromBackend();
-            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error } }));
-          }
-        })
-        .catch((e) => {
-          console.error(`[MySQL Network Error] Failed to sync delete for ${collection}:`, e);
-          this.hydrateFromBackend();
+      try {
+        const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+          ? (window as any).__SOLAR_API_URL__
+          : apiClient.getBaseUrl();
+
+        const token = apiClient.getToken();
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        };
+        if (token) {
+          headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+          headers['x-auth-token'] = token;
+        }
+
+        const res = await fetch(`${apiUrl}/sync/push`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({ collection, item: { id }, action: 'delete' })
         });
-      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          console.error(`[MySQL Storage Error] Failed to sync delete for ${collection}:`, err.error || res.statusText);
+          await this.hydrateFromBackend();
+          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error || res.statusText } }));
+          return false;
+        }
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+        return true;
+      } catch (e: any) {
+        console.error(`[MySQL Network Error] Failed to sync delete for ${collection}:`, e);
+        await this.hydrateFromBackend();
+        return false;
+      }
     }
+    return true;
   }
 
   // --- Leads ---
@@ -362,9 +417,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/leads/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/leads/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ leads })
     });
     let result: any = {};
@@ -377,18 +440,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Lead import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getLeads();
-      const existingIds = new Set(current.map(l => l.id));
-      const newlyAdded: Lead[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.LEADS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -648,9 +700,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/customers/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/customers/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ customers })
     });
     let result: any = {};
@@ -663,18 +723,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Customer import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getCustomers();
-      const existingIds = new Set(current.map(c => c.id));
-      const newlyAdded: Customer[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.CUSTOMERS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -687,14 +736,7 @@ class StorageService {
         password: newPassword,
         updatedAt: new Date().toISOString()
       };
-      this.set(STORAGE_KEYS.CUSTOMERS, customers);
-    }
-    if (typeof fetch !== 'undefined') {
-      fetch(`/api/customers/${encodeURIComponent(customerId)}/password`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPassword })
-      }).catch(() => {});
+      this.set(STORAGE_KEYS.CUSTOMERS, customers, customers[index]);
     }
   }
 
@@ -840,17 +882,16 @@ class StorageService {
   setProjectsFromBackend(projects: SolarProject[]): void {
     if (!Array.isArray(projects)) return;
     this.memStore.set(STORAGE_KEYS.PROJECTS, projects);
-    safeStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(projects));
-    window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    safeStorage.removeItem(STORAGE_KEYS.PROJECTS);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    }
   }
 
   deleteProject(id: string): void {
     const projects = this.getProjects().filter(p => p.id !== id);
     this.set(STORAGE_KEYS.PROJECTS, projects);
     this.deleteSync('projects', id);
-    if (typeof fetch !== 'undefined') {
-      fetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
-    }
   }
 
   async importProjects(projects: any[]): Promise<{
@@ -864,9 +905,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/projects/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/projects/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ projects })
     });
     let result: any = {};
@@ -879,18 +928,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Project import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getProjects();
-      const existingIds = new Set(current.map(p => p.id));
-      const newlyAdded: SolarProject[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.PROJECTS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1320,9 +1358,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/payments/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/payments/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ payments })
     });
     let result: any = {};
@@ -1335,18 +1381,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Payment import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getPayments();
-      const existingIds = new Set(current.map(p => p.id));
-      const newlyAdded: PaymentRecord[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.PAYMENTS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1383,9 +1418,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/expenses/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/expenses/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ expenses })
     });
     let result: any = {};
@@ -1398,18 +1441,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Expense import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getExpenses();
-      const existingIds = new Set(current.map(e => e.id));
-      const newlyAdded: ExpenseRecord[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.EXPENSES, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1489,9 +1521,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/employees/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/employees/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ employees })
     });
     let result: any = {};
@@ -1504,18 +1544,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Employee import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getEmployees();
-      const existingIds = new Set(current.map(e => e.id));
-      const newlyAdded: Employee[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.EMPLOYEES, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1539,9 +1568,6 @@ class StorageService {
     const users = this.getUsers().filter(u => u.id !== id);
     this.set(STORAGE_KEYS.USERS, users);
     this.deleteSync('users', id);
-    if (typeof fetch !== 'undefined') {
-      fetch(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
-    }
   }
 
   // --- Attendance ---
@@ -1587,9 +1613,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/attendance/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/attendance/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ attendance })
     });
     let result: any = {};
@@ -1602,18 +1636,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Attendance import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getAttendance();
-      const existingIds = new Set(current.map(a => a.id));
-      const newlyAdded: AttendanceRecord[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.ATTENDANCE, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1734,9 +1757,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/service-tickets/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/service-tickets/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ tickets })
     });
     let result: any = {};
@@ -1749,18 +1780,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Service ticket import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getServiceTickets();
-      const existingIds = new Set(current.map(t => t.id));
-      const newlyAdded: ServiceTicket[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.SERVICE_TICKETS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.SERVICE_TICKETS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1982,9 +2002,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/products/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/products/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ products })
     });
     let result: any = {};
@@ -1997,18 +2025,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Product import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getProducts();
-      const existingIds = new Set(current.map(p => p.id));
-      const newlyAdded: ProductItem[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.PRODUCTS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
@@ -2100,9 +2117,17 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const res = await fetch('/api/vendors/import', {
+    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+      ? (window as any).__SOLAR_API_URL__
+      : apiClient.getBaseUrl();
+    const token = apiClient.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+    const res = await fetch(`${apiUrl}/vendors/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify({ vendors })
     });
     let result: any = {};
@@ -2115,18 +2140,7 @@ class StorageService {
       throw new Error(result.error || result.message || `Vendor import failed with status ${res.status}`);
     }
 
-    if (result.importedRecords && result.importedRecords.length > 0) {
-      const current = this.getVendors();
-      const existingIds = new Set(current.map(v => v.id));
-      const newlyAdded: Vendor[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
-      const updatedList = [...newlyAdded, ...current];
-      this.memStore.set(STORAGE_KEYS.VENDORS, updatedList);
-      safeStorage.setItem(STORAGE_KEYS.VENDORS, JSON.stringify(updatedList));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-      }
-    }
-
+    await this.hydrateFromBackend();
     return result;
   }
 
