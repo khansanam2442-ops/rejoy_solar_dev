@@ -191,18 +191,10 @@ class StorageService {
           safeStorage.removeItem(k);
           safeSessionStorage.removeItem(k);
         });
-
-        // Pre-populate memStore immediately from safeStorage for instant render without white screens or blank lists
+        // Purge any v3 cached business data in browser localStorage to enforce MySQL as sole truth
         Object.values(STORAGE_KEYS).forEach(k => {
-          const cached = safeStorage.getItem(k);
-          if (cached) {
-            try {
-              const parsed = JSON.parse(cached);
-              if (parsed !== undefined && parsed !== null) {
-                this.memStore.set(k, parsed);
-              }
-            } catch {}
-          }
+          safeStorage.removeItem(k);
+          safeSessionStorage.removeItem(k);
         });
       } catch {}
 
@@ -260,10 +252,8 @@ class StorageService {
                   }));
                 }
                 this.memStore.set(storageKey, cleaned);
-                safeStorage.setItem(storageKey, JSON.stringify(cleaned));
               } else {
                 this.memStore.set(storageKey, backendItems);
-                safeStorage.setItem(storageKey, JSON.stringify(backendItems));
               }
             }
           });
@@ -286,19 +276,6 @@ class StorageService {
         return val as T;
       }
     }
-    // Check safeStorage fallback
-    if (typeof window !== 'undefined') {
-      const stored = safeStorage.getItem(key);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (parsed !== undefined && parsed !== null) {
-            this.memStore.set(key, parsed);
-            return parsed as T;
-          }
-        } catch {}
-      }
-    }
     this.memStore.set(key, defaultValue);
     return defaultValue;
   }
@@ -306,7 +283,6 @@ class StorageService {
   private set<T>(key: string, data: T, singleItem?: any): void {
     this.memStore.set(key, data);
     if (typeof window !== 'undefined') {
-      safeStorage.setItem(key, JSON.stringify(data));
       const collection = KEY_TO_COLLECTION[key];
       if (collection) {
         fetch('/api/sync/push', {
@@ -332,10 +308,6 @@ class StorageService {
 
   private deleteSync(collection: string, id: string): void {
     if (typeof window !== 'undefined') {
-      const storageKey = Object.entries(KEY_TO_COLLECTION).find(([, col]) => col === collection)?.[0];
-      if (storageKey && this.memStore.has(storageKey)) {
-        safeStorage.setItem(storageKey, JSON.stringify(this.memStore.get(storageKey)));
-      }
       fetch('/api/sync/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1465,40 +1437,6 @@ class StorageService {
       };
       employeeMap.set(safeEmp.id, safeEmp);
       if (safeEmp.email) employeeMap.set(safeEmp.email.toLowerCase(), safeEmp);
-    });
-
-    // Merge in users from STORAGE_KEYS.USERS who are staff members (not Customer)
-    const users = this.get<any[]>(STORAGE_KEYS.USERS, []);
-    (users || []).filter(Boolean).forEach(u => {
-      if (u.role === 'Customer') return;
-      const uEmail = (u.email || '').toLowerCase().trim();
-      const existingByEmail = uEmail ? employeeMap.get(uEmail) : null;
-      const existingById = employeeMap.get(u.id);
-      if (!existingByEmail && !existingById) {
-        const isFw = Boolean(u.isFieldWorker || [
-          'Site Survey Engineer', 'Site Inspector', 'Civil Team',
-          'Structure Team', 'Installation Team', 'Electrical Team', 'Technician'
-        ].includes(u.role));
-        const syntheticEmp: Employee = {
-          id: u.id,
-          employeeCode: u.employeeId || u.employeeCode || `EMP-${u.id.slice(-4).toUpperCase()}`,
-          name: u.name || 'Staff Member',
-          email: u.email,
-          phone: u.phone || '+91 98250 11223',
-          department: u.department || 'Operations',
-          designation: u.designation || u.role || 'Solar Specialist',
-          systemRole: u.role || 'Project Manager',
-          salaryMonthly: 0,
-          status: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'INACTIVE' : 'ACTIVE',
-          accountStatus: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'DISABLED' : 'ACTIVE',
-          loginEnabled: u.status !== 'DISABLED',
-          isFieldWorker: isFw,
-          currentSiteLocation: '',
-          joiningDate: u.createdAt ? String(u.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10)
-        };
-        employeeMap.set(u.id, syntheticEmp);
-        if (uEmail) employeeMap.set(uEmail, syntheticEmp);
-      }
     });
 
     const result: Employee[] = [];

@@ -39,7 +39,73 @@ export const UserManagementView: React.FC = () => {
   const { showToast, triggerRefresh } = useApp();
   const { currentUser } = useAuth();
 
-  const [employees, setEmployees] = useState<Employee[]>(() => storageService.getEmployees());
+  const loadMergedPersonnel = (): Employee[] => {
+    const rawUsers = storageService.getUsers();
+    const rawEmployees = storageService.getEmployees();
+
+    const resultMap = new Map<string, Employee>();
+    const emailToIdMap = new Map<string, string>();
+
+    // 1. First add genuine employees from solar_employees
+    (rawEmployees || []).filter(Boolean).forEach(emp => {
+      const eEmail = (emp.email || '').toLowerCase().trim();
+      resultMap.set(emp.id, emp);
+      if (eEmail) emailToIdMap.set(eEmail, emp.id);
+    });
+
+    // 2. Merge users from solar_users
+    (rawUsers || []).filter(Boolean).forEach(u => {
+      if (u.role === 'Customer') return;
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const existingId = resultMap.has(u.id) ? u.id : (uEmail ? emailToIdMap.get(uEmail) : undefined);
+
+      if (existingId && resultMap.has(existingId)) {
+        const existing = resultMap.get(existingId)!;
+        resultMap.set(existingId, {
+          ...existing,
+          employeeCode: existing.employeeCode || u.employeeId || `EMP-${u.id.slice(-4).toUpperCase()}`,
+          phone: existing.phone || u.phone || '',
+          department: existing.department || u.department || 'Operations',
+          designation: existing.designation || u.designation || u.role,
+          systemRole: u.role || existing.systemRole,
+          assignedRole: u.role || existing.assignedRole,
+          status: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'INACTIVE' : existing.status,
+          accountStatus: u.status === 'DISABLED' ? 'DISABLED' : (existing.accountStatus || 'ACTIVE'),
+          loginEnabled: u.status !== 'DISABLED',
+          isFieldWorker: Boolean(u.isFieldWorker ?? existing.isFieldWorker)
+        });
+      } else {
+        const isFw = Boolean(u.isFieldWorker || [
+          'Site Survey Engineer', 'Site Inspector', 'Civil Team',
+          'Structure Team', 'Installation Team', 'Electrical Team', 'Technician'
+        ].includes(u.role));
+        const userEmp: Employee = {
+          id: u.id,
+          employeeCode: u.employeeId || `EMP-${u.id.slice(-4).toUpperCase()}`,
+          name: u.name || 'Staff Member',
+          email: u.email || '',
+          phone: u.phone || '',
+          department: u.department || 'Operations',
+          designation: u.designation || u.role || 'Staff',
+          systemRole: u.role || 'Admin',
+          assignedRole: u.role || 'Admin',
+          salaryMonthly: 0,
+          status: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'INACTIVE' : 'ACTIVE',
+          accountStatus: (u.status === 'DISABLED' || u.status === 'INACTIVE') ? 'DISABLED' : 'ACTIVE',
+          loginEnabled: u.status !== 'DISABLED',
+          isFieldWorker: isFw,
+          currentSiteLocation: '',
+          joiningDate: u.createdAt ? String(u.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10)
+        };
+        resultMap.set(u.id, userEmp);
+        if (uEmail) emailToIdMap.set(uEmail, u.id);
+      }
+    });
+
+    return Array.from(resultMap.values());
+  };
+
+  const [employees, setEmployees] = useState<Employee[]>(() => loadMergedPersonnel());
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -73,7 +139,7 @@ export const UserManagementView: React.FC = () => {
     department: 'Operations',
     designation: 'Solar Engineer',
     role: 'Site Survey Engineer',
-    phone: '+91 98000 00000',
+    phone: '',
     isFieldWorker: true,
     loginEnabled: true,
     status: 'ACTIVE',
@@ -83,15 +149,17 @@ export const UserManagementView: React.FC = () => {
   const [formData, setFormData] = useState<EmployeeFormData>(defaultEmployeeForm);
 
   const reloadEmployees = () => {
-    setEmployees(storageService.getEmployees());
+    setEmployees(loadMergedPersonnel());
   };
 
   React.useEffect(() => {
     // Initial fetch from backend to ensure latest MySQL records
-    storageService.hydrateFromBackend().catch(() => {});
+    storageService.hydrateFromBackend().then(() => {
+      setEmployees(loadMergedPersonnel());
+    }).catch(() => {});
 
     const handleStorageUpdate = () => {
-      setEmployees(storageService.getEmployees());
+      setEmployees(loadMergedPersonnel());
     };
 
     window.addEventListener('solarpulse_storage_updated', handleStorageUpdate);

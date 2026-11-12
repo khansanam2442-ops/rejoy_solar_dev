@@ -827,6 +827,41 @@ function saveEmployeeToDb($pdo, $item) {
         $isFieldWorker, $accountStatus
     ]);
 
+    // Ensure authoritative base table solar_employee is also updated
+    try {
+        $stmtBase = $pdo->prepare("
+            INSERT INTO `solar_employee` (
+                `id`, `employee_code`, `name`, `photo_url`, `department`,
+                `designation`, `phone`, `email`, `joining_date`, `salary_monthly`,
+                `status`, `current_site_location`, `login_enabled`, `system_role`,
+                `is_field_worker`, `account_status`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                `name` = VALUES(`name`),
+                `photo_url` = VALUES(`photo_url`),
+                `department` = VALUES(`department`),
+                `designation` = VALUES(`designation`),
+                `phone` = VALUES(`phone`),
+                `email` = VALUES(`email`),
+                `joining_date` = VALUES(`joining_date`),
+                `salary_monthly` = VALUES(`salary_monthly`),
+                `status` = VALUES(`status`),
+                `current_site_location` = VALUES(`current_site_location`),
+                `login_enabled` = VALUES(`login_enabled`),
+                `system_role` = VALUES(`system_role`),
+                `is_field_worker` = VALUES(`is_field_worker`),
+                `account_status` = VALUES(`account_status`)
+        ");
+        $stmtBase->execute([
+            $item['id'], $code, $name, $photoUrl, $dept,
+            $desig, $phone, $email, $joiningDate, $salary,
+            $status, $siteLoc, $loginEnabled, $systemRole,
+            $isFieldWorker, $accountStatus
+        ]);
+    } catch (Exception $eBase) {
+        // Base table may be aliased or view
+    }
+
     // Synchronize to solar_users if loginEnabled
     if ($loginEnabled) {
         try {
@@ -1909,6 +1944,7 @@ function deleteItemFromDb($pdo, $collection, $id) {
     if ($collection === 'employees' || $collection === 'users') {
         try { $pdo->prepare('DELETE FROM `solar_users` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
         try { $pdo->prepare('DELETE FROM `solar_employees` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
+        try { $pdo->prepare('DELETE FROM `solar_employee` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
     } else {
         $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
         $stmt->execute([$id]);
@@ -2733,6 +2769,609 @@ if ($method === 'DELETE' && preg_match('#^/users/([^/]+)/?$#', $cleanPath, $matc
     deleteItemFromDb($pdo, 'users', $userId);
     http_response_code(200);
     echo json_encode(['success' => true, 'message' => 'User deleted from MySQL successfully.']);
+    exit;
+}
+
+// ==========================================================
+// CUSTOMERS REST ENDPOINTS
+// ==========================================================
+
+// GET /api/customers
+if ($method === 'GET' && in_array($cleanPath, ['/customers', '/customers/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->query('SELECT * FROM `solar_customers` ORDER BY `created_at` DESC');
+    $rows = $stmt->fetchAll();
+    $customers = array_map(function ($r) {
+        return [
+            'id' => $r['id'],
+            'customerCode' => $r['customer_code'],
+            'name' => $r['name'],
+            'companyName' => $r['company_name'] ?? '',
+            'customerType' => $r['customer_type'] ?? 'Residential',
+            'phone' => $r['phone'],
+            'email' => $r['email'] ?? '',
+            'siteAddress' => $r['site_address'] ?? '',
+            'city' => $r['city'] ?? 'Ahmedabad',
+            'state' => $r['state'] ?? 'Gujarat',
+            'pincode' => $r['pincode'] ?? '',
+            'gstNumber' => $r['gst_number'] ?? '',
+            'electricityConsumerNo' => $r['electricity_consumer_no'] ?? '',
+            'sanctionedLoadKw' => floatval($r['sanctioned_load_kw'] ?? 0),
+            'status' => $r['status'] ?? 'ACTIVE',
+            'activeProjectId' => $r['active_project_id'] ?? null,
+            'createdAt' => $r['created_at'],
+            'updatedAt' => $r['updated_at']
+        ];
+    }, $rows ?: []);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'count' => count($customers), 'data' => $customers]);
+    exit;
+}
+
+// GET /api/customers/{id}
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('SELECT * FROM `solar_customers` WHERE `id` = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $r = $stmt->fetch();
+    if (!$r) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => "Customer '$id' not found in MySQL"]);
+        exit;
+    }
+    $customer = [
+        'id' => $r['id'],
+        'customerCode' => $r['customer_code'],
+        'name' => $r['name'],
+        'companyName' => $r['company_name'] ?? '',
+        'customerType' => $r['customer_type'] ?? 'Residential',
+        'phone' => $r['phone'],
+        'email' => $r['email'] ?? '',
+        'siteAddress' => $r['site_address'] ?? '',
+        'city' => $r['city'] ?? 'Ahmedabad',
+        'state' => $r['state'] ?? 'Gujarat',
+        'pincode' => $r['pincode'] ?? '',
+        'gstNumber' => $r['gst_number'] ?? '',
+        'electricityConsumerNo' => $r['electricity_consumer_no'] ?? '',
+        'sanctionedLoadKw' => floatval($r['sanctioned_load_kw'] ?? 0),
+        'status' => $r['status'] ?? 'ACTIVE',
+        'activeProjectId' => $r['active_project_id'] ?? null,
+        'createdAt' => $r['created_at'],
+        'updatedAt' => $r['updated_at']
+    ];
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $customer]);
+    exit;
+}
+
+// POST /api/customers
+if ($method === 'POST' && in_array($cleanPath, ['/customers', '/customers/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $saved = saveCustomerToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Customer saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/customers/{id}
+if ($method === 'PUT' && preg_match('#^/customers/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $body['id'] = $id;
+    $saved = saveCustomerToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Customer updated in MySQL successfully.']);
+    exit;
+}
+
+// DELETE /api/customers/{id}
+if ($method === 'DELETE' && preg_match('#^/customers/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    deleteItemFromDb($pdo, 'customers', $id);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Customer deleted from MySQL successfully.']);
+    exit;
+}
+
+// ==========================================================
+// LEADS REST ENDPOINTS
+// ==========================================================
+
+// GET /api/leads
+if ($method === 'GET' && in_array($cleanPath, ['/leads', '/leads/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->query('SELECT * FROM `solar_leads` ORDER BY `created_at` DESC');
+    $rows = $stmt->fetchAll();
+    $leads = array_map(function ($r) {
+        return [
+            'id' => $r['id'],
+            'customerName' => $r['customer_name'],
+            'companyName' => $r['company_name'] ?? '',
+            'phone' => $r['phone'],
+            'email' => $r['email'] ?? '',
+            'address' => $r['address'] ?? '',
+            'city' => $r['city'] ?? '',
+            'solarCapacityKw' => floatval($r['solar_capacity_kw'] ?? 0),
+            'estimatedValue' => floatval($r['estimated_value'] ?? 0),
+            'source' => $r['source'] ?? 'Website',
+            'assignedSalespersonId' => $r['assigned_salesperson_id'] ?? '',
+            'assignedSalespersonName' => $r['assigned_salesperson_name'] ?? '',
+            'status' => $r['status'] ?? 'NEW',
+            'notes' => $r['notes'] ?? '',
+            'nextFollowUpDate' => $r['next_follow_up_date'],
+            'createdAt' => $r['created_at'],
+            'updatedAt' => $r['updated_at']
+        ];
+    }, $rows ?: []);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'count' => count($leads), 'data' => $leads]);
+    exit;
+}
+
+// GET /api/leads/{id}
+if ($method === 'GET' && preg_match('#^/leads/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('SELECT * FROM `solar_leads` WHERE `id` = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $r = $stmt->fetch();
+    if (!$r) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => "Lead '$id' not found in MySQL"]);
+        exit;
+    }
+    $lead = [
+        'id' => $r['id'],
+        'customerName' => $r['customer_name'],
+        'companyName' => $r['company_name'] ?? '',
+        'phone' => $r['phone'],
+        'email' => $r['email'] ?? '',
+        'address' => $r['address'] ?? '',
+        'city' => $r['city'] ?? '',
+        'solarCapacityKw' => floatval($r['solar_capacity_kw'] ?? 0),
+        'estimatedValue' => floatval($r['estimated_value'] ?? 0),
+        'source' => $r['source'] ?? 'Website',
+        'assignedSalespersonId' => $r['assigned_salesperson_id'] ?? '',
+        'assignedSalespersonName' => $r['assigned_salesperson_name'] ?? '',
+        'status' => $r['status'] ?? 'NEW',
+        'notes' => $r['notes'] ?? '',
+        'nextFollowUpDate' => $r['next_follow_up_date'],
+        'createdAt' => $r['created_at'],
+        'updatedAt' => $r['updated_at']
+    ];
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $lead]);
+    exit;
+}
+
+// POST /api/leads
+if ($method === 'POST' && in_array($cleanPath, ['/leads', '/leads/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $saved = saveLeadToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Lead saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/leads/{id}
+if ($method === 'PUT' && preg_match('#^/leads/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $body['id'] = $id;
+    $saved = saveLeadToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Lead updated in MySQL successfully.']);
+    exit;
+}
+
+// DELETE /api/leads/{id}
+if ($method === 'DELETE' && preg_match('#^/leads/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    deleteItemFromDb($pdo, 'leads', $id);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Lead deleted from MySQL successfully.']);
+    exit;
+}
+
+// ==========================================================
+// QUOTATIONS REST ENDPOINTS
+// ==========================================================
+
+// GET /api/quotations
+if ($method === 'GET' && in_array($cleanPath, ['/quotations', '/quotations/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->query('SELECT * FROM `solar_quotations` ORDER BY `created_at` DESC');
+    $rows = $stmt->fetchAll();
+    $quotations = array_map(function ($r) {
+        return [
+            'id' => $r['id'],
+            'quotationNumber' => $r['quotation_number'],
+            'customerId' => $r['customer_id'] ?? '',
+            'customerName' => $r['customer_name'],
+            'projectId' => $r['project_id'] ?? '',
+            'capacityKw' => floatval($r['capacity_kw'] ?? 0),
+            'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
+            'baseAmount' => floatval($r['base_amount'] ?? 0),
+            'taxAmount' => floatval($r['tax_amount'] ?? 0),
+            'panelBrand' => $r['panel_brand'] ?? '',
+            'inverterBrand' => $r['inverter_brand'] ?? '',
+            'structureType' => $r['structure_type'] ?? '',
+            'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
+            'subtotal' => floatval($r['base_amount'] ?? 0),
+            'discountAmount' => 0,
+            'gstPercent' => 13.8,
+            'gstAmount' => floatval($r['tax_amount'] ?? 0),
+            'totalAmount' => floatval($r['total_amount'] ?? 0),
+            'paymentTerms' => $r['payment_terms'] ?? '',
+            'warrantyDetails' => $r['warranty_details'] ?? '',
+            'termsAndConditions' => $r['terms_and_conditions'] ?? '',
+            'status' => $r['status'] ?? 'DRAFT',
+            'validUntil' => $r['valid_until'],
+            'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
+            'createdAt' => $r['created_at']
+        ];
+    }, $rows ?: []);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'count' => count($quotations), 'data' => $quotations]);
+    exit;
+}
+
+// GET /api/quotations/{id}
+if ($method === 'GET' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('SELECT * FROM `solar_quotations` WHERE `id` = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $r = $stmt->fetch();
+    if (!$r) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => "Quotation '$id' not found in MySQL"]);
+        exit;
+    }
+    $quotation = [
+        'id' => $r['id'],
+        'quotationNumber' => $r['quotation_number'],
+        'customerId' => $r['customer_id'] ?? '',
+        'customerName' => $r['customer_name'],
+        'projectId' => $r['project_id'] ?? '',
+        'capacityKw' => floatval($r['capacity_kw'] ?? 0),
+        'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
+        'baseAmount' => floatval($r['base_amount'] ?? 0),
+        'taxAmount' => floatval($r['tax_amount'] ?? 0),
+        'panelBrand' => $r['panel_brand'] ?? '',
+        'inverterBrand' => $r['inverter_brand'] ?? '',
+        'structureType' => $r['structure_type'] ?? '',
+        'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
+        'subtotal' => floatval($r['base_amount'] ?? 0),
+        'discountAmount' => 0,
+        'gstPercent' => 13.8,
+        'gstAmount' => floatval($r['tax_amount'] ?? 0),
+        'totalAmount' => floatval($r['total_amount'] ?? 0),
+        'paymentTerms' => $r['payment_terms'] ?? '',
+        'warrantyDetails' => $r['warranty_details'] ?? '',
+        'termsAndConditions' => $r['terms_and_conditions'] ?? '',
+        'status' => $r['status'] ?? 'DRAFT',
+        'validUntil' => $r['valid_until'],
+        'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
+        'createdAt' => $r['created_at']
+    ];
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $quotation]);
+    exit;
+}
+
+// POST /api/quotations
+if ($method === 'POST' && in_array($cleanPath, ['/quotations', '/quotations/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $saved = saveQuotationToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Quotation saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/quotations/{id}
+if ($method === 'PUT' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $body['id'] = $id;
+    $saved = saveQuotationToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Quotation updated in MySQL successfully.']);
+    exit;
+}
+
+// DELETE /api/quotations/{id}
+if ($method === 'DELETE' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    deleteItemFromDb($pdo, 'quotations', $id);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Quotation deleted from MySQL successfully.']);
+    exit;
+}
+
+// ==========================================================
+// EMPLOYEES REST ENDPOINTS
+// ==========================================================
+
+// GET /api/employees
+if ($method === 'GET' && in_array($cleanPath, ['/employees', '/employees/', '/employee', '/employee/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->query('SELECT * FROM `solar_employees` ORDER BY `created_at` ASC');
+    $rows = $stmt->fetchAll();
+    $employees = array_map(function ($r) {
+        return [
+            'id' => $r['id'],
+            'employeeCode' => $r['employee_code'],
+            'name' => $r['name'],
+            'photoUrl' => $r['photo_url'] ?? '',
+            'department' => $r['department'],
+            'designation' => $r['designation'],
+            'phone' => $r['phone'],
+            'email' => $r['email'],
+            'joiningDate' => $r['joining_date'],
+            'salaryMonthly' => floatval($r['salary_monthly'] ?? 0),
+            'status' => $r['status'] ?? 'ACTIVE',
+            'currentSiteLocation' => $r['current_site_location'] ?? '',
+            'loginEnabled' => (bool)($r['login_enabled'] ?? 1),
+            'systemRole' => $r['system_role'] ?? 'Super Admin',
+            'isFieldWorker' => (bool)($r['is_field_worker'] ?? 0),
+            'accountStatus' => $r['account_status'] ?? 'ACTIVE',
+            'createdAt' => $r['created_at']
+        ];
+    }, $rows ?: []);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'count' => count($employees), 'data' => $employees]);
+    exit;
+}
+
+// GET /api/employees/{id}
+if ($method === 'GET' && preg_match('#^/employees?/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('SELECT * FROM `solar_employees` WHERE `id` = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $r = $stmt->fetch();
+    if (!$r) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => "Employee '$id' not found in MySQL"]);
+        exit;
+    }
+    $employee = [
+        'id' => $r['id'],
+        'employeeCode' => $r['employee_code'],
+        'name' => $r['name'],
+        'photoUrl' => $r['photo_url'] ?? '',
+        'department' => $r['department'],
+        'designation' => $r['designation'],
+        'phone' => $r['phone'],
+        'email' => $r['email'],
+        'joiningDate' => $r['joining_date'],
+        'salaryMonthly' => floatval($r['salary_monthly'] ?? 0),
+        'status' => $r['status'] ?? 'ACTIVE',
+        'currentSiteLocation' => $r['current_site_location'] ?? '',
+        'loginEnabled' => (bool)($r['login_enabled'] ?? 1),
+        'systemRole' => $r['system_role'] ?? 'Super Admin',
+        'isFieldWorker' => (bool)($r['is_field_worker'] ?? 0),
+        'accountStatus' => $r['account_status'] ?? 'ACTIVE',
+        'createdAt' => $r['created_at']
+    ];
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $employee]);
+    exit;
+}
+
+// POST /api/employees
+if ($method === 'POST' && in_array($cleanPath, ['/employees', '/employees/', '/employee', '/employee/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $saved = saveEmployeeToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Employee saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/employees/{id}
+if ($method === 'PUT' && preg_match('#^/employees?/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $body['id'] = $id;
+    $saved = saveEmployeeToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Employee updated in MySQL successfully.']);
+    exit;
+}
+
+// DELETE /api/employees/{id}
+if ($method === 'DELETE' && preg_match('#^/employees?/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    deleteItemFromDb($pdo, 'employees', $id);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Employee deleted from MySQL successfully.']);
+    exit;
+}
+
+// ==========================================================
+// PROJECTS REST ENDPOINTS
+// ==========================================================
+
+// GET /api/projects
+if ($method === 'GET' && in_array($cleanPath, ['/projects', '/projects/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $stagesByProject = [];
+    try {
+        $sStmt = $pdo->query('SELECT * FROM `solar_project_stages` ORDER BY `stage_order` ASC');
+        while ($s = $sStmt->fetch()) {
+            $pId = $s['project_id'];
+            if (!isset($stagesByProject[$pId])) $stagesByProject[$pId] = [];
+            $stagesByProject[$pId][] = [
+                'id' => $s['id'],
+                'stageKey' => $s['stage_key'],
+                'title' => $s['title'],
+                'order' => intval($s['stage_order']),
+                'department' => $s['department'],
+                'assignedRole' => $s['assigned_role'],
+                'assignedEmployeeId' => $s['assigned_employee_id'] ?? '',
+                'assignedEmployeeName' => $s['assigned_employee_name'] ?? '',
+                'assignedToName' => $s['assigned_employee_name'] ?? '',
+                'status' => $s['status'] ?? 'NOT STARTED',
+                'priority' => $s['priority'] ?? 'MEDIUM',
+                'startDate' => $s['start_date'],
+                'dueDate' => $s['due_date'],
+                'completedDate' => $s['completed_date'],
+                'checklist' => json_decode($s['checklist_json'] ?? '[]', true) ?: [],
+                'photos' => json_decode($s['photos_json'] ?? '[]', true) ?: [],
+                'documents' => json_decode($s['documents_json'] ?? '[]', true) ?: [],
+                'gpsLocation' => json_decode($s['gps_location_json'] ?? 'null', true),
+                'notes' => $s['notes'] ?? '',
+                'approvedBy' => $s['approved_by'] ?? '',
+                'rejectionReason' => $s['rejection_reason'] ?? '',
+                'activities' => []
+            ];
+        }
+    } catch (Exception $e) {}
+
+    $stmt = $pdo->query('SELECT * FROM `solar_projects` ORDER BY `created_at` DESC');
+    $rows = $stmt->fetchAll();
+    $projects = array_map(function ($r) use ($stagesByProject) {
+        $assignments = json_decode($r['assignments_json'] ?? '[]', true) ?: [];
+        return [
+            'id' => $r['id'],
+            'projectCode' => $r['project_code'],
+            'customerId' => $r['customer_id'],
+            'customerName' => $r['customer_name'],
+            'title' => $r['title'],
+            'capacityKw' => floatval($r['capacity_kw'] ?? 0),
+            'totalValue' => floatval($r['total_value'] ?? 0),
+            'status' => $r['status'] ?? 'PLANNING',
+            'currentStageKey' => $r['current_stage_key'] ?? 'site_survey',
+            'completionPercentage' => intval($r['completion_percentage'] ?? 0),
+            'progressPercentage' => intval($r['completion_percentage'] ?? 0),
+            'projectManagerId' => $r['project_manager_id'] ?? '',
+            'projectManagerName' => $r['project_manager_name'] ?? '',
+            'siteAddress' => $r['site_address'] ?? '',
+            'city' => $r['city'] ?? 'Ahmedabad',
+            'inverterModel' => $r['inverter_model'] ?? '',
+            'panelModel' => $r['panel_model'] ?? '',
+            'structureType' => $r['structure_type'] ?? 'Elevated GI Structure',
+            'startDate' => $r['start_date'],
+            'expectedCompletionDate' => $r['expected_completion_date'],
+            'notes' => $r['notes'] ?? '',
+            'assignedUsers' => $assignments,
+            'stages' => $stagesByProject[$r['id']] ?? [],
+            'createdAt' => $r['created_at'],
+            'updatedAt' => $r['updated_at']
+        ];
+    }, $rows ?: []);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'count' => count($projects), 'data' => $projects]);
+    exit;
+}
+
+// GET /api/projects/{id}
+if ($method === 'GET' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $stmt = $pdo->prepare('SELECT * FROM `solar_projects` WHERE `id` = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $r = $stmt->fetch();
+    if (!$r) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => "Project '$id' not found in MySQL"]);
+        exit;
+    }
+    $stages = [];
+    $sStmt = $pdo->prepare('SELECT * FROM `solar_project_stages` WHERE `project_id` = ? ORDER BY `stage_order` ASC');
+    $sStmt->execute([$id]);
+    while ($s = $sStmt->fetch()) {
+        $stages[] = [
+            'id' => $s['id'],
+            'stageKey' => $s['stage_key'],
+            'title' => $s['title'],
+            'order' => intval($s['stage_order']),
+            'department' => $s['department'],
+            'assignedRole' => $s['assigned_role'],
+            'assignedEmployeeId' => $s['assigned_employee_id'] ?? '',
+            'assignedEmployeeName' => $s['assigned_employee_name'] ?? '',
+            'assignedToName' => $s['assigned_employee_name'] ?? '',
+            'status' => $s['status'] ?? 'NOT STARTED',
+            'priority' => $s['priority'] ?? 'MEDIUM',
+            'startDate' => $s['start_date'],
+            'dueDate' => $s['due_date'],
+            'completedDate' => $s['completed_date'],
+            'checklist' => json_decode($s['checklist_json'] ?? '[]', true) ?: [],
+            'photos' => json_decode($s['photos_json'] ?? '[]', true) ?: [],
+            'documents' => json_decode($s['documents_json'] ?? '[]', true) ?: [],
+            'gpsLocation' => json_decode($s['gps_location_json'] ?? 'null', true),
+            'notes' => $s['notes'] ?? '',
+            'approvedBy' => $s['approved_by'] ?? '',
+            'rejectionReason' => $s['rejection_reason'] ?? '',
+            'activities' => []
+        ];
+    }
+    $assignments = json_decode($r['assignments_json'] ?? '[]', true) ?: [];
+    $project = [
+        'id' => $r['id'],
+        'projectCode' => $r['project_code'],
+        'customerId' => $r['customer_id'],
+        'customerName' => $r['customer_name'],
+        'title' => $r['title'],
+        'capacityKw' => floatval($r['capacity_kw'] ?? 0),
+        'totalValue' => floatval($r['total_value'] ?? 0),
+        'status' => $r['status'] ?? 'PLANNING',
+        'currentStageKey' => $r['current_stage_key'] ?? 'site_survey',
+        'completionPercentage' => intval($r['completion_percentage'] ?? 0),
+        'progressPercentage' => intval($r['completion_percentage'] ?? 0),
+        'projectManagerId' => $r['project_manager_id'] ?? '',
+        'projectManagerName' => $r['project_manager_name'] ?? '',
+        'siteAddress' => $r['site_address'] ?? '',
+        'city' => $r['city'] ?? 'Ahmedabad',
+        'inverterModel' => $r['inverter_model'] ?? '',
+        'panelModel' => $r['panel_model'] ?? '',
+        'structureType' => $r['structure_type'] ?? 'Elevated GI Structure',
+        'startDate' => $r['start_date'],
+        'expectedCompletionDate' => $r['expected_completion_date'],
+        'notes' => $r['notes'] ?? '',
+        'assignedUsers' => $assignments,
+        'stages' => $stages,
+        'createdAt' => $r['created_at'],
+        'updatedAt' => $r['updated_at']
+    ];
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $project]);
+    exit;
+}
+
+// POST /api/projects
+if ($method === 'POST' && in_array($cleanPath, ['/projects', '/projects/'])) {
+    $pdo = getDbConnection($dbConfig);
+    $saved = saveProjectToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Project saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/projects/{id}
+if ($method === 'PUT' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    $body['id'] = $id;
+    $saved = saveProjectToDb($pdo, $body);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Project updated in MySQL successfully.']);
+    exit;
+}
+
+// DELETE /api/projects/{id}
+if ($method === 'DELETE' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    deleteItemFromDb($pdo, 'projects', $id);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Project deleted from MySQL successfully.']);
     exit;
 }
 
@@ -4397,43 +5036,6 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
     try {
         $stmt = $pdo->query('SELECT * FROM `solar_employees` ORDER BY `created_at` ASC');
         $rows = $stmt->fetchAll();
-        $existingEmpIds = [];
-        $existingEmpEmails = [];
-        foreach ($rows as $er) {
-            $existingEmpIds[$er['id']] = true;
-            if (!empty($er['email'])) $existingEmpEmails[strtolower($er['email'])] = true;
-        }
-
-        // Merge users who are staff members from solar_users
-        try {
-            $uStmt = $pdo->query("SELECT * FROM `solar_users` WHERE `role` != 'Customer'");
-            while ($u = $uStmt->fetch()) {
-                $uEmail = strtolower($u['email'] ?? '');
-                if (empty($existingEmpIds[$u['id']]) && (empty($uEmail) || empty($existingEmpEmails[$uEmail]))) {
-                    $rows[] = [
-                        'id' => $u['id'],
-                        'employee_code' => $u['employee_id'] ?: ('EMP-' . substr($u['id'], -4)),
-                        'name' => $u['name'],
-                        'photo_url' => '',
-                        'department' => $u['department'] ?: 'Operations',
-                        'designation' => $u['designation'] ?: ($u['role'] ?: 'Staff Member'),
-                        'phone' => $u['phone'] ?: '',
-                        'email' => $u['email'],
-                        'joining_date' => $u['created_at'],
-                        'salary_monthly' => 0.00,
-                        'status' => $u['status'] ?: 'ACTIVE',
-                        'current_site_location' => '',
-                        'login_enabled' => ($u['status'] !== 'DISABLED') ? 1 : 0,
-                        'system_role' => $u['role'] ?: 'Admin',
-                        'is_field_worker' => $u['is_field_worker'] ?? 0,
-                        'account_status' => ($u['status'] === 'DISABLED') ? 'DISABLED' : 'ACTIVE',
-                        'created_at' => $u['created_at']
-                    ];
-                    $existingEmpIds[$u['id']] = true;
-                    if (!empty($uEmail)) $existingEmpEmails[$uEmail] = true;
-                }
-            }
-        } catch (Exception $ue) {}
 
         $data['employees'] = array_map(function ($r) {
             return [

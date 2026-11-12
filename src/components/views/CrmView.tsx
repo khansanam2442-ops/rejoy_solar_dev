@@ -570,7 +570,16 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredLeads.map(lead => (
+                    {filteredLeads.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="py-12 text-center text-slate-400">
+                          <Users className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
+                          <p className="font-semibold text-slate-600">No leads found in MySQL</p>
+                          <p className="text-[11px] text-slate-400 mt-1">Register a new solar inquiry or import leads via Excel Hub</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLeads.map(lead => (
                       <tr key={lead.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3.5 px-4 font-bold text-slate-900">{lead.customerName}</td>
                         <td className="py-3.5 px-4 text-slate-600">{lead.companyName || '—'}</td>
@@ -602,7 +611,8 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                           )}
                         </td>
                       </tr>
-                    ))}
+                    ))
+                  )}
                   </tbody>
                 </table>
               </div>
@@ -613,8 +623,17 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
 
       {/* TAB 2: CUSTOMERS DIRECTORY */}
       {activeTab === 'CUSTOMERS' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomers.map((cust) => (
+        filteredCustomers.length === 0 ? (
+          <div className="bg-white rounded-2xl p-12 text-center border border-slate-200/80 shadow-2xs">
+            <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-slate-800">No Customers Found</h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+              No customers match your search criteria. Add a customer or convert an existing solar lead to get started.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredCustomers.map((cust) => (
             <div
               key={cust.id}
               onClick={() => openCustomerControlCenter(cust.id, cust.activeProjectId)}
@@ -695,6 +714,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
             </div>
           ))}
         </div>
+        )
       )}
 
       {/* TAB 3: QUOTATIONS & PROPOSALS */}
