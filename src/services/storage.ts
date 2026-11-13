@@ -248,6 +248,7 @@ class StorageService {
     } catch (e: any) {
       const errMsg = e?.message || 'Failed to load data from MySQL backend';
       console.error('[Storage] Backend MySQL bootstrap failed:', errMsg);
+      this.memStore.clear();
       this.isHydrated = false;
       this.bootstrapStatus = 'error';
       this.bootstrapError = errMsg;
@@ -270,6 +271,8 @@ class StorageService {
   }
 
   private set<T>(key: string, data: T, singleItem?: any): void {
+    const hadPrevious = this.memStore.has(key);
+    const previousSnapshot = this.memStore.get(key);
     this.memStore.set(key, data);
     if (typeof window !== 'undefined') {
       const collection = KEY_TO_COLLECTION[key];
@@ -283,6 +286,12 @@ class StorageService {
           .catch((e: any) => {
             const errMsg = e?.message || `Failed to save ${collection} to MySQL`;
             console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, errMsg);
+            // Roll back unpersisted optimistic change immediately before rehydrating from MySQL
+            if (hadPrevious) {
+              this.memStore.set(key, previousSnapshot);
+            } else {
+              this.memStore.delete(key);
+            }
             this.lastSyncError = errMsg;
             window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: errMsg } }));
             this.hydrateFromBackend();
@@ -351,20 +360,62 @@ class StorageService {
     return result;
   }
 
+  async addLeadAsync(leadData: Partial<Lead> & { customerName: string; phone: string; [key: string]: any }): Promise<Lead> {
+    const newLead: Lead = {
+      id: `lead-${Date.now()}`,
+      customerName: leadData.customerName,
+      companyName: leadData.companyName || '',
+      phone: leadData.phone,
+      email: leadData.email || '',
+      address: leadData.address || '',
+      city: leadData.city || '',
+      solarCapacityKw: Number(leadData.solarCapacityKw) || 0,
+      estimatedValue: Number(leadData.estimatedValue) || 0,
+      source: leadData.source || 'Direct Referral',
+      assignedSalespersonId: leadData.assignedSalespersonId || leadData.assignedToId || undefined,
+      assignedSalespersonName: leadData.assignedSalespersonName || leadData.assignedToName || '',
+      status: (leadData.status as LeadStatus) || 'NEW',
+      notes: leadData.notes || '',
+      nextFollowUpDate: leadData.nextFollowUpDate || new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const saved = await apiClient.syncPush('leads', { item: newLead });
+    const committed = saved && typeof saved === 'object' && saved.id ? saved : newLead;
+    const leads = this.getLeads().filter(l => l.id !== committed.id);
+    leads.unshift(committed);
+    this.memStore.set(STORAGE_KEYS.LEADS, leads);
+    this.lastSyncError = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    }
+    return committed;
+  }
+
+  async deleteLeadAsync(id: string): Promise<void> {
+    await apiClient.syncPush('leads', { item: { id }, action: 'delete' });
+    const leads = this.getLeads().filter(l => l.id !== id);
+    this.memStore.set(STORAGE_KEYS.LEADS, leads);
+    this.lastSyncError = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    }
+  }
+
   addLead(leadData: Partial<Lead> & { customerName: string; phone: string; [key: string]: any }): Lead {
     const newLead: Lead = {
       id: `lead-${Date.now()}`,
       customerName: leadData.customerName,
-      companyName: leadData.companyName || leadData.customerName,
+      companyName: leadData.companyName || '',
       phone: leadData.phone,
       email: leadData.email || '',
       address: leadData.address || '',
-      city: leadData.city || 'Ahmedabad',
-      solarCapacityKw: Number(leadData.solarCapacityKw) || 10,
-      estimatedValue: Number(leadData.estimatedValue) || 450000,
-      source: leadData.source || 'Direct Call',
+      city: leadData.city || '',
+      solarCapacityKw: Number(leadData.solarCapacityKw) || 0,
+      estimatedValue: Number(leadData.estimatedValue) || 0,
+      source: leadData.source || 'Direct Referral',
       assignedSalespersonId: leadData.assignedSalespersonId || leadData.assignedToId || undefined,
-      assignedSalespersonName: leadData.assignedSalespersonName || leadData.assignedToName || 'Unassigned',
+      assignedSalespersonName: leadData.assignedSalespersonName || leadData.assignedToName || '',
       status: (leadData.status as LeadStatus) || 'NEW',
       notes: leadData.notes || '',
       nextFollowUpDate: leadData.nextFollowUpDate || new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10),
@@ -381,11 +432,9 @@ class StorageService {
     convertedByName?: string,
     role?: string
   ): { customer: Customer; project: SolarProject } {
-    let lead = this.getLeads().find(l => l.id === leadId);
+    const lead = this.getLeads().find(l => l.id === leadId);
     if (!lead) {
-      const customers = this.getCustomers();
-      const projects = this.getProjects();
-      return { customer: customers[0], project: projects[0] };
+      throw new Error('Selected lead record was not found in MySQL.');
     }
 
     // Pre-validate customer uniqueness before modifying lead or creating project

@@ -618,7 +618,7 @@ function saveLeadToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'lead-' . round(microtime(true) * 1000);
     $customerName = trim($item['customerName'] ?? $item['customer_name'] ?? '');
     $companyName = trim($item['companyName'] ?? $item['company_name'] ?? '');
-    $phone = trim($item['phone'] ?? '+91 99999 00000');
+    $phone = trim($item['phone'] ?? '');
     $email = trim($item['email'] ?? '');
     $address = trim($item['address'] ?? '');
     $city = trim($item['city'] ?? '');
@@ -5421,6 +5421,218 @@ if ($method === 'GET' && in_array($cleanPath, ['/pusher/status', '/pusher/status
         'presenceEvent' => 'presence.updated'
     ]);
     exit;
+}
+
+// ==========================================================
+// 29. DIRECT CRM REST ENDPOINTS (LEADS, CUSTOMERS, QUOTATIONS)
+// ==========================================================
+
+if (in_array($cleanPath, ['/leads', '/leads/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'GET') {
+        $stmt = $pdo->query('SELECT * FROM `solar_leads` ORDER BY `created_at` DESC');
+        $rows = $stmt->fetchAll();
+        $leads = array_map(function ($r) {
+            return [
+                'id' => $r['id'],
+                'customerName' => $r['customer_name'],
+                'companyName' => $r['company_name'] ?? '',
+                'phone' => $r['phone'],
+                'email' => $r['email'] ?? '',
+                'address' => $r['address'] ?? '',
+                'city' => $r['city'] ?? '',
+                'solarCapacityKw' => floatval($r['solar_capacity_kw'] ?? 0),
+                'estimatedValue' => floatval($r['estimated_value'] ?? 0),
+                'source' => $r['source'] ?? 'Website',
+                'assignedSalespersonId' => $r['assigned_salesperson_id'] ?? '',
+                'assignedSalespersonName' => $r['assigned_salesperson_name'] ?? '',
+                'status' => $r['status'] ?? 'NEW',
+                'notes' => $r['notes'] ?? '',
+                'nextFollowUpDate' => $r['next_follow_up_date'],
+                'createdAt' => $r['created_at'],
+                'updatedAt' => $r['updated_at']
+            ];
+        }, $rows ?: []);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($leads), 'data' => $leads]);
+        exit;
+    }
+
+    if ($method === 'POST') {
+        if (empty($body['customerName']) || empty($body['phone'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => 'Lead customerName and phone required.']);
+            exit;
+        }
+        $saved = saveLeadToDb($pdo, $body);
+        http_response_code(201);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+}
+
+if (preg_match('#^/leads/([^/]+)/?$#', $cleanPath, $matches)) {
+    $leadId = urldecode($matches[1]);
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'PUT') {
+        $body['id'] = $leadId;
+        $saved = saveLeadToDb($pdo, $body);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+
+    if ($method === 'DELETE') {
+        deleteItemFromDb($pdo, 'leads', $leadId);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Lead deleted from MySQL.']);
+        exit;
+    }
+}
+
+if (in_array($cleanPath, ['/customers', '/customers/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'GET') {
+        $stmt = $pdo->query('SELECT * FROM `solar_customers` ORDER BY `created_at` DESC');
+        $rows = $stmt->fetchAll();
+        $customers = array_map(function ($r) {
+            return [
+                'id' => $r['id'],
+                'customerCode' => $r['customer_code'],
+                'name' => $r['name'],
+                'companyName' => $r['company_name'] ?? '',
+                'customerType' => $r['customer_type'] ?? 'Residential',
+                'phone' => $r['phone'],
+                'email' => $r['email'] ?? '',
+                'siteAddress' => $r['site_address'] ?? '',
+                'city' => $r['city'] ?? '',
+                'state' => $r['state'] ?? 'Gujarat',
+                'pincode' => $r['pincode'] ?? '',
+                'gstNumber' => $r['gst_number'] ?? '',
+                'electricityConsumerNo' => $r['electricity_consumer_no'] ?? '',
+                'sanctionedLoadKw' => floatval($r['sanctioned_load_kw'] ?? 0),
+                'status' => $r['status'] ?? 'ACTIVE',
+                'activeProjectId' => $r['active_project_id'] ?? null,
+                'createdAt' => $r['created_at'],
+                'updatedAt' => $r['updated_at']
+            ];
+        }, $rows ?: []);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($customers), 'data' => $customers]);
+        exit;
+    }
+
+    if ($method === 'POST') {
+        if (empty($body['name']) || empty($body['phone'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => 'Customer name and phone are required.']);
+            exit;
+        }
+        $saved = saveCustomerToDb($pdo, $body);
+        http_response_code(201);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+}
+
+if (preg_match('#^/customers/([^/]+)/?$#', $cleanPath, $matches)) {
+    $custId = urldecode($matches[1]);
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'PUT') {
+        $body['id'] = $custId;
+        $saved = saveCustomerToDb($pdo, $body);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+
+    if ($method === 'DELETE') {
+        deleteItemFromDb($pdo, 'customers', $custId);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Customer deleted from MySQL.']);
+        exit;
+    }
+}
+
+if (in_array($cleanPath, ['/quotations', '/quotations/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'GET') {
+        $stmt = $pdo->query('SELECT * FROM `solar_quotations` ORDER BY `created_at` DESC');
+        $rows = $stmt->fetchAll();
+        $quotations = array_map(function ($r) {
+            return [
+                'id' => $r['id'],
+                'quotationNumber' => $r['quotation_number'],
+                'customerId' => $r['customer_id'],
+                'customerName' => $r['customer_name'],
+                'projectId' => $r['project_id'],
+                'capacityKw' => floatval($r['capacity_kw'] ?? 0),
+                'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
+                'baseAmount' => floatval($r['base_amount'] ?? 0),
+                'taxAmount' => floatval($r['tax_amount'] ?? 0),
+                'panelBrand' => $r['panel_brand'] ?? '',
+                'inverterBrand' => $r['inverter_brand'] ?? '',
+                'structureType' => $r['structure_type'] ?? '',
+                'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
+                'subtotal' => floatval($r['subtotal'] ?? 0),
+                'discountAmount' => floatval($r['discount_amount'] ?? 0),
+                'gstPercent' => floatval($r['gst_percent'] ?? 13.8),
+                'gstAmount' => floatval($r['gst_amount'] ?? 0),
+                'totalAmount' => floatval($r['total_amount'] ?? 0),
+                'totalProjectCost' => floatval($r['total_amount'] ?? 0),
+                'paymentTerms' => $r['payment_terms'] ?? '',
+                'warrantyDetails' => $r['warranty_details'] ?? '',
+                'termsAndConditions' => $r['terms_and_conditions'] ?? '',
+                'status' => $r['status'] ?? 'SENT',
+                'validUntil' => $r['valid_until'],
+                'validTill' => $r['valid_until'],
+                'createdAt' => $r['created_at'],
+                'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
+                'acceptedAt' => $r['accepted_at']
+            ];
+        }, $rows ?: []);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($quotations), 'data' => $quotations]);
+        exit;
+    }
+
+    if ($method === 'POST') {
+        $saved = saveQuotationToDb($pdo, $body);
+        http_response_code(201);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+}
+
+if (preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $matches)) {
+    $quoteId = urldecode($matches[1]);
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    if ($method === 'PUT') {
+        $body['id'] = $quoteId;
+        $saved = saveQuotationToDb($pdo, $body);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+
+    if ($method === 'DELETE') {
+        deleteItemFromDb($pdo, 'quotations', $quoteId);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Quotation deleted from MySQL.']);
+        exit;
+    }
 }
 
 // Default 404 for unhandled API routes (Always returns JSON, NEVER index.html)

@@ -108,9 +108,10 @@ async function createServerApp() {
     res.setHeader('Access-Control-Expose-Headers', 'Set-Cookie');
     res.setHeader('Vary', 'Origin, Cookie, Authorization');
 
-    if (req.path.startsWith('/api/auth') || req.path.startsWith('/auth')) {
+    if (req.path.startsWith('/api') || req.path.startsWith('/auth')) {
       res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
     }
 
     if (req.method === 'OPTIONS') {

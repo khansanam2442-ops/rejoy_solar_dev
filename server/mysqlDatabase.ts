@@ -954,7 +954,7 @@ class MySqlDatabaseManager {
     const existing = await this.getExistingRow('solar_leads', item.id);
     const customerName = item.customerName ?? item.customer_name ?? existing?.customer_name ?? '';
     const companyName = item.companyName ?? item.company_name ?? existing?.company_name ?? '';
-    const phone = item.phone ?? existing?.phone ?? '+91 99999 00000';
+    const phone = item.phone ?? existing?.phone ?? '';
     const email = item.email ?? existing?.email ?? '';
     const address = item.address ?? existing?.address ?? '';
     const city = item.city ?? existing?.city ?? '';

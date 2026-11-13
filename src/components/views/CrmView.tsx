@@ -76,19 +76,21 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
   const [leadViewMode, setLeadViewMode] = useState<'KANBAN' | 'LIST'>('KANBAN');
 
   // New Lead Modal state
-  const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
-  const [leadForm, setLeadForm] = useState({
+  const emptyLeadForm = {
     customerName: '',
     companyName: '',
     phone: '',
     email: '',
     address: '',
-    city: 'Ahmedabad',
-    solarCapacityKw: 50,
-    estimatedValue: 2400000,
+    city: '',
+    solarCapacityKw: 0,
+    estimatedValue: 0,
     source: 'Direct Referral',
-    notes: 'Inquired for factory rooftop solar installation.'
-  });
+    notes: ''
+  };
+  const [isNewLeadOpen, setIsNewLeadOpen] = useState(false);
+  const [isSavingLead, setIsSavingLead] = useState(false);
+  const [leadForm, setLeadForm] = useState(emptyLeadForm);
 
   // New Customer Modal state
   const [isNewCustomerOpen, setIsNewCustomerOpen] = useState(false);
@@ -155,23 +157,50 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
     );
   }, [quotations, searchTerm]);
 
-  const handleCreateLead = (e: React.FormEvent) => {
+  const handleCreateLead = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!leadForm.customerName || !leadForm.phone) {
+    if (!leadForm.customerName.trim() || !leadForm.phone.trim()) {
       showToast('Customer name and phone are required', 'error');
       return;
     }
 
-    storageService.addLead({
-      ...leadForm,
-      status: 'NEW',
-      assignedToId: currentUser?.id || 'emp-1',
-      assignedToName: currentUser?.name || 'Solar Team Member'
-    });
+    setIsSavingLead(true);
+    try {
+      await storageService.addLeadAsync({
+        ...leadForm,
+        customerName: leadForm.customerName.trim(),
+        companyName: leadForm.companyName.trim(),
+        phone: leadForm.phone.trim(),
+        email: leadForm.email.trim(),
+        city: leadForm.city.trim(),
+        notes: leadForm.notes.trim(),
+        status: 'NEW',
+        assignedToId: currentUser?.id || '',
+        assignedToName: currentUser?.name || ''
+      });
 
-    setIsNewLeadOpen(false);
-    showToast('New solar lead registered successfully', 'success');
-    triggerRefresh();
+      setLeadForm(emptyLeadForm);
+      setIsNewLeadOpen(false);
+      showToast('New solar lead saved to MySQL successfully', 'success');
+      triggerRefresh();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to save lead to MySQL database', 'error');
+    } finally {
+      setIsSavingLead(false);
+    }
+  };
+
+  const handleDeleteLead = async (lead: Lead) => {
+    if (!window.confirm(`Delete lead "${lead.customerName}" from MySQL? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await storageService.deleteLeadAsync(lead.id);
+      showToast(`Lead "${lead.customerName}" deleted from MySQL`, 'info');
+      triggerRefresh();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete lead from MySQL', 'error');
+    }
   };
 
   const handleConvertToCustomerAndProject = (lead: Lead) => {
@@ -332,7 +361,10 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
         <div className="flex flex-wrap items-center gap-2">
           {activeTab === 'LEADS' && (
             <button
-              onClick={() => setIsNewLeadOpen(true)}
+              onClick={() => {
+                setLeadForm(emptyLeadForm);
+                setIsNewLeadOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-all shadow-2xs"
             >
               <Plus className="w-4 h-4" />
@@ -513,20 +545,32 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
 
                           {/* Card bottom actions */}
                           <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between gap-1">
-                            <button
-                              onClick={() =>
-                                openWhatsAppModal(lead.phone, lead.customerName, 'LEAD_WELCOME', {
-                                  capacityKw: lead.solarCapacityKw
-                                })
-                              }
-                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                              title="Send WhatsApp Welcome"
-                            >
-                              <MessageSquare className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openWhatsAppModal(lead.phone, lead.customerName, 'LEAD_WELCOME', {
+                                    capacityKw: lead.solarCapacityKw
+                                  })
+                                }
+                                className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                title="Send WhatsApp Welcome"
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLead(lead)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Delete Lead from MySQL"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
 
                             {lead.status !== 'WON' ? (
                               <button
+                                type="button"
                                 onClick={() => handleConvertToCustomerAndProject(lead)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-[10px] font-bold transition-colors"
                               >
@@ -592,17 +636,28 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                         <td className="py-3.5 px-4 text-slate-500">{lead.source}</td>
                         <td className="py-3.5 px-4 text-right space-x-2">
                           <button
+                            type="button"
                             onClick={() =>
                               openWhatsAppModal(lead.phone, lead.customerName, 'LEAD_WELCOME', {
                                 capacityKw: lead.solarCapacityKw
                               })
                             }
                             className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-md"
+                            title="Send WhatsApp Welcome"
                           >
                             <MessageSquare className="w-4 h-4 inline" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLead(lead)}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md"
+                            title="Delete Lead from MySQL"
+                          >
+                            <Trash2 className="w-4 h-4 inline" />
+                          </button>
                           {lead.status !== 'WON' && (
                             <button
+                              type="button"
                               onClick={() => handleConvertToCustomerAndProject(lead)}
                               className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px]"
                             >
@@ -693,7 +748,9 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
               </div>
 
               <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-500">Sanctioned: {cust.sanctionedLoadKw || 100} kW</span>
+                <span className="text-slate-500">
+                  Sanctioned: {cust.sanctionedLoadKw ? `${cust.sanctionedLoadKw} kW` : 'Not specified'}
+                </span>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -776,7 +833,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                             </span>
                           )}
                           <span className="text-[10px] text-slate-400 block truncate max-w-[180px]">
-                            {q.city || 'Raipur, CG'}
+                            {q.city || '—'}
                           </span>
                         </td>
 
@@ -790,7 +847,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                             </span>
                           </div>
                           <span className="text-[10px] text-slate-500 block mt-1 truncate max-w-[200px]">
-                            {q.panelBrand || 'Tier-1 Mono PERC'}
+                            {q.panelBrand || '—'}
                           </span>
                         </td>
 
@@ -874,13 +931,16 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
 
                             {/* WhatsApp */}
                             <button
-                              onClick={() =>
-                                openWhatsAppModal('919879544321', q.customerName, 'QUOTATION_SHARE', {
+                              onClick={() => {
+                                const matchedCust = customers.find(
+                                  c => (q.customerId && c.id === q.customerId) || c.name === q.customerName
+                                );
+                                openWhatsAppModal(matchedCust?.phone || '', q.customerName, 'QUOTATION_SHARE', {
                                   quotationNumber: q.quotationNumber,
                                   capacityKw: q.capacityKw,
                                   amount: totalCost
-                                })
-                              }
+                                });
+                              }}
                               className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                               title="Share on WhatsApp"
                             >
@@ -972,11 +1032,14 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                   <label className="block text-xs font-bold text-slate-700 mb-1">Est. Solar Capacity (kW)</label>
                   <input
                     type="number"
-                    value={leadForm.solarCapacityKw}
+                    min="0"
+                    step="0.5"
+                    value={leadForm.solarCapacityKw || ''}
                     onChange={e => {
-                      const kw = Number(e.target.value);
+                      const kw = Number(e.target.value) || 0;
                       setLeadForm({ ...leadForm, solarCapacityKw: kw, estimatedValue: kw * 48000 });
                     }}
+                    placeholder="e.g. 10"
                     className="w-full text-xs border border-slate-200 rounded-xl p-2.5 font-bold"
                   />
                 </div>
@@ -984,8 +1047,10 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                   <label className="block text-xs font-bold text-slate-700 mb-1">Est. Project Value (₹)</label>
                   <input
                     type="number"
-                    value={leadForm.estimatedValue}
-                    onChange={e => setLeadForm({ ...leadForm, estimatedValue: Number(e.target.value) })}
+                    min="0"
+                    value={leadForm.estimatedValue || ''}
+                    onChange={e => setLeadForm({ ...leadForm, estimatedValue: Number(e.target.value) || 0 })}
+                    placeholder="e.g. 480000"
                     className="w-full text-xs border border-slate-200 rounded-xl p-2.5"
                   />
                 </div>
@@ -997,6 +1062,18 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                   type="text"
                   value={leadForm.city}
                   onChange={e => setLeadForm({ ...leadForm, city: e.target.value })}
+                  placeholder="e.g. Ahmedabad"
+                  className="w-full text-xs border border-slate-200 rounded-xl p-2.5"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Requirement / Inquiry Notes</label>
+                <textarea
+                  rows={2}
+                  value={leadForm.notes}
+                  onChange={e => setLeadForm({ ...leadForm, notes: e.target.value })}
+                  placeholder="e.g. Rooftop solar requirement, sanctioned load, phase details..."
                   className="w-full text-xs border border-slate-200 rounded-xl p-2.5"
                 />
               </div>
@@ -1011,9 +1088,10 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-xl shadow-2xs"
+                  disabled={isSavingLead}
+                  className="px-5 py-2 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-50 rounded-xl shadow-2xs"
                 >
-                  Register Lead
+                  {isSavingLead ? 'Saving to MySQL...' : 'Register Lead'}
                 </button>
               </div>
             </form>
