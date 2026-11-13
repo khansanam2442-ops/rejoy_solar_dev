@@ -6499,8 +6499,179 @@ class MySqlDatabaseManager {
   // ==========================================================
   // WORKFORCE LIVE TRACKING & PRESENCE (PERSISTED IN MYSQL)
   // ==========================================================
+  private isEligibleFieldWorkerRole(role?: string | null, isFieldFlag?: any, department?: string | null): boolean {
+    if (Boolean(isFieldFlag) && String(isFieldFlag) !== '0' && String(isFieldFlag).toLowerCase() !== 'false') {
+      return true;
+    }
+    const normRole = String(role || '').toLowerCase().trim();
+    const normDept = String(department || '').toLowerCase().trim();
+    if (!normRole) return false;
+    if (
+      normRole === 'customer' ||
+      normRole === 'admin' ||
+      normRole === 'super admin' ||
+      normRole.includes('accountant') ||
+      normRole.includes('finance') ||
+      normRole === 'hr manager' ||
+      normRole.includes('director') ||
+      normRole.includes('executive assistant')
+    ) {
+      return false;
+    }
+    const eligibleRoles = [
+      'site survey engineer',
+      'site inspector',
+      'civil team',
+      'civil engineer',
+      'structure team',
+      'structure engineer',
+      'installation team',
+      'installation engineer',
+      'electrical team',
+      'electrical engineer',
+      'project engineer',
+      'technician',
+      'service engineer',
+      'service manager'
+    ];
+    return (
+      eligibleRoles.some((r) => normRole.includes(r)) ||
+      normDept.includes('engineering') ||
+      normDept.includes('installation') ||
+      normDept.includes('electrical') ||
+      normDept.includes('civil') ||
+      normDept.includes('structure') ||
+      normDept.includes('service')
+    );
+  }
+
+  private async loadVerifiedActiveFieldStaffMap(): Promise<{
+    byId: Map<string, any>;
+    byEmail: Map<string, any>;
+    byCode: Map<string, any>;
+    allKnownIds: Set<string>;
+    allKnownEmails: Set<string>;
+  }> {
+    this.assertDbConnected();
+    const byId = new Map<string, any>();
+    const byEmail = new Map<string, any>();
+    const byCode = new Map<string, any>();
+    const allKnownIds = new Set<string>();
+    const allKnownEmails = new Set<string>();
+
+    const register = (rec: {
+      id: string;
+      employeeCode: string;
+      name: string;
+      email: string;
+      role: string;
+      department: string;
+      phone: string;
+      isFieldWorker: boolean;
+      active: boolean;
+    }) => {
+      if (rec.id) allKnownIds.add(rec.id.trim().toLowerCase());
+      if (rec.email) allKnownEmails.add(rec.email.trim().toLowerCase());
+      if (!rec.active) return;
+      if (!this.isEligibleFieldWorkerRole(rec.role, rec.isFieldWorker, rec.department)) return;
+
+      const idKey = rec.id.trim().toLowerCase();
+      const emailKey = rec.email.trim().toLowerCase();
+      const codeKey = rec.employeeCode.trim().toLowerCase();
+      if (idKey && !byId.has(idKey)) byId.set(idKey, rec);
+      if (emailKey && !byEmail.has(emailKey)) byEmail.set(emailKey, rec);
+      if (codeKey && !byCode.has(codeKey)) byCode.set(codeKey, rec);
+    };
+
+    for (const table of ['solar_employees', 'solar_employee']) {
+      try {
+        const [empRows]: any = await this.pool!.query(`SELECT * FROM \`${table}\``);
+        if (Array.isArray(empRows)) {
+          for (const e of empRows) {
+            const status = String(e.status || 'ACTIVE').toUpperCase();
+            const acctStatus = String(e.account_status || 'ACTIVE').toUpperCase();
+            const role = String(e.system_role || e.assigned_role || e.designation || 'Staff');
+            const active =
+              status !== 'DISABLED' &&
+              status !== 'INACTIVE' &&
+              status !== 'TERMINATED' &&
+              acctStatus !== 'DISABLED' &&
+              role.toLowerCase() !== 'customer';
+            register({
+              id: String(e.id || ''),
+              employeeCode: String(e.employee_code || e.id || ''),
+              name: String(e.name || 'Employee'),
+              email: String(e.email || '').trim().toLowerCase(),
+              role,
+              department: String(e.department || 'Operations'),
+              phone: String(e.phone || ''),
+              isFieldWorker: Boolean(e.is_field_worker),
+              active
+            });
+          }
+        }
+      } catch {
+        // Table may not exist in older schemas
+      }
+    }
+
+    try {
+      const [userRows]: any = await this.pool!.query('SELECT * FROM `solar_users`');
+      if (Array.isArray(userRows)) {
+        for (const u of userRows) {
+          const status = String(u.status || 'ACTIVE').toUpperCase();
+          const role = String(u.role || 'Staff');
+          const active =
+            status !== 'DISABLED' &&
+            status !== 'INACTIVE' &&
+            role.toLowerCase() !== 'customer';
+          register({
+            id: String(u.id || ''),
+            employeeCode: String(u.employee_id || u.id || ''),
+            name: String(u.name || 'Staff Member'),
+            email: String(u.email || '').trim().toLowerCase(),
+            role,
+            department: String(u.department || 'Operations'),
+            phone: String(u.phone || ''),
+            isFieldWorker: Boolean(u.is_field_worker),
+            active
+          });
+        }
+      }
+    } catch {
+      // Ignore if unavailable
+    }
+
+    return { byId, byEmail, byCode, allKnownIds, allKnownEmails };
+  }
+
+  public async resolveVerifiedFieldStaff(userId?: string, email?: string, employeeCode?: string): Promise<{
+    id: string;
+    employeeCode: string;
+    name: string;
+    email: string;
+    role: string;
+    department: string;
+    phone: string;
+    isFieldWorker: boolean;
+  } | null> {
+    const { byId, byEmail, byCode } = await this.loadVerifiedActiveFieldStaffMap();
+    const cleanId = String(userId || '').trim().toLowerCase();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanCode = String(employeeCode || '').trim().toLowerCase();
+
+    return (
+      (cleanId && byId.get(cleanId)) ||
+      (cleanEmail && byEmail.get(cleanEmail)) ||
+      (cleanCode && byCode.get(cleanCode)) ||
+      null
+    );
+  }
+
   public async getWorkforceLocations(): Promise<any[]> {
     this.assertDbConnected();
+
+    const { byId, byEmail, byCode, allKnownIds, allKnownEmails } = await this.loadVerifiedActiveFieldStaffMap();
 
     const query = `
       SELECT
@@ -6529,11 +6700,45 @@ class MySqlDatabaseManager {
     `;
 
     const [rows]: any = await this.pool!.query(query);
-    return (Array.isArray(rows) ? rows : []).map((r: any) => {
+    const seenCanonicalIds = new Set<string>();
+    const orphanedUserIds: string[] = [];
+    const verifiedRecords: any[] = [];
+
+    for (const r of (Array.isArray(rows) ? rows : [])) {
+      const rawId = String(r.userId || '').trim().toLowerCase();
+      const rawEmail = String(r.email || '').trim().toLowerCase();
+      const rawCode = String(r.employeeCode || '').trim().toLowerCase();
+
+      const staff =
+        (rawId && byId.get(rawId)) ||
+        (rawEmail && byEmail.get(rawEmail)) ||
+        (rawCode && byCode.get(rawCode)) ||
+        null;
+
+      if (!staff) {
+        // Check if this user doesn't exist in solar_users or solar_employees at all (or is non-field/disabled)
+        const existsAnywhere =
+          (rawId && allKnownIds.has(rawId)) ||
+          (rawEmail && allKnownEmails.has(rawEmail));
+        if (!existsAnywhere && r.userId) {
+          orphanedUserIds.push(String(r.userId));
+        }
+        continue;
+      }
+
+      if (seenCanonicalIds.has(staff.id)) {
+        continue;
+      }
+      seenCanonicalIds.add(staff.id);
+
       const isOnline = Boolean(r.isOnline);
-      const hasCoords = typeof r.latitude === 'number' && typeof r.longitude === 'number' && !isNaN(r.latitude) && !isNaN(r.longitude);
+      const hasCoords =
+        typeof r.latitude === 'number' &&
+        typeof r.longitude === 'number' &&
+        !isNaN(r.latitude) &&
+        !isNaN(r.longitude);
       const speed = typeof r.speed === 'number' ? r.speed : 0;
-      let effectiveStatus: string = r.status || 'offline';
+      let effectiveStatus: string = 'offline';
       if (!isOnline) {
         effectiveStatus = 'offline';
       } else if (hasCoords) {
@@ -6542,27 +6747,41 @@ class MySqlDatabaseManager {
         effectiveStatus = 'online';
       }
 
-      return {
-        userId: r.userId,
-        employeeCode: r.employeeCode || r.userId,
-        name: r.name || `Field Worker (${r.userId})`,
-        email: r.email || '',
-        role: r.role || 'Field Engineer',
+      verifiedRecords.push({
+        userId: staff.id,
+        employeeCode: staff.employeeCode || staff.id,
+        name: staff.name,
+        email: staff.email || '',
+        role: staff.role,
+        department: staff.department || 'Operations',
+        phone: staff.phone || '',
         latitude: hasCoords ? r.latitude : undefined,
         longitude: hasCoords ? r.longitude : undefined,
         accuracy: typeof r.accuracy === 'number' ? r.accuracy : undefined,
         heading: typeof r.heading === 'number' ? r.heading : undefined,
         speed: typeof r.speed === 'number' ? r.speed : undefined,
         batteryLevel: r.batteryLevel !== null && r.batteryLevel !== undefined ? Number(r.batteryLevel) : undefined,
-        activity: r.activity || (isOnline ? (hasCoords ? (speed > 3 ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline'),
+        activity:
+          r.activity ||
+          (isOnline ? (hasCoords ? (speed > 3 ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline'),
         isOnline,
         isSharingLocation: Boolean(r.isSharingLocation),
         hasLocation: hasCoords,
         status: effectiveStatus,
         lastSeenAt: r.lastSeenAt || new Date().toISOString(),
-        updatedAt: r.updatedAt || new Date().toISOString()
-      };
-    });
+        updatedAt: r.updatedAt || new Date().toISOString(),
+        verified: true
+      });
+    }
+
+    // Automatically prune orphaned rows from solar_workforce_locations that no longer exist in solar_users/solar_employees
+    if (orphanedUserIds.length > 0) {
+      for (const orphanId of orphanedUserIds) {
+        await this.pool!.query('DELETE FROM `solar_workforce_locations` WHERE `user_id` = ?', [orphanId]).catch(() => {});
+      }
+    }
+
+    return verifiedRecords;
   }
 
   public async saveWorkforceLocation(data: {
@@ -6579,9 +6798,14 @@ class MySqlDatabaseManager {
     batteryLevel?: number;
     activity?: string;
   }): Promise<boolean> {
-    const userId = String(data.userId).trim();
+    const userId = String(data.userId || '').trim();
     if (!userId) return false;
     this.assertDbConnected();
+
+    const verified = await this.resolveVerifiedFieldStaff(userId, data.email, data.employeeCode);
+    if (!verified) {
+      return false;
+    }
 
     const lat = Number(data.latitude);
     const lng = Number(data.longitude);
@@ -6598,10 +6822,10 @@ class MySqlDatabaseManager {
         \`status\`, \`last_seen_at\`
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, NOW())
       ON DUPLICATE KEY UPDATE
-        \`employee_code\` = COALESCE(VALUES(\`employee_code\`), \`employee_code\`),
-        \`name\` = COALESCE(VALUES(\`name\`), \`name\`),
-        \`email\` = COALESCE(VALUES(\`email\`), \`email\`),
-        \`role\` = COALESCE(VALUES(\`role\`), \`role\`),
+        \`employee_code\` = VALUES(\`employee_code\`),
+        \`name\` = VALUES(\`name\`),
+        \`email\` = VALUES(\`email\`),
+        \`role\` = VALUES(\`role\`),
         \`latitude\` = VALUES(\`latitude\`),
         \`longitude\` = VALUES(\`longitude\`),
         \`accuracy\` = VALUES(\`accuracy\`),
@@ -6616,11 +6840,11 @@ class MySqlDatabaseManager {
     `;
 
     await this.pool!.query(sql, [
-      userId,
-      data.employeeCode || null,
-      data.name || null,
-      data.email || null,
-      data.role || null,
+      verified.id,
+      verified.employeeCode || null,
+      verified.name || null,
+      verified.email || null,
+      verified.role || null,
       lat,
       lng,
       data.accuracy !== undefined ? Number(data.accuracy) : null,
@@ -6641,9 +6865,14 @@ class MySqlDatabaseManager {
     role?: string;
     isSharingLocation?: boolean;
   }): Promise<boolean> {
-    const userId = String(data.userId).trim();
+    const userId = String(data.userId || '').trim();
     if (!userId) return false;
     this.assertDbConnected();
+
+    const verified = await this.resolveVerifiedFieldStaff(userId, data.email, data.employeeCode);
+    if (!verified) {
+      return false;
+    }
 
     const isSharing = Boolean(data.isSharingLocation);
     const sql = `
@@ -6652,10 +6881,10 @@ class MySqlDatabaseManager {
         \`is_online\`, \`is_sharing_location\`, \`status\`, \`last_seen_at\`
       ) VALUES (?, ?, ?, ?, ?, 1, ?, 'online', NOW())
       ON DUPLICATE KEY UPDATE
-        \`employee_code\` = COALESCE(VALUES(\`employee_code\`), \`employee_code\`),
-        \`name\` = COALESCE(VALUES(\`name\`), \`name\`),
-        \`email\` = COALESCE(VALUES(\`email\`), \`email\`),
-        \`role\` = COALESCE(VALUES(\`role\`), \`role\`),
+        \`employee_code\` = VALUES(\`employee_code\`),
+        \`name\` = VALUES(\`name\`),
+        \`email\` = VALUES(\`email\`),
+        \`role\` = VALUES(\`role\`),
         \`is_online\` = 1,
         \`is_sharing_location\` = VALUES(\`is_sharing_location\`),
         \`status\` = CASE
@@ -6668,24 +6897,26 @@ class MySqlDatabaseManager {
     `;
 
     await this.pool!.query(sql, [
-      userId,
-      data.employeeCode || null,
-      data.name || null,
-      data.email || null,
-      data.role || null,
+      verified.id,
+      verified.employeeCode || null,
+      verified.name || null,
+      verified.email || null,
+      verified.role || null,
       isSharing ? 1 : 0
     ]);
     return true;
   }
 
-  public async setWorkforceOffline(userId: string): Promise<boolean> {
-    const cleanId = String(userId).trim();
-    if (!cleanId) return false;
+  public async setWorkforceOffline(userId: string, email?: string): Promise<boolean> {
+    const cleanId = String(userId || '').trim();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    if (!cleanId && !cleanEmail) return false;
     this.assertDbConnected();
 
     await this.pool!.query(
-      'UPDATE `solar_workforce_locations` SET `is_online` = 0, `is_sharing_location` = 0, `status` = \'offline\' WHERE `user_id` = ?',
-      [cleanId]
+      'UPDATE `solar_workforce_locations` SET `is_online` = 0, `is_sharing_location` = 0, `status` = \'offline\' WHERE `user_id` = ?' +
+        (cleanEmail ? ' OR LOWER(`email`) = ?' : ''),
+      cleanEmail ? [cleanId, cleanEmail] : [cleanId]
     );
     return true;
   }

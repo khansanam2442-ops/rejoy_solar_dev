@@ -79,7 +79,8 @@ class PusherService {
       // This guarantees production connects even if frontend was built before .env was configured
       try {
         const res = await fetch(`${apiClient.getBaseUrl()}/pusher/config`, {
-          headers: apiClient.getAuthHeaders()
+          headers: apiClient.getAuthHeaders(),
+          credentials: 'include'
         });
         if (res.ok) {
           const config = await res.json();
@@ -189,7 +190,7 @@ class PusherService {
     try {
       const sseUrl = `${apiClient.getBaseUrl()}/workforce/stream`;
       console.info(`[Pusher] Starting SSE fallback (${sseUrl})...`);
-      this.sseSource = new EventSource(sseUrl);
+      this.sseSource = new EventSource(sseUrl, { withCredentials: true });
 
       this.sseSource.onopen = () => {
         console.log('[Pusher] SSE fallback connected successfully');
@@ -299,6 +300,7 @@ class PusherService {
           'Content-Type': 'application/json',
           'x-user-id': payload.userId
         }),
+        credentials: 'include',
         body: JSON.stringify(payload)
       });
       return res.ok;
@@ -328,6 +330,7 @@ class PusherService {
           'x-user-id': data.userId,
           'x-user-role': data.role || ''
         }),
+        credentials: 'include',
         body: JSON.stringify(data)
       });
       return res.ok;
@@ -364,6 +367,7 @@ class PusherService {
           'Content-Type': 'application/json',
           'x-user-id': userId
         }),
+        credentials: 'include',
         body,
         keepalive: true
       });
@@ -425,6 +429,7 @@ class PusherService {
     }
     this.isInitialized = false;
     this.initPromise = null;
+    this.updateConnectionState('disconnected');
   }
 }
 

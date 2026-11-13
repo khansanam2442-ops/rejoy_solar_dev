@@ -1,9 +1,9 @@
 import { storageService } from './storage';
+import { safeStorage, safeSessionStorage } from './safeStorage';
 import { pusherService } from './pusherService';
 import { apiClient } from './apiClient';
 import {
   LiveEmployeeLocation,
-  WorkforceLiveStatus,
   ELIGIBLE_FIELD_ROLES,
   LocationUpdatePayload,
   PresenceUpdatePayload,
@@ -55,18 +55,25 @@ export function formatRelativeTime(isoDate?: string): string {
 
 class LiveLocationService {
   private employeeLocations: Map<string, LiveEmployeeLocation> = new Map();
-  // Alias map to resolve by email, employeeCode, or authUid to the primary employee id
+  // Alias map to resolve by email, employeeCode, or authUid to the primary verified employee id
   private alternateIdMap: Map<string, string> = new Map();
+  private serverVerifiedIds: Set<string> = new Set();
   private listeners: Set<(locations: LiveEmployeeLocation[]) => void> = new Set();
+  private errorListeners: Set<(error: string | null) => void> = new Set();
+  private lastFetchError: string | null = null;
   private unsubscribeLocationPusher: (() => void) | null = null;
   private unsubscribePresencePusher: (() => void) | null = null;
   private staleCheckTimer: any = null;
   private pollTimer: any = null;
   private trackingEnabled: boolean = false;
-  private isInitialFetched = false;
+  private isLocationSharing: boolean = false;
 
   constructor() {
-    this.initializeFieldWorkers();
+    // Purge any legacy persisted location caches from browser storage
+    try {
+      safeStorage.removeItem(REAL_LOCATIONS_STORAGE_KEY);
+      safeSessionStorage.removeItem(REAL_LOCATIONS_STORAGE_KEY);
+    } catch {}
 
     // 1. Listen to real-time location stream from Pusher
     this.unsubscribeLocationPusher = pusherService.onLocationUpdate((payload) => {
@@ -77,6 +84,30 @@ class LiveLocationService {
     this.unsubscribePresencePusher = pusherService.onPresenceUpdate((payload) => {
       this.handleIncomingPresence(payload);
     });
+  }
+
+  private setFetchError(error: string | null): void {
+    if (this.lastFetchError === error) return;
+    this.lastFetchError = error;
+    this.errorListeners.forEach((listener) => {
+      try {
+        listener(error);
+      } catch (e) {
+        console.error('[Workforce] Error in error subscriber:', e);
+      }
+    });
+  }
+
+  public getFetchError(): string | null {
+    return this.lastFetchError;
+  }
+
+  public subscribeError(callback: (error: string | null) => void): () => void {
+    this.errorListeners.add(callback);
+    callback(this.lastFetchError);
+    return () => {
+      this.errorListeners.delete(callback);
+    };
   }
 
   /**
@@ -96,7 +127,8 @@ class LiveLocationService {
 
     if (!enabled) {
       this.isLocationSharing = false;
-      this.isInitialFetched = false;
+      this.serverVerifiedIds.clear();
+      this.setFetchError(null);
       if (this.staleCheckTimer) {
         clearInterval(this.staleCheckTimer);
         this.staleCheckTimer = null;
@@ -134,14 +166,23 @@ class LiveLocationService {
   }
 
   // Check whether an employee role is eligible for field tracking
-  isEligibleFieldWorker(role: string, department?: string): boolean {
-    if (!role) return false;
-    const normalizedRole = role.toLowerCase().trim();
+  isEligibleFieldWorker(role: string, department?: string, isFieldWorkerFlag?: boolean): boolean {
+    const normalizedRole = (role || '').toLowerCase().trim();
+    if (!normalizedRole && !isFieldWorkerFlag) return false;
+    if (normalizedRole === 'customer' || normalizedRole.includes('customer')) {
+      return false;
+    }
+
+    if (isFieldWorkerFlag === true) {
+      return true;
+    }
+
     const normalizedDept = (department || '').toLowerCase().trim();
 
-    // Disqualify customer and office-only roles
+    // Disqualify customer, admin, and office-only roles unless explicitly marked isFieldWorker
     if (
-      normalizedRole.includes('customer') ||
+      normalizedRole === 'admin' ||
+      normalizedRole === 'super admin' ||
       normalizedRole.includes('accountant') ||
       normalizedRole.includes('finance') ||
       normalizedRole.includes('hr') ||
@@ -154,13 +195,12 @@ class LiveLocationService {
       return false;
     }
 
-    // Match against eligible field worker titles
+    // Match against eligible field worker titles or field departments
     return (
       ELIGIBLE_FIELD_ROLES.some((r) =>
         normalizedRole.includes(r.toLowerCase())
       ) ||
       normalizedDept.includes('engineering') ||
-      normalizedDept.includes('operation') ||
       normalizedDept.includes('installation') ||
       normalizedDept.includes('electrical') ||
       normalizedDept.includes('civil') ||
@@ -168,8 +208,6 @@ class LiveLocationService {
       normalizedDept.includes('service')
     );
   }
-
-  private isLocationSharing: boolean = false;
 
   public setLocationSharingActive(active: boolean) {
     this.isLocationSharing = active;
@@ -179,8 +217,105 @@ class LiveLocationService {
     return this.isLocationSharing;
   }
 
+  private getVerifiedActiveFieldEmployees(): any[] {
+    try {
+      const rawEmployees = [...storageService.getEmployees()];
+      const rawUsers = storageService.getUsers();
+
+      // Build quick map of users to cross-check disabled status & isFieldWorker flag
+      const userByIdOrEmail = new Map<string, any>();
+      rawUsers.forEach((u: any) => {
+        if (u.id) userByIdOrEmail.set(String(u.id).toLowerCase(), u);
+        if (u.email) userByIdOrEmail.set(String(u.email).trim().toLowerCase(), u);
+      });
+
+      const merged: any[] = [];
+      const seenIds = new Set<string>();
+      const seenEmails = new Set<string>();
+
+      rawEmployees.forEach((emp: any) => {
+        if (!emp || !emp.id) return;
+        const emailKey = (emp.email || '').trim().toLowerCase();
+        const linkedUser =
+          userByIdOrEmail.get(String(emp.id).toLowerCase()) ||
+          (emailKey ? userByIdOrEmail.get(emailKey) : undefined);
+
+        const empStatus = String(emp.status || 'ACTIVE').toUpperCase();
+        const acctStatus = String(emp.accountStatus || 'ACTIVE').toUpperCase();
+        const userStatus = linkedUser ? String(linkedUser.status || 'ACTIVE').toUpperCase() : 'ACTIVE';
+        const isActive =
+          empStatus !== 'DISABLED' &&
+          empStatus !== 'INACTIVE' &&
+          empStatus !== 'TERMINATED' &&
+          acctStatus !== 'DISABLED' &&
+          userStatus !== 'DISABLED' &&
+          userStatus !== 'INACTIVE' &&
+          emp.loginEnabled !== false &&
+          (linkedUser ? linkedUser.active !== false : true);
+
+        if (!isActive) return;
+
+        const role = emp.systemRole || emp.designation || linkedUser?.role || '';
+        const dept = emp.department || linkedUser?.department || '';
+        const isFieldFlag = Boolean(emp.isFieldWorker ?? linkedUser?.isFieldWorker);
+
+        if (!this.isEligibleFieldWorker(role, dept, isFieldFlag)) return;
+
+        seenIds.add(String(emp.id).toLowerCase());
+        if (emailKey) seenEmails.add(emailKey);
+        merged.push({
+          ...emp,
+          role,
+          department: dept || 'Operations',
+          isFieldWorker: isFieldFlag
+        });
+      });
+
+      // Include any active eligible field users in solar_users not already covered in solar_employees
+      rawUsers.forEach((u: any) => {
+        if (!u || !u.id) return;
+        const idKey = String(u.id).toLowerCase();
+        const emailKey = (u.email || '').trim().toLowerCase();
+        if (seenIds.has(idKey) || (emailKey && seenEmails.has(emailKey))) return;
+
+        const uStatus = String(u.status || 'ACTIVE').toUpperCase();
+        const isActive =
+          uStatus !== 'DISABLED' &&
+          uStatus !== 'INACTIVE' &&
+          u.active !== false &&
+          u.role !== 'Customer';
+        if (!isActive) return;
+
+        const role = u.role || u.designation || '';
+        const dept = u.department || '';
+        const isFieldFlag = Boolean(u.isFieldWorker);
+        if (!this.isEligibleFieldWorker(role, dept, isFieldFlag)) return;
+
+        seenIds.add(idKey);
+        if (emailKey) seenEmails.add(emailKey);
+        merged.push({
+          id: u.id,
+          employeeCode: u.employeeId || u.id,
+          name: u.name,
+          email: u.email,
+          phone: u.phone || '',
+          department: dept || 'Operations',
+          designation: u.designation || u.role,
+          systemRole: u.role,
+          role,
+          status: 'ACTIVE',
+          isFieldWorker: isFieldFlag
+        });
+      });
+
+      return merged;
+    } catch {
+      return [];
+    }
+  }
+
   /**
-   * Resolves any user identifier (emp-id, email, code, auth uid) to canonical employee ID
+   * Resolves any user identifier (emp-id, email, code, auth uid) to canonical verified employee ID
    */
   public resolveCanonicalId(rawId: string, email?: string, employeeCode?: string, alternateUserId?: string): string {
     const cleanId = rawId ? rawId.trim().toLowerCase() : '';
@@ -190,7 +325,7 @@ class LiveLocationService {
 
     if (!cleanId && !cleanEmail && !cleanCode && !cleanAlt) return rawId || '';
 
-    // Direct match in active memory
+    // Direct match in active verified locations
     if (rawId && this.employeeLocations.has(rawId)) return rawId;
     if (alternateUserId && this.employeeLocations.has(alternateUserId)) return alternateUserId;
 
@@ -214,90 +349,54 @@ class LiveLocationService {
       }
     }
 
-    // Search storageService employees and users for canonical mapping
-    try {
-      const allEmployees = storageService.getEmployees();
-      for (const emp of allEmployees) {
-        const empId = emp.id;
-        const matchEmail = cleanEmail && emp.email && emp.email.trim().toLowerCase() === cleanEmail;
-        const matchCode = cleanCode && emp.employeeCode && emp.employeeCode.trim().toLowerCase() === cleanCode;
-        const matchAuth = (cleanId && emp.authUid && emp.authUid.trim().toLowerCase() === cleanId) ||
-                          (cleanAlt && emp.authUid && emp.authUid.trim().toLowerCase() === cleanAlt);
-        const matchId = (cleanId && emp.id && emp.id.trim().toLowerCase() === cleanId) ||
-                        (cleanAlt && emp.id && emp.id.trim().toLowerCase() === cleanAlt);
+    // Search verified active field staff from MySQL bootstrap
+    const verifiedFieldStaff = this.getVerifiedActiveFieldEmployees();
+    for (const emp of verifiedFieldStaff) {
+      const empId = emp.id;
+      const matchEmail = cleanEmail && emp.email && emp.email.trim().toLowerCase() === cleanEmail;
+      const matchCode = cleanCode && emp.employeeCode && emp.employeeCode.trim().toLowerCase() === cleanCode;
+      const matchAuth = (cleanId && emp.authUid && emp.authUid.trim().toLowerCase() === cleanId) ||
+                        (cleanAlt && emp.authUid && emp.authUid.trim().toLowerCase() === cleanAlt);
+      const matchId = (cleanId && emp.id && emp.id.trim().toLowerCase() === cleanId) ||
+                      (cleanAlt && emp.id && emp.id.trim().toLowerCase() === cleanAlt);
 
-        if (matchEmail || matchCode || matchAuth || matchId) {
-          if (cleanId) this.alternateIdMap.set(cleanId, empId);
-          if (cleanAlt) this.alternateIdMap.set(cleanAlt, empId);
-          if (cleanEmail) this.alternateIdMap.set(cleanEmail, empId);
-          if (cleanCode) this.alternateIdMap.set(cleanCode, empId);
-          return empId;
-        }
+      if (matchEmail || matchCode || matchAuth || matchId) {
+        if (cleanId) this.alternateIdMap.set(cleanId, empId);
+        if (cleanAlt) this.alternateIdMap.set(cleanAlt, empId);
+        if (cleanEmail) this.alternateIdMap.set(cleanEmail, empId);
+        if (cleanCode) this.alternateIdMap.set(cleanCode, empId);
+        return empId;
       }
-
-      const allUsers = storageService.getUsers();
-      for (const u of allUsers) {
-        const uId = u.id;
-        const matchEmail = cleanEmail && u.email && u.email.trim().toLowerCase() === cleanEmail;
-        const matchCode = cleanCode && u.employeeId && u.employeeId.trim().toLowerCase() === cleanCode;
-        const matchId = (cleanId && u.id && u.id.trim().toLowerCase() === cleanId) ||
-                        (cleanAlt && u.id && u.id.trim().toLowerCase() === cleanAlt);
-
-        if (matchEmail || matchCode || matchId) {
-          if (cleanId) this.alternateIdMap.set(cleanId, uId);
-          if (cleanAlt) this.alternateIdMap.set(cleanAlt, uId);
-          if (cleanEmail) this.alternateIdMap.set(cleanEmail, uId);
-          if (cleanCode) this.alternateIdMap.set(cleanCode, uId);
-          return uId;
-        }
-      }
-    } catch {
-      // Non-blocking
     }
 
     return rawId;
   }
 
   private initializeFieldWorkers() {
-    const allEmployees = [...storageService.getEmployees()];
+    if (!this.trackingEnabled) return;
+
+    const allFieldEmployees = this.getVerifiedActiveFieldEmployees();
     const allProjects = storageService.getProjects();
+    const verifiedIds = new Set<string>();
 
-    try {
-      const allUsers = storageService.getUsers();
-      allUsers.forEach((u) => {
-        if (u.role !== 'Customer' && !allEmployees.some(e => e.id === u.id || (e.email && u.email && e.email.toLowerCase() === u.email.toLowerCase()))) {
-          allEmployees.push({
-            id: u.id,
-            employeeCode: u.employeeId || u.id,
-            name: u.name,
-            email: u.email,
-            phone: u.phone || '',
-            department: u.department || 'Operations',
-            designation: u.designation || u.role,
-            systemRole: u.role,
-            status: 'ACTIVE',
-            joiningDate: new Date().toISOString(),
-            salaryMonthly: 0,
-            currentSiteLocation: '',
-            loginEnabled: true
-          } as any);
-        }
-      });
-    } catch {}
-
-    // Map alternate IDs for all workforce members first for universal resolution
-    allEmployees.forEach((emp) => {
-      if (emp.id) this.alternateIdMap.set(emp.id.toLowerCase(), emp.id);
-      if (emp.employeeCode) this.alternateIdMap.set(emp.employeeCode.toLowerCase(), emp.id);
-      if (emp.email) this.alternateIdMap.set(emp.email.toLowerCase(), emp.id);
-      if (emp.authUid) this.alternateIdMap.set(emp.authUid.toLowerCase(), emp.id);
+    this.alternateIdMap.clear();
+    allFieldEmployees.forEach((emp) => {
+      verifiedIds.add(emp.id);
+      if (emp.id) this.alternateIdMap.set(String(emp.id).toLowerCase(), emp.id);
+      if (emp.employeeCode) this.alternateIdMap.set(String(emp.employeeCode).toLowerCase(), emp.id);
+      if (emp.email) this.alternateIdMap.set(String(emp.email).trim().toLowerCase(), emp.id);
+      if (emp.authUid) this.alternateIdMap.set(String(emp.authUid).toLowerCase(), emp.id);
     });
 
-    // Central server /api/workforce/locations manages persisted location records
+    // Prune any unverified / deleted / non-field workers from memory
+    for (const key of Array.from(this.employeeLocations.keys())) {
+      if (!verifiedIds.has(key) && !this.serverVerifiedIds.has(key)) {
+        this.employeeLocations.delete(key);
+      }
+    }
 
-    // Initialize all existing staff in the system so Admin has baseline metadata
-    allEmployees.forEach((emp) => {
-      // Find assigned solar project if available
+    // Initialize verified active field staff from MySQL bootstrap metadata
+    allFieldEmployees.forEach((emp) => {
       const assignedProject = allProjects.find(
         (p) =>
           p.projectManagerId === emp.id ||
@@ -313,10 +412,10 @@ class LiveLocationService {
         employeeCode: emp.employeeCode || emp.id,
         name: emp.name,
         email: emp.email,
-        role: emp.systemRole || emp.designation || 'Field Worker',
+        role: emp.role || emp.systemRole || emp.designation || 'Field Engineer',
         avatar: emp.photoUrl,
-        phone: emp.phone,
-        department: emp.department,
+        phone: emp.phone || '',
+        department: emp.department || 'Operations',
         designation: emp.designation,
 
         isOnline,
@@ -370,29 +469,58 @@ class LiveLocationService {
 
       this.employeeLocations.set(emp.id, record);
     });
+
+    this.notifyListeners();
   }
 
   /**
-   * Admin Initial Load: Fetch latest known locations & presence from central server
+   * Admin Initial Load: Fetch latest known locations & presence from central server (MySQL joined)
    */
   async fetchServerLocations(): Promise<void> {
     if (!this.trackingEnabled) return;
     try {
       const url = `${apiClient.getBaseUrl()}/workforce/locations`;
       const res = await apiClient.request(url);
-      if (!res.ok) return;
+      if (!res.ok) {
+        let message = `Unable to load field workforce telemetry (HTTP ${res.status})`;
+        try {
+          const errJson = await res.json();
+          if (errJson?.message || errJson?.error) {
+            message = errJson.message || errJson.error;
+          }
+        } catch {}
+        this.setFetchError(message);
+        return;
+      }
 
       const data = await res.json();
-      if (!data.success || !Array.isArray(data.locations)) return;
+      if (!data.success || !Array.isArray(data.locations)) {
+        this.setFetchError(data?.message || data?.error || 'Unexpected response from workforce tracking API');
+        return;
+      }
 
+      this.setFetchError(null);
       const now = Date.now();
+      const verifiedFieldEmployees = this.getVerifiedActiveFieldEmployees();
+      const verifiedLocalIds = new Set(verifiedFieldEmployees.map((e) => e.id));
+      const nextServerVerifiedIds = new Set<string>();
 
-      // Process and deduplicate server records
+      // Re-index aliases against verified active staff before reconciling server response
+      this.initializeFieldWorkers();
+
       data.locations.forEach((srv: any) => {
-        if (!srv || !srv.userId) return;
-        const targetId = this.resolveCanonicalId(srv.userId, srv.email, srv.employeeCode);
-        const existing = this.employeeLocations.get(targetId);
+        if (!srv || !srv.userId || srv.verified === false) return;
+        const role = srv.role || '';
+        const dept = srv.department || '';
+        const isFieldFlag = Boolean(srv.isFieldWorker);
+        if (!this.isEligibleFieldWorker(role, dept, isFieldFlag)) {
+          return;
+        }
 
+        const targetId = this.resolveCanonicalId(srv.userId, srv.email, srv.employeeCode);
+        nextServerVerifiedIds.add(targetId);
+
+        const existing = this.employeeLocations.get(targetId);
         const hasCoords = typeof srv.latitude === 'number' && typeof srv.longitude === 'number';
         const lastSeenMs = srv.lastSeenAt ? new Date(srv.lastSeenAt).getTime() : 0;
         const existingLastSeenMs = existing?.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
@@ -402,26 +530,22 @@ class LiveLocationService {
           return;
         }
 
-        // Presence is online if server marked online or within timeout window
         const isOnline = Boolean(srv.isOnline) || (lastSeenMs > 0 && Math.abs(now - lastSeenMs) < PRESENCE_TIMEOUT_MS);
         const effectiveLastSeen = srv.lastSeenAt || existing?.lastSeenAt || new Date().toISOString();
 
         if (existing) {
-          // Always apply authoritative server presence state
           existing.isOnline = isOnline;
           existing.lastSeenAt = effectiveLastSeen;
-
           if (typeof srv.isSharingLocation === 'boolean') {
             existing.isSharingLocation = srv.isSharingLocation;
           }
-          if (srv.name && (!existing.name || existing.name.startsWith('Field Worker ('))) {
-            existing.name = srv.name;
-          }
+          // Authoritative MySQL staff fields always win
+          if (srv.name) existing.name = srv.name;
           if (srv.role) existing.role = srv.role;
-          if (srv.employeeCode && (!existing.employeeCode || existing.employeeCode === existing.userId)) {
-            existing.employeeCode = srv.employeeCode;
-          }
-          if (srv.email && !existing.email) existing.email = srv.email;
+          if (srv.employeeCode) existing.employeeCode = srv.employeeCode;
+          if (srv.email) existing.email = srv.email;
+          if (srv.department) existing.department = srv.department;
+          if (srv.phone) existing.phone = srv.phone;
 
           if (hasCoords) {
             existing.latitude = srv.latitude;
@@ -444,7 +568,6 @@ class LiveLocationService {
             }
           }
 
-          // Presence is independent of GPS: online employees without GPS are status 'online'
           existing.status = !isOnline
             ? 'offline'
             : existing.hasLocation && typeof existing.latitude === 'number'
@@ -459,15 +582,15 @@ class LiveLocationService {
 
           this.employeeLocations.set(targetId, { ...existing });
         } else {
-          // Add newly discovered worker dynamically even if not in storage
+          // Verified by backend SQL JOIN against solar_users / solar_employees
           const newRecord: LiveEmployeeLocation = {
             userId: targetId,
             employeeCode: srv.employeeCode || targetId,
-            name: srv.name || `Field Worker (${targetId.slice(0, 6)})`,
+            name: srv.name,
             email: srv.email,
-            role: srv.role || 'Field Engineer',
+            role: srv.role,
             phone: srv.phone || '',
-            department: 'Operations',
+            department: srv.department || 'Operations',
             isOnline,
             isSharingLocation: srv.isSharingLocation ?? true,
             lastSeenAt: effectiveLastSeen,
@@ -489,115 +612,88 @@ class LiveLocationService {
           this.employeeLocations.set(targetId, newRecord);
           this.alternateIdMap.set(targetId.toLowerCase(), targetId);
           if (srv.userId && srv.userId !== targetId) {
-            this.alternateIdMap.set(srv.userId.toLowerCase(), targetId);
+            this.alternateIdMap.set(String(srv.userId).toLowerCase(), targetId);
           }
-          if (srv.email) this.alternateIdMap.set(srv.email.toLowerCase(), targetId);
-          if (srv.employeeCode) this.alternateIdMap.set(srv.employeeCode.toLowerCase(), targetId);
+          if (srv.email) this.alternateIdMap.set(String(srv.email).trim().toLowerCase(), targetId);
+          if (srv.employeeCode) this.alternateIdMap.set(String(srv.employeeCode).toLowerCase(), targetId);
         }
       });
 
-      this.isInitialFetched = true;
+      this.serverVerifiedIds = nextServerVerifiedIds;
+
+      // Remove any stale/deleted entries no longer verified in MySQL
+      for (const key of Array.from(this.employeeLocations.keys())) {
+        if (!nextServerVerifiedIds.has(key) && !verifiedLocalIds.has(key)) {
+          this.employeeLocations.delete(key);
+        }
+      }
+
       this.notifyListeners();
-    } catch (err) {
+    } catch (err: any) {
+      const msg = err?.message || 'Network error reaching workforce tracking endpoint';
       console.warn('[Workforce] Could not fetch server locations:', err);
+      this.setFetchError(msg);
     }
   }
 
   /**
-   * Process Real-Time GPS Location updates from Pusher / SSE
+   * Process Real-Time GPS Location updates from Pusher / SSE.
+   * Rejects any event whose userId does not resolve to an existing verified active MySQL field worker.
    */
   private handleIncomingLocation(payload: LocationUpdatePayload) {
+    if (!this.trackingEnabled) return;
     if (!payload || !payload.userId || typeof payload.latitude !== 'number' || typeof payload.longitude !== 'number') {
       return;
     }
 
     const canonicalId = this.resolveCanonicalId(payload.userId, undefined, payload.employeeCode);
     const existing = this.employeeLocations.get(canonicalId);
+    if (!existing) {
+      // Never dynamically create ghost workforce entries from Pusher/SSE broadcasts
+      return;
+    }
+
     const speed = payload.speed !== undefined ? payload.speed : 0;
     const isMoving = speed > 3;
     const timestamp = payload.timestamp || new Date().toISOString();
 
-    let updated: LiveEmployeeLocation;
+    const updated: LiveEmployeeLocation = {
+      ...existing,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      hasLocation: true,
+      isOnline: true,
+      isSharingLocation: true,
+      accuracy: payload.accuracy,
+      heading: payload.heading,
+      speed: payload.speed,
+      batteryLevel: payload.batteryLevel ?? existing.batteryLevel,
+      currentActivity: payload.activity || (isMoving ? 'In Transit / Moving' : 'On Site / Active'),
+      updatedAt: timestamp,
+      lastSeenAt: timestamp,
+      status: isMoving ? 'moving' : 'idle'
+    };
 
-    if (existing) {
-      updated = {
-        ...existing,
-        latitude: payload.latitude,
-        longitude: payload.longitude,
-        hasLocation: true,
-        isOnline: true,
-        isSharingLocation: true,
-        accuracy: payload.accuracy,
-        heading: payload.heading,
-        speed: payload.speed,
-        batteryLevel: payload.batteryLevel ?? existing.batteryLevel,
-        currentActivity: payload.activity || (isMoving ? 'In Transit / Moving' : 'On Site / Active'),
-        updatedAt: timestamp,
-        lastSeenAt: timestamp,
-        status: isMoving ? 'moving' : 'idle'
-      };
-
-      if (payload.name && (!updated.name || updated.name.startsWith('Field Worker ('))) {
-        updated.name = payload.name;
-      }
-      if (payload.role) updated.role = payload.role;
-      if (payload.employeeCode && (!updated.employeeCode || updated.employeeCode === updated.userId)) {
-        updated.employeeCode = payload.employeeCode;
-      }
-
-      if (updated.assignedSiteCoordinates) {
-        updated.distanceToSiteKm = calculateDistanceKm(
-          payload.latitude,
-          payload.longitude,
-          updated.assignedSiteCoordinates.latitude,
-          updated.assignedSiteCoordinates.longitude
-        );
-      }
-      this.employeeLocations.set(canonicalId, updated);
-    } else {
-      // Dynamic worker entry if not previously configured
-      updated = {
-        userId: canonicalId,
-        employeeCode: payload.employeeCode || canonicalId,
-        name: payload.name || `Field Worker (${canonicalId.slice(0, 6)})`,
-        role: payload.role || 'Field Engineer',
-        phone: '',
-        department: 'Operations',
-        isOnline: true,
-        isSharingLocation: true,
-        latitude: payload.latitude,
-        longitude: payload.longitude,
-        hasLocation: true,
-        accuracy: payload.accuracy,
-        heading: payload.heading,
-        speed: payload.speed,
-        batteryLevel: payload.batteryLevel,
-        currentActivity: payload.activity || (isMoving ? 'In Transit' : 'Active'),
-        updatedAt: timestamp,
-        lastSeenAt: timestamp,
-        status: isMoving ? 'moving' : 'idle'
-      };
-      this.employeeLocations.set(canonicalId, updated);
-      this.alternateIdMap.set(canonicalId.toLowerCase(), canonicalId);
-      if (payload.userId !== canonicalId) {
-        this.alternateIdMap.set(payload.userId.toLowerCase(), canonicalId);
-      }
-      if (payload.employeeCode) {
-        this.alternateIdMap.set(payload.employeeCode.toLowerCase(), canonicalId);
-      }
+    if (updated.assignedSiteCoordinates) {
+      updated.distanceToSiteKm = calculateDistanceKm(
+        payload.latitude,
+        payload.longitude,
+        updated.assignedSiteCoordinates.latitude,
+        updated.assignedSiteCoordinates.longitude
+      );
     }
 
-    this.persistRealLocation(canonicalId, updated);
+    this.employeeLocations.set(canonicalId, updated);
     this.notifyListeners();
   }
 
   /**
-   * Process Real-Time Presence updates from Pusher / SSE
+   * Process Real-Time Presence updates from Pusher / SSE.
+   * Rejects any event whose userId does not resolve to an existing verified active MySQL field worker.
    */
   private handleIncomingPresence(payload: PresenceUpdatePayload) {
+    if (!this.trackingEnabled) return;
     if (!payload || !payload.userId) return;
-
-    console.log(`[Presence] presence.updated received ${payload.userId}`);
 
     const canonicalId = this.resolveCanonicalId(
       payload.userId,
@@ -606,104 +702,55 @@ class LiveLocationService {
       payload.alternateUserId
     );
     const existing = this.employeeLocations.get(canonicalId);
+    if (!existing) {
+      // Never dynamically create ghost workforce entries from Pusher/SSE presence events
+      return;
+    }
+
     const isOnline = Boolean(payload.isOnline);
     const timestamp = payload.lastSeenAt || new Date().toISOString();
     const payloadTime = new Date(timestamp).getTime();
-    const existingTime = existing?.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
+    const existingTime = existing.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
 
     // Guard against out-of-order older Pusher events marking a newer online user offline
-    if (existing && existing.isOnline && payloadTime < existingTime && !isOnline) {
+    if (existing.isOnline && payloadTime < existingTime && !isOnline) {
       return;
     }
 
     const hasPayloadCoords = typeof payload.latitude === 'number' && typeof payload.longitude === 'number';
 
-    if (existing) {
-      existing.isOnline = isOnline;
-      existing.lastSeenAt = timestamp;
-      existing.updatedAt = timestamp;
-      if (typeof payload.isSharingLocation === 'boolean') {
-        existing.isSharingLocation = payload.isSharingLocation;
-      }
-      if (payload.role) existing.role = payload.role;
-      if (payload.employeeCode && (!existing.employeeCode || existing.employeeCode === existing.userId)) {
-        existing.employeeCode = payload.employeeCode;
-      }
-      if (payload.name && (!existing.name || existing.name.startsWith('Field Worker ('))) {
-        existing.name = payload.name;
-      }
-      if (payload.email && !existing.email) existing.email = payload.email;
-
-      if (hasPayloadCoords) {
-        existing.latitude = payload.latitude;
-        existing.longitude = payload.longitude;
-        existing.hasLocation = true;
-        if (payload.accuracy !== undefined) existing.accuracy = payload.accuracy;
-        if (payload.speed !== undefined) existing.speed = payload.speed;
-      }
-
-      const hasCoords = Boolean(existing.hasLocation && typeof existing.latitude === 'number' && typeof existing.longitude === 'number');
-
-      // Determine status independently from GPS
-      if (!isOnline) {
-        existing.status = 'offline';
-        existing.currentActivity = 'Offline';
-      } else if (hasCoords) {
-        existing.status = (existing.speed && existing.speed > 3) ? 'moving' : 'idle';
-        existing.currentActivity = (existing.speed && existing.speed > 3) ? 'In Transit / Moving' : 'On Site / Active';
-      } else {
-        existing.status = 'online';
-        existing.currentActivity = existing.isSharingLocation
-          ? 'Online • Awaiting GPS fix'
-          : 'Online • Standby';
-      }
-
-      this.employeeLocations.set(canonicalId, { ...existing });
-      this.persistRealLocation(canonicalId, existing);
-    } else {
-      // Dynamic worker entry if receiving presence for a worker not yet in local state
-      const hasCoords = hasPayloadCoords;
-      const newRecord: LiveEmployeeLocation = {
-        userId: canonicalId,
-        employeeCode: payload.employeeCode || canonicalId,
-        name: payload.name || `Field Worker (${canonicalId.slice(0, 6)})`,
-        email: payload.email,
-        role: payload.role || 'Field Engineer',
-        phone: '',
-        department: 'Operations',
-        isOnline,
-        isSharingLocation: payload.isSharingLocation ?? true,
-        lastSeenAt: timestamp,
-        updatedAt: timestamp,
-        hasLocation: hasCoords,
-        latitude: hasCoords ? payload.latitude : undefined,
-        longitude: hasCoords ? payload.longitude : undefined,
-        accuracy: payload.accuracy,
-        speed: payload.speed,
-        status: !isOnline ? 'offline' : hasCoords ? ((payload.speed || 0) > 3 ? 'moving' : 'idle') : 'online',
-        currentActivity: !isOnline
-          ? 'Offline'
-          : hasCoords
-          ? ((payload.speed || 0) > 3 ? 'In Transit / Moving' : 'On Site / Active')
-          : (payload.isSharingLocation ? 'Online • Awaiting GPS fix' : 'Online • Standby')
-      };
-      this.employeeLocations.set(canonicalId, newRecord);
-      this.alternateIdMap.set(canonicalId.toLowerCase(), canonicalId);
-      if (payload.userId && payload.userId !== canonicalId) {
-        this.alternateIdMap.set(payload.userId.toLowerCase(), canonicalId);
-      }
-      if (payload.alternateUserId) {
-        this.alternateIdMap.set(payload.alternateUserId.toLowerCase(), canonicalId);
-      }
-      if (payload.email) {
-        this.alternateIdMap.set(payload.email.toLowerCase(), canonicalId);
-      }
-      if (payload.employeeCode) {
-        this.alternateIdMap.set(payload.employeeCode.toLowerCase(), canonicalId);
-      }
-      this.persistRealLocation(canonicalId, newRecord);
+    existing.isOnline = isOnline;
+    existing.lastSeenAt = timestamp;
+    existing.updatedAt = timestamp;
+    if (typeof payload.isSharingLocation === 'boolean') {
+      existing.isSharingLocation = payload.isSharingLocation;
     }
 
+    if (hasPayloadCoords) {
+      existing.latitude = payload.latitude;
+      existing.longitude = payload.longitude;
+      existing.hasLocation = true;
+      if (payload.accuracy !== undefined) existing.accuracy = payload.accuracy;
+      if (payload.speed !== undefined) existing.speed = payload.speed;
+    }
+
+    const hasCoords = Boolean(existing.hasLocation && typeof existing.latitude === 'number' && typeof existing.longitude === 'number');
+
+    // Determine status independently from GPS
+    if (!isOnline) {
+      existing.status = 'offline';
+      existing.currentActivity = 'Offline';
+    } else if (hasCoords) {
+      existing.status = (existing.speed && existing.speed > 3) ? 'moving' : 'idle';
+      existing.currentActivity = (existing.speed && existing.speed > 3) ? 'In Transit / Moving' : 'On Site / Active';
+    } else {
+      existing.status = 'online';
+      existing.currentActivity = existing.isSharingLocation
+        ? 'Online • Awaiting GPS fix'
+        : 'Online • Standby';
+    }
+
+    this.employeeLocations.set(canonicalId, { ...existing });
     this.notifyListeners();
   }
 
@@ -730,10 +777,6 @@ class LiveLocationService {
     if (hasChanges) {
       this.notifyListeners();
     }
-  }
-
-  private persistRealLocation(userId: string, loc: LiveEmployeeLocation) {
-    this.employeeLocations.set(userId, loc);
   }
 
   /**
@@ -812,8 +855,6 @@ class LiveLocationService {
 
   private notifyListeners() {
     const list = this.getLocations();
-    const onlineCount = list.filter((l) => l.isOnline).length;
-    console.log(`[Presence] online employees: ${onlineCount}`);
     this.listeners.forEach((listener) => {
       try {
         listener(list);
@@ -842,6 +883,7 @@ class LiveLocationService {
     }
     this.trackingEnabled = false;
     this.listeners.clear();
+    this.errorListeners.clear();
   }
 }
 

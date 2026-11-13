@@ -18,7 +18,7 @@ import {
   Maximize2,
   Minimize2,
   ShieldAlert,
-  Radio
+  AlertTriangle
 } from 'lucide-react';
 
 export const LiveFieldTrackingView: React.FC = () => {
@@ -36,6 +36,9 @@ export const LiveFieldTrackingView: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pusherState, setPusherState] = useState<PusherConnectionState>(() =>
     pusherService.getConnectionState()
+  );
+  const [workforceError, setWorkforceError] = useState<string | null>(() =>
+    liveLocationService.getFetchError()
   );
   const [lastHeartbeat, setLastHeartbeat] = useState<string>(new Date().toLocaleTimeString());
 
@@ -88,22 +91,27 @@ export const LiveFieldTrackingView: React.FC = () => {
     };
   }, []);
 
-  // Subscribe to real-time location & presence stream
+  // Subscribe to real-time location, presence, and fetch error streams
   useEffect(() => {
     const unsubscribeLocations = liveLocationService.subscribe((updatedLocations) => {
       setLocations(updatedLocations);
       setLastHeartbeat(new Date().toLocaleTimeString());
 
-      // If an employee was selected, update their reference
+      // Update selected employee reference or clear if removed from verified MySQL workforce
       setSelectedEmployee((prev) => {
         if (!prev) return null;
         const match = updatedLocations.find((l) => l.userId === prev.userId);
-        return match || prev;
+        return match || null;
       });
+    });
+
+    const unsubscribeError = liveLocationService.subscribeError((err) => {
+      setWorkforceError(err);
     });
 
     return () => {
       unsubscribeLocations();
+      unsubscribeError();
     };
   }, []);
 
@@ -256,6 +264,26 @@ export const LiveFieldTrackingView: React.FC = () => {
         </div>
       </div>
 
+      {workforceError && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-xs font-bold text-rose-900">Unable to load workforce telemetry from MySQL</h3>
+              <p className="text-xs text-rose-700 mt-0.5">{workforceError}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleRefreshServer}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-xl text-xs font-bold transition-colors cursor-pointer self-start sm:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>Retry</span>
+          </button>
+        </div>
+      )}
+
       {/* Main Interactive Map & Employee Sidebar Workspace */}
       <div
         className={`grid grid-cols-1 lg:grid-cols-12 gap-4 ${
@@ -288,6 +316,7 @@ export const LiveFieldTrackingView: React.FC = () => {
             onFilterChange={setFilters}
             isMobileDrawerOpen={isMobileDrawerOpen}
             onToggleMobileDrawer={() => setIsMobileDrawerOpen((prev) => !prev)}
+            pusherState={pusherState}
           />
         </div>
       </div>

@@ -14,13 +14,24 @@ export function useWorkforcePresence(currentUser: UserProfile | null, isAuthenti
       return;
     }
 
+    // Authenticated internal staff (e.g., Admins) can observe live workforce locations
     liveLocationService.setTrackingEnabled(true);
+
+    // Only emit workforce presence/heartbeat telemetry if this user is an eligible field worker
+    const canEmitFieldPresence = liveLocationService.isEligibleFieldWorker(
+      currentUser.role,
+      currentUser.department,
+      Boolean(currentUser.isFieldWorker)
+    );
+    if (!canEmitFieldPresence) {
+      return () => {
+        liveLocationService.setTrackingEnabled(false);
+      };
+    }
 
     const userId = currentUser.id;
     const employeeCode = currentUser.employeeId || currentUser.id;
-    const name = currentUser.name;
     const email = currentUser.email;
-    const role = currentUser.role;
 
     const triggerHeartbeat = async () => {
       const user = currentUserRef.current;
@@ -32,7 +43,6 @@ export function useWorkforcePresence(currentUser: UserProfile | null, isAuthenti
       const activeRole = user.role;
 
       try {
-        console.log('[Presence] heartbeat sent', { userId: activeUserId });
         const success = await liveLocationService.sendHeartbeat({
           userId: activeUserId,
           employeeCode: activeCode,
@@ -41,15 +51,15 @@ export function useWorkforcePresence(currentUser: UserProfile | null, isAuthenti
           role: activeRole,
           isSharingLocation: liveLocationService.isLocationSharingActive()
         });
-        if (success) {
-          console.log('[Presence] heartbeat response 200', { userId: activeUserId });
+        if (!success) {
+          console.warn('[Presence] heartbeat rejected or skipped for user:', activeUserId);
         }
       } catch (err) {
         console.warn('[Workforce Presence] Automatic heartbeat failed:', err);
       }
     };
 
-    // 1. Immediately broadcast heartbeat upon login
+    // 1. Immediately broadcast heartbeat upon login for eligible field staff
     triggerHeartbeat();
 
     // 2. Schedule recurring heartbeat every 20 seconds
@@ -71,5 +81,5 @@ export function useWorkforcePresence(currentUser: UserProfile | null, isAuthenti
       // NOTE: Do NOT send offline in React effect cleanup, as component re-renders or navigation
       // must not prematurely knock the user offline. Explicit offline is handled by logout or beforeunload.
     };
-  }, [isAuthenticated, currentUser?.id, currentUser?.role]);
+  }, [isAuthenticated, currentUser?.id, currentUser?.role, currentUser?.department, currentUser?.isFieldWorker]);
 }

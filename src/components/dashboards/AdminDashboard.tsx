@@ -3,7 +3,8 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storage';
 import { liveLocationService } from '../../services/liveLocationService';
-import { LiveEmployeeLocation } from '../../types/tracking';
+import { pusherService } from '../../services/pusherService';
+import { LiveEmployeeLocation, PusherConnectionState } from '../../types/tracking';
 import {
   SunMedium,
   Zap,
@@ -26,7 +27,8 @@ import {
   FileText,
   DollarSign,
   Activity,
-  ChevronRight
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react';
 import {
   BarChart,
@@ -70,14 +72,60 @@ export const AdminDashboard: React.FC = () => {
   const [liveLocations, setLiveLocations] = useState<LiveEmployeeLocation[]>(() =>
     liveLocationService.getLocations()
   );
+  const [workforceError, setWorkforceError] = useState<string | null>(() =>
+    liveLocationService.getFetchError()
+  );
+  const [pusherState, setPusherState] = useState<PusherConnectionState>(() =>
+    pusherService.getConnectionState()
+  );
 
   useEffect(() => {
+    liveLocationService.setTrackingEnabled(true);
     liveLocationService.fetchServerLocations();
     const unsub = liveLocationService.subscribe((locs) => {
       setLiveLocations(locs);
     });
-    return () => unsub();
-  }, []);
+    const unsubErr = liveLocationService.subscribeError((err) => {
+      setWorkforceError(err);
+    });
+    const unsubPusher = pusherService.onConnectionChange((state) => {
+      setPusherState(state);
+    });
+    return () => {
+      unsub();
+      unsubErr();
+      unsubPusher();
+    };
+  }, [refreshTrigger]);
+
+  const connectionBadge = useMemo(() => {
+    if (pusherState === 'pusher-connected' || pusherState === 'connected') {
+      return {
+        label: 'Pusher Live',
+        badgeClass: 'bg-emerald-100 text-emerald-800',
+        dotClass: 'bg-emerald-500 animate-ping'
+      };
+    }
+    if (pusherState === 'pusher-connecting' || pusherState === 'connecting') {
+      return {
+        label: 'Connecting...',
+        badgeClass: 'bg-amber-100 text-amber-800',
+        dotClass: 'bg-amber-500 animate-pulse'
+      };
+    }
+    if (pusherState === 'sse-fallback') {
+      return {
+        label: 'SSE Fallback',
+        badgeClass: 'bg-amber-100 text-amber-800',
+        dotClass: 'bg-amber-500'
+      };
+    }
+    return {
+      label: 'Realtime Offline',
+      badgeClass: 'bg-slate-100 text-slate-600',
+      dotClass: 'bg-slate-400'
+    };
+  }, [pusherState]);
 
   const liveStats = useMemo(() => {
     const online = liveLocations.filter((l) => l.isOnline).length;
@@ -266,13 +314,13 @@ export const AdminDashboard: React.FC = () => {
                 <h3 className="text-sm font-black text-slate-900">
                   Realtime Field Workforce Tracking
                 </h3>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                  Pusher Connected
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${connectionBadge.badgeClass}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${connectionBadge.dotClass}`} />
+                  {connectionBadge.label}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Live GPS telemetry for site survey engineers, civil, structure, electrical and installation teams.
+                Verified MySQL field personnel telemetry for survey, civil, structure, electrical and installation teams.
               </p>
             </div>
           </div>
@@ -287,39 +335,67 @@ export const AdminDashboard: React.FC = () => {
         </div>
 
         {/* Active Field Workers Horizontal Reel */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
-          {liveLocations.slice(0, 4).map((worker) => (
-            <div
-              key={worker.userId}
-              onClick={() => setActiveView('live_tracking')}
-              className="p-3 rounded-xl bg-slate-50 hover:bg-amber-50/50 border border-slate-200/80 hover:border-amber-300 transition-all cursor-pointer"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-bold text-slate-900 truncate">
-                  {worker.name}
-                </span>
-                <span
-                  className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
-                    worker.status === 'moving'
-                      ? 'bg-blue-100 text-blue-800'
-                      : worker.status === 'online'
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  {worker.status}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 font-medium truncate">
-                {worker.role}
-              </p>
-              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                <span>{worker.assignedProjectTitle || 'Assigned to Field'}</span>
-                <span>{worker.speed ? `${worker.speed} km/h` : 'Stationary'}</span>
+        {workforceError ? (
+          <div className="mt-4 p-4 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-rose-900">Unable to load workforce tracking from MySQL</p>
+                <p className="text-[11px] text-rose-700 mt-0.5">{workforceError}</p>
               </div>
             </div>
-          ))}
-        </div>
+            <button
+              type="button"
+              onClick={() => liveLocationService.fetchServerLocations()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-lg text-xs font-bold transition-colors cursor-pointer self-start sm:self-auto"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry</span>
+            </button>
+          </div>
+        ) : liveLocations.length === 0 ? (
+          <div className="mt-4 p-6 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center">
+            <Users className="w-7 h-7 text-slate-300 mx-auto mb-2" />
+            <p className="text-xs font-bold text-slate-700">No verified field workforce records found in MySQL</p>
+            <p className="text-[11px] text-slate-500 mt-1 max-w-md mx-auto">
+              Only active field engineers and site technicians present in Employee &amp; User Management appear here. Office-only Admins and deleted accounts are excluded.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+            {liveLocations.slice(0, 4).map((worker) => (
+              <div
+                key={worker.userId}
+                onClick={() => setActiveView('live_tracking')}
+                className="p-3 rounded-xl bg-slate-50 hover:bg-amber-50/50 border border-slate-200/80 hover:border-amber-300 transition-all cursor-pointer"
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-bold text-slate-900 truncate">
+                    {worker.name}
+                  </span>
+                  <span
+                    className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md ${
+                      worker.status === 'moving'
+                        ? 'bg-blue-100 text-blue-800'
+                        : worker.status === 'online' || worker.status === 'idle'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {worker.status}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-medium truncate">
+                  {worker.role}
+                </p>
+                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span>{worker.assignedProjectTitle || 'Assigned to Field'}</span>
+                  <span>{worker.speed ? `${worker.speed} km/h` : 'Stationary'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Quick Access to All ERP Modules */}

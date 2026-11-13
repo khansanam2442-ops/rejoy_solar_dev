@@ -280,13 +280,42 @@ async function createServerApp() {
     });
   }
 
-  // Helper for role-based authorization
-  function isCustomerRequest(req: express.Request): boolean {
-    const roleHeader = (req.headers['x-user-role'] as string) || '';
-    const roleQuery = (req.query.role as string) || '';
-    const roleBody = req.body?.role || '';
-    const role = (roleHeader || roleQuery || roleBody).toLowerCase().trim();
-    return role === 'customer';
+  // Helper to authenticate staff (non-Customer) session from cookie or Bearer header
+  async function authenticateStaffSession(
+    req: express.Request,
+    res: express.Response
+  ): Promise<{ id: string; email: string; role: string; employeeId?: string; name?: string } | null> {
+    const token = extractSessionToken(req);
+    if (!token) {
+      res.status(401).json({ success: false, error: 'Authentication required for workforce tracking.' });
+      return null;
+    }
+
+    let user: any = null;
+    const pool = dbManager.getPool();
+    if (pool) {
+      const val = await authService.validateSession(pool, token).catch(() => ({ valid: false, user: null }));
+      if (val.valid && val.user) user = val.user;
+    }
+    if (!user) {
+      const jwtVal = verifyToken(token);
+      if (jwtVal.valid && jwtVal.payload) {
+        user = await dbManager.findUserByIdOrEmail(jwtVal.payload.sub || jwtVal.payload.email).catch(() => null);
+      }
+    }
+    if (!user) {
+      res.status(401).json({ success: false, error: 'Invalid or expired session.' });
+      return null;
+    }
+    if (String(user.role || '').toLowerCase().trim() === 'customer') {
+      res.status(403).json({ success: false, error: 'Customer accounts cannot access workforce tracking.' });
+      return null;
+    }
+    if (['DISABLED', 'INACTIVE'].includes(String(user.status || 'ACTIVE').toUpperCase())) {
+      res.status(403).json({ success: false, error: 'Account is disabled.' });
+      return null;
+    }
+    return user;
   }
 
   // Periodic stale presence check (every 15 seconds)
@@ -386,16 +415,13 @@ async function createServerApp() {
     return undefined;
   }
 
-  // Admin Initial Load: Fetch All Field Employees' Latest Known Locations & Presence
-  // Admin Initial Load: Fetch All Field Employees' Latest Known Locations & Presence
+  // Admin/Staff Load: Fetch Verified Active Field Employees' Latest Known Locations & Presence
   app.get(['/api/workforce/locations', '/api/workforce/status', '/api/locations'], async (req, res) => {
-    if (isCustomerRequest(req)) {
-      res.status(403).json({ success: false, error: 'Customer accounts cannot access workforce tracking.' });
-      return;
-    }
+    const actor = await authenticateStaffSession(req, res);
+    if (!actor) return;
 
     try {
-      // 1. Fetch persistent MySQL records as single source of truth
+      // 1. Fetch persistent MySQL records joined & verified against solar_users / solar_employees
       const dbRecords = await dbManager.getWorkforceLocations();
 
       workforceState.clear();
@@ -429,10 +455,22 @@ async function createServerApp() {
   });
 
   // Realtime Workforce Server-Sent Events (SSE) Stream
-  app.get(['/api/workforce/stream', '/api/location/stream'], (req, res) => {
-    if (isCustomerRequest(req)) {
-      res.status(403).json({ success: false, error: 'Customer accounts cannot access workforce streaming.' });
-      return;
+  app.get(['/api/workforce/stream', '/api/location/stream'], async (req, res) => {
+    const actor = await authenticateStaffSession(req, res);
+    if (!actor) return;
+
+    let initialList: WorkforceRecord[] = [];
+    try {
+      const dbRecords = await dbManager.getWorkforceLocations();
+      workforceState.clear();
+      dbRecords.forEach((rec) => {
+        if (rec && rec.userId) {
+          workforceState.set(rec.userId, rec);
+        }
+      });
+      initialList = dbRecords;
+    } catch {
+      initialList = Array.from(workforceState.values());
     }
 
     res.writeHead(200, {
@@ -442,8 +480,6 @@ async function createServerApp() {
     });
     res.write('\n');
 
-    // Send initial snapshot of all workers
-    const initialList = Array.from(workforceState.values());
     res.write(`event: workforce.snapshot\ndata: ${JSON.stringify(initialList)}\n\n`);
 
     sseClients.add(res);
@@ -453,35 +489,38 @@ async function createServerApp() {
     });
   });
 
-  // Presence Heartbeat Endpoint: Field worker broadcasts heartbeat every 20-25 seconds
+  // Presence Heartbeat Endpoint: Field worker broadcasts heartbeat every 20 seconds
   app.post(['/api/presence/heartbeat', '/api/presence'], async (req, res) => {
+    const actor = await authenticateStaffSession(req, res);
+    if (!actor) return;
+
     try {
-      const { userId, employeeCode, name, email, role, isSharingLocation } = req.body || {};
-      const callerUserId = (req.headers['x-user-id'] as string) || userId;
+      const { isSharingLocation } = req.body || {};
 
-      if (!callerUserId && !email && !employeeCode) {
-        res.status(400).json({ success: false, error: 'Missing userId in heartbeat payload.' });
+      // Strictly verify the authenticated user exists as an active eligible field worker in MySQL
+      const verified = await dbManager.resolveVerifiedFieldStaff(actor.id, actor.email, actor.employeeId);
+      if (!verified) {
+        // Office/Admin accounts (is_field_worker = 0) are not tracked as field personnel
+        res.json({
+          success: true,
+          tracked: false,
+          online: false,
+          isOnline: false,
+          message: 'Non-field staff account; field presence tracking skipped.'
+        });
         return;
       }
 
-      if (isCustomerRequest(req)) {
-        res.status(403).json({ success: false, error: 'Customer accounts cannot register field presence.' });
-        return;
-      }
-
-      console.log(`[Presence] heartbeat received ${callerUserId || email || employeeCode}`);
-
-      const rawId = callerUserId ? String(callerUserId).trim() : '';
-      const existing = findExistingWorkforceRecord(rawId, email, employeeCode);
-      const targetId = resolveCanonicalWorkforceKey(existing?.userId || rawId, email || existing?.email, employeeCode || existing?.employeeCode);
+      const targetId = verified.id;
+      const existing = findExistingWorkforceRecord(targetId, verified.email, verified.employeeCode);
       const timestamp = new Date().toISOString();
 
       const updated: WorkforceRecord = {
         userId: targetId,
-        employeeCode: employeeCode || existing?.employeeCode || targetId,
-        name: name || existing?.name || (targetId.startsWith('emp-') ? `Field Worker (${targetId})` : 'Solar Worker'),
-        email: email || existing?.email,
-        role: role || existing?.role || 'Field Engineer',
+        employeeCode: verified.employeeCode || targetId,
+        name: verified.name,
+        email: verified.email,
+        role: verified.role,
         latitude: existing?.latitude,
         longitude: existing?.longitude,
         accuracy: existing?.accuracy,
@@ -494,42 +533,29 @@ async function createServerApp() {
         isOnline: true,
         isSharingLocation: typeof isSharingLocation === 'boolean' ? isSharingLocation : (existing?.isSharingLocation ?? false),
         hasLocation: Boolean(existing?.hasLocation && typeof existing?.latitude === 'number' && typeof existing?.longitude === 'number'),
-        status: existing?.hasLocation && typeof existing?.latitude === 'number' && typeof existing?.longitude === 'number'
-          ? (existing.speed && existing.speed > 3 ? 'moving' : 'idle')
-          : 'online'
+        status:
+          existing?.hasLocation && typeof existing?.latitude === 'number' && typeof existing?.longitude === 'number'
+            ? (existing.speed && existing.speed > 3 ? 'moving' : 'idle')
+            : 'online'
       };
 
-      // Clean up duplicate old keys if rawId was an alias
-      if (rawId && rawId !== targetId && workforceState.has(rawId)) {
-        workforceState.delete(rawId);
-      }
-      if (existing && existing.userId !== targetId && workforceState.has(existing.userId)) {
-        workforceState.delete(existing.userId);
-      }
-
       workforceState.set(targetId, updated);
-      
+
       // Persist to MySQL as authoritative store
-      try {
-        await dbManager.saveWorkforceHeartbeat({
-          userId: targetId,
-          employeeCode: updated.employeeCode,
-          name: updated.name,
-          email: updated.email,
-          role: updated.role,
-          isSharingLocation: updated.isSharingLocation
-        });
-      } catch (dbErr) {
-        console.warn('[Presence] MySQL save heartbeat error:', dbErr);
-      }
+      await dbManager.saveWorkforceHeartbeat({
+        userId: verified.id,
+        employeeCode: verified.employeeCode,
+        name: verified.name,
+        email: verified.email,
+        role: verified.role,
+        isSharingLocation: updated.isSharingLocation
+      });
 
       persistWorkforceState();
-      console.log(`[Presence] workforce state updated & persisted ${targetId}`);
 
-      // Broadcast presence update with full metadata
+      // Broadcast presence update with authoritative MySQL metadata
       const presencePayload = {
         userId: targetId,
-        alternateUserId: rawId !== targetId ? rawId : undefined,
         employeeCode: updated.employeeCode,
         name: updated.name,
         email: updated.email,
@@ -546,10 +572,10 @@ async function createServerApp() {
         activity: updated.activity
       };
       await broadcastWorkforceEvent('presence.updated', presencePayload);
-      console.log(`[Presence] presence.updated broadcast ${targetId}`);
 
       res.json({
         success: true,
+        tracked: true,
         online: true,
         isOnline: true,
         userId: targetId,
@@ -564,18 +590,12 @@ async function createServerApp() {
 
   // Explicit Offline / Disconnect Endpoint: Called when employee pauses sharing or logs out
   app.post('/api/presence/offline', async (req, res) => {
+    const actor = await authenticateStaffSession(req, res);
+    if (!actor) return;
+
     try {
-      const { userId, email, employeeCode } = req.body || {};
-      const callerUserId = (req.headers['x-user-id'] as string) || userId;
-
-      if (!callerUserId && !email && !employeeCode) {
-        res.status(400).json({ success: false, error: 'Missing userId in offline payload.' });
-        return;
-      }
-
-      const rawId = callerUserId ? String(callerUserId).trim() : '';
-      const existing = findExistingWorkforceRecord(rawId, email, employeeCode);
-      const targetId = resolveCanonicalWorkforceKey(existing?.userId || rawId, email || existing?.email, employeeCode || existing?.employeeCode);
+      const targetId = actor.id;
+      const existing = findExistingWorkforceRecord(targetId, actor.email, actor.employeeId);
       const timestamp = new Date().toISOString();
 
       if (existing) {
@@ -587,23 +607,23 @@ async function createServerApp() {
         persistWorkforceState();
       }
 
-      try {
-        await dbManager.setWorkforceOffline(targetId);
-      } catch (dbErr) {
+      await dbManager.setWorkforceOffline(targetId, actor.email).catch((dbErr) => {
         console.warn('[Presence] MySQL setWorkforceOffline error:', dbErr);
-      }
-
-      await broadcastWorkforceEvent('presence.updated', {
-        userId: targetId,
-        employeeCode: existing?.employeeCode,
-        name: existing?.name,
-        email: existing?.email,
-        role: existing?.role,
-        isOnline: false,
-        lastSeenAt: timestamp,
-        isSharingLocation: false,
-        status: 'offline'
       });
+
+      if (existing) {
+        await broadcastWorkforceEvent('presence.updated', {
+          userId: existing.userId,
+          employeeCode: existing.employeeCode,
+          name: existing.name,
+          email: existing.email,
+          role: existing.role,
+          isOnline: false,
+          lastSeenAt: timestamp,
+          isSharingLocation: false,
+          status: 'offline'
+        });
+      }
 
       res.json({ success: true, online: false, isOnline: false, message: 'User presence set to offline.' });
     } catch (err: any) {
@@ -613,12 +633,11 @@ async function createServerApp() {
 
   // Realtime Live Location Update Endpoint (Field Worker GPS -> Backend -> Pusher event 'location.updated')
   app.post(['/api/update-location', '/api/location/update', '/api/location'], async (req, res) => {
+    const actor = await authenticateStaffSession(req, res);
+    if (!actor) return;
+
     try {
       const {
-        userId,
-        employeeCode,
-        name,
-        role,
         latitude,
         longitude,
         accuracy,
@@ -629,22 +648,23 @@ async function createServerApp() {
         batteryLevel
       } = req.body || {};
 
-      const callerUserId = (req.headers['x-user-id'] as string) || userId;
-
-      if (!callerUserId || typeof latitude !== 'number' || typeof longitude !== 'number') {
+      if (typeof latitude !== 'number' || typeof longitude !== 'number' || isNaN(latitude) || isNaN(longitude)) {
         res.status(400).json({
           success: false,
-          error: 'Missing required location fields: userId, latitude, longitude.'
+          error: 'Missing or invalid location fields: latitude, longitude.'
         });
         return;
       }
 
-      if (isCustomerRequest(req)) {
-        res.status(403).json({ success: false, error: 'Customer accounts cannot submit GPS coordinates.' });
+      const verified = await dbManager.resolveVerifiedFieldStaff(actor.id, actor.email, actor.employeeId);
+      if (!verified) {
+        res.status(403).json({
+          success: false,
+          error: 'Only active verified field personnel can submit GPS coordinates.'
+        });
         return;
       }
 
-      const id = String(callerUserId);
       const nowIso = timestamp || new Date().toISOString();
       const numLat = Number(latitude);
       const numLng = Number(longitude);
@@ -652,7 +672,10 @@ async function createServerApp() {
       const isMoving = numSpeed !== undefined && numSpeed > 3;
 
       const payload = {
-        userId: id,
+        userId: verified.id,
+        employeeCode: verified.employeeCode,
+        name: verified.name,
+        role: verified.role,
         latitude: numLat,
         longitude: numLng,
         accuracy: accuracy !== undefined ? Number(accuracy) : undefined,
@@ -663,14 +686,13 @@ async function createServerApp() {
         batteryLevel: batteryLevel !== undefined ? Number(batteryLevel) : undefined
       };
 
-      // Persist in workforceState with canonical id resolution
-      const existing = findExistingWorkforceRecord(id, undefined, employeeCode);
-      const targetId = resolveCanonicalWorkforceKey(existing?.userId || id, existing?.email, employeeCode || existing?.employeeCode);
+      const existing = findExistingWorkforceRecord(verified.id, verified.email, verified.employeeCode);
       const updatedRecord: WorkforceRecord = {
-        userId: targetId,
-        employeeCode: employeeCode || existing?.employeeCode || targetId,
-        name: name || existing?.name || `Field Worker (${targetId})`,
-        role: role || existing?.role || 'Field Engineer',
+        userId: verified.id,
+        employeeCode: verified.employeeCode || verified.id,
+        name: verified.name,
+        email: verified.email,
+        role: verified.role,
         latitude: numLat,
         longitude: numLng,
         accuracy: payload.accuracy,
@@ -686,34 +708,23 @@ async function createServerApp() {
         status: isMoving ? 'moving' : 'idle'
       };
 
-      if (id !== targetId && workforceState.has(id)) {
-        workforceState.delete(id);
-      }
-
-      workforceState.set(targetId, updatedRecord);
+      workforceState.set(verified.id, updatedRecord);
       persistWorkforceState();
 
-      // Persist to MySQL as authoritative store
-      try {
-        await dbManager.saveWorkforceLocation({
-          userId: targetId,
-          employeeCode: updatedRecord.employeeCode,
-          name: updatedRecord.name,
-          email: existing?.email,
-          role: updatedRecord.role,
-          latitude: numLat,
-          longitude: numLng,
-          accuracy: payload.accuracy,
-          heading: payload.heading,
-          speed: numSpeed,
-          batteryLevel: payload.batteryLevel,
-          activity: payload.activity
-        });
-      } catch (dbErr) {
-        console.warn('[Location Update] MySQL save location error:', dbErr);
-      }
-
-      payload.userId = targetId;
+      await dbManager.saveWorkforceLocation({
+        userId: verified.id,
+        employeeCode: verified.employeeCode,
+        name: verified.name,
+        email: verified.email,
+        role: verified.role,
+        latitude: numLat,
+        longitude: numLng,
+        accuracy: payload.accuracy,
+        heading: payload.heading,
+        speed: numSpeed,
+        batteryLevel: payload.batteryLevel,
+        activity: payload.activity
+      });
 
       // Broadcast to both Pusher and Server-Sent Events
       await broadcastWorkforceEvent('location.updated', payload);

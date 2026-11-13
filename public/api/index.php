@@ -5476,27 +5476,157 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
 // 28. WORKFORCE LIVE TRACKING & FIELD PRESENCE ENDPOINTS
 // ==========================================================
 
-function isCustomerRequestPhp() {
-    $role = $_SERVER['HTTP_X_USER_ROLE'] ?? $_GET['role'] ?? '';
-    if (empty($role) && !empty($GLOBALS['body']['role'])) {
-        $role = $GLOBALS['body']['role'];
+// Helper: Check if staff role/flag qualifies for Field Workforce Tracking
+function isEligibleFieldWorkerPhp($role, $isFieldFlag = false, $dept = '') {
+    if (!empty($isFieldFlag) && strval($isFieldFlag) !== '0' && strtolower(strval($isFieldFlag)) !== 'false') {
+        return true;
     }
-    return strtolower(trim($role)) === 'customer';
+    $normRole = strtolower(trim((string)$role));
+    $normDept = strtolower(trim((string)$dept));
+    if (empty($normRole)) return false;
+
+    if (
+        $normRole === 'customer' ||
+        $normRole === 'admin' ||
+        $normRole === 'super admin' ||
+        strpos($normRole, 'accountant') !== false ||
+        strpos($normRole, 'finance') !== false ||
+        $normRole === 'hr manager' ||
+        strpos($normRole, 'director') !== false ||
+        strpos($normRole, 'executive assistant') !== false
+    ) {
+        return false;
+    }
+
+    $eligible = [
+        'site survey engineer',
+        'site inspector',
+        'civil team',
+        'civil engineer',
+        'structure team',
+        'structure engineer',
+        'installation team',
+        'installation engineer',
+        'electrical team',
+        'electrical engineer',
+        'project engineer',
+        'technician',
+        'service engineer',
+        'service manager'
+    ];
+    foreach ($eligible as $r) {
+        if (strpos($normRole, $r) !== false) return true;
+    }
+    foreach (['engineering', 'installation', 'electrical', 'civil', 'structure', 'service'] as $d) {
+        if (strpos($normDept, $d) !== false) return true;
+    }
+    return false;
 }
 
-// GET /api/workforce/locations - All Active & Historic Workforce Locations (Admin & Internal Staff Only)
+// Helper: Load verified active field staff maps from solar_employees/solar_employee & solar_users
+function loadVerifiedActiveFieldStaffPhp($pdo) {
+    $byId = [];
+    $byEmail = [];
+    $byCode = [];
+    $allKnownIds = [];
+    $allKnownEmails = [];
+
+    $register = function ($rec) use (&$byId, &$byEmail, &$byCode, &$allKnownIds, &$allKnownEmails) {
+        $idKey = strtolower(trim((string)($rec['id'] ?? '')));
+        $emailKey = strtolower(trim((string)($rec['email'] ?? '')));
+        $codeKey = strtolower(trim((string)($rec['employeeCode'] ?? '')));
+        if ($idKey !== '') $allKnownIds[$idKey] = true;
+        if ($emailKey !== '') $allKnownEmails[$emailKey] = true;
+        if (empty($rec['active'])) return;
+        if (!isEligibleFieldWorkerPhp($rec['role'], $rec['isFieldWorker'], $rec['department'])) return;
+
+        if ($idKey !== '' && !isset($byId[$idKey])) $byId[$idKey] = $rec;
+        if ($emailKey !== '' && !isset($byEmail[$emailKey])) $byEmail[$emailKey] = $rec;
+        if ($codeKey !== '' && !isset($byCode[$codeKey])) $byCode[$codeKey] = $rec;
+    };
+
+    foreach (['solar_employees', 'solar_employee'] as $tbl) {
+        try {
+            $eRows = $pdo->query("SELECT * FROM `$tbl`")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($eRows as $e) {
+                $status = strtoupper((string)($e['status'] ?? 'ACTIVE'));
+                $acctStatus = strtoupper((string)($e['account_status'] ?? 'ACTIVE'));
+                $role = (string)($e['system_role'] ?? $e['assigned_role'] ?? $e['designation'] ?? 'Staff');
+                $active = !in_array($status, ['DISABLED', 'INACTIVE', 'TERMINATED'], true)
+                    && $acctStatus !== 'DISABLED'
+                    && strtolower(trim($role)) !== 'customer';
+                $register([
+                    'id' => (string)($e['id'] ?? ''),
+                    'employeeCode' => (string)($e['employee_code'] ?? $e['id'] ?? ''),
+                    'name' => (string)($e['name'] ?? 'Employee'),
+                    'email' => strtolower(trim((string)($e['email'] ?? ''))),
+                    'role' => $role,
+                    'department' => (string)($e['department'] ?? 'Operations'),
+                    'phone' => (string)($e['phone'] ?? ''),
+                    'isFieldWorker' => !empty($e['is_field_worker']),
+                    'active' => $active
+                ]);
+            }
+        } catch (Exception $ex) {}
+    }
+
+    try {
+        $uRows = $pdo->query("SELECT * FROM `solar_users`")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($uRows as $u) {
+            $status = strtoupper((string)($u['status'] ?? 'ACTIVE'));
+            $role = (string)($u['role'] ?? 'Staff');
+            $active = !in_array($status, ['DISABLED', 'INACTIVE'], true)
+                && strtolower(trim($role)) !== 'customer';
+            $register([
+                'id' => (string)($u['id'] ?? ''),
+                'employeeCode' => (string)($u['employee_id'] ?? $u['id'] ?? ''),
+                'name' => (string)($u['name'] ?? 'Staff Member'),
+                'email' => strtolower(trim((string)($u['email'] ?? ''))),
+                'role' => $role,
+                'department' => (string)($u['department'] ?? 'Operations'),
+                'phone' => (string)($u['phone'] ?? ''),
+                'isFieldWorker' => !empty($u['is_field_worker']),
+                'active' => $active
+            ]);
+        }
+    } catch (Exception $ex) {}
+
+    return [
+        'byId' => $byId,
+        'byEmail' => $byEmail,
+        'byCode' => $byCode,
+        'allKnownIds' => $allKnownIds,
+        'allKnownEmails' => $allKnownEmails
+    ];
+}
+
+function resolveVerifiedFieldStaffPhp($pdo, $userId = '', $email = '', $employeeCode = '') {
+    $maps = loadVerifiedActiveFieldStaffPhp($pdo);
+    $idKey = strtolower(trim((string)$userId));
+    $emailKey = strtolower(trim((string)$email));
+    $codeKey = strtolower(trim((string)$employeeCode));
+    if ($idKey !== '' && isset($maps['byId'][$idKey])) return $maps['byId'][$idKey];
+    if ($emailKey !== '' && isset($maps['byEmail'][$emailKey])) return $maps['byEmail'][$emailKey];
+    if ($codeKey !== '' && isset($maps['byCode'][$codeKey])) return $maps['byCode'][$codeKey];
+    return null;
+}
+
+// GET /api/workforce/locations - Verified Active Field Workforce Locations (Authenticated Non-Customer Staff Only)
 if ($method === 'GET' && in_array($cleanPath, ['/workforce/locations', '/workforce/status', '/locations', '/workforce/locations/', '/workforce/status/', '/locations/'])) {
-    if (isCustomerRequestPhp()) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $authUser = requireAuthUserPhp($pdo);
+    if (strtolower(trim($authUser['role'] ?? '')) === 'customer') {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => 'Customer accounts cannot access workforce tracking.']);
         exit;
     }
 
-    $pdo = getDbConnection($dbConfig);
-    ensureRequiredTables($pdo);
-
     $records = [];
     try {
+        $maps = loadVerifiedActiveFieldStaffPhp($pdo);
+
         $sql = "
             SELECT
                 user_id, employee_code, name, email, role,
@@ -5512,14 +5642,36 @@ if ($method === 'GET' && in_array($cleanPath, ['/workforce/locations', '/workfor
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $nowIso = gmdate('Y-m-d\TH:i:s.000\Z');
+        $seenCanonicalIds = [];
+        $orphanedIds = [];
 
         foreach ($rows as $r) {
+            $rawId = strtolower(trim((string)($r['user_id'] ?? '')));
+            $rawEmail = strtolower(trim((string)($r['email'] ?? '')));
+            $rawCode = strtolower(trim((string)($r['employee_code'] ?? '')));
+
+            $staff = null;
+            if ($rawId !== '' && isset($maps['byId'][$rawId])) $staff = $maps['byId'][$rawId];
+            elseif ($rawEmail !== '' && isset($maps['byEmail'][$rawEmail])) $staff = $maps['byEmail'][$rawEmail];
+            elseif ($rawCode !== '' && isset($maps['byCode'][$rawCode])) $staff = $maps['byCode'][$rawCode];
+
+            if (!$staff) {
+                $existsAnywhere = ($rawId !== '' && isset($maps['allKnownIds'][$rawId]))
+                    || ($rawEmail !== '' && isset($maps['allKnownEmails'][$rawEmail]));
+                if (!$existsAnywhere && !empty($r['user_id'])) {
+                    $orphanedIds[] = $r['user_id'];
+                }
+                continue;
+            }
+
+            if (isset($seenCanonicalIds[$staff['id']])) continue;
+            $seenCanonicalIds[$staff['id']] = true;
+
             $sec = ($r['seconds_since_seen'] !== null) ? intval($r['seconds_since_seen']) : 999999;
-            $isOnline = (intval($r['is_online']) === 1) && ($sec <= 120);
+            $isOnline = (intval($r['is_online']) === 1) && ($sec >= -30 && $sec <= 120);
             $hasCoords = ($r['latitude'] !== null) && ($r['longitude'] !== null) && ($r['latitude'] !== '') && ($r['longitude'] !== '');
             $speed = ($r['speed'] !== null) ? floatval($r['speed']) : 0;
 
-            $status = $r['status'] ?: 'offline';
             if (!$isOnline) {
                 $status = 'offline';
             } elseif ($hasCoords) {
@@ -5531,11 +5683,13 @@ if ($method === 'GET' && in_array($cleanPath, ['/workforce/locations', '/workfor
             $activity = $r['activity'] ?: ($isOnline ? ($hasCoords ? (($speed > 3) ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline');
 
             $records[] = [
-                'userId' => $r['user_id'],
-                'employeeCode' => $r['employee_code'] ?: $r['user_id'],
-                'name' => $r['name'] ?: ('Field Worker (' . $r['user_id'] . ')'),
-                'email' => $r['email'] ?: '',
-                'role' => $r['role'] ?: 'Field Engineer',
+                'userId' => $staff['id'],
+                'employeeCode' => $staff['employeeCode'] ?: $staff['id'],
+                'name' => $staff['name'],
+                'email' => $staff['email'] ?: '',
+                'role' => $staff['role'],
+                'department' => $staff['department'] ?: 'Operations',
+                'phone' => $staff['phone'] ?: '',
                 'latitude' => $hasCoords ? floatval($r['latitude']) : null,
                 'longitude' => $hasCoords ? floatval($r['longitude']) : null,
                 'accuracy' => ($r['accuracy'] !== null) ? floatval($r['accuracy']) : null,
@@ -5548,8 +5702,17 @@ if ($method === 'GET' && in_array($cleanPath, ['/workforce/locations', '/workfor
                 'hasLocation' => $hasCoords,
                 'status' => $status,
                 'lastSeenAt' => $r['last_seen_at_iso'] ?: $nowIso,
-                'updatedAt' => $r['updated_at_iso'] ?: $nowIso
+                'updatedAt' => $r['updated_at_iso'] ?: $nowIso,
+                'verified' => true
             ];
+        }
+
+        // Automatically prune orphaned rows whose users no longer exist in solar_users / solar_employees
+        if (!empty($orphanedIds)) {
+            $delOrphan = $pdo->prepare('DELETE FROM `solar_workforce_locations` WHERE `user_id` = ?');
+            foreach ($orphanedIds as $oid) {
+                try { $delOrphan->execute([$oid]); } catch (Exception $de) {}
+            }
         }
     } catch (Exception $e) {
         error_log('Error querying workforce locations in PHP gateway: ' . $e->getMessage());
@@ -5572,29 +5735,34 @@ if ($method === 'GET' && in_array($cleanPath, ['/workforce/locations', '/workfor
     exit;
 }
 
-// POST /api/update-location - Live GPS Update Submission
+// POST /api/update-location - Live GPS Update Submission (Verified Active Field Staff Only)
 if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/update', '/location', '/update-location/', '/location/update/', '/location/'])) {
-    if (isCustomerRequestPhp()) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $authUser = requireAuthUserPhp($pdo);
+    if (strtolower(trim($authUser['role'] ?? '')) === 'customer') {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => 'Customer accounts cannot submit GPS coordinates.']);
         exit;
     }
 
-    $callerUserId = $_SERVER['HTTP_X_USER_ID'] ?? ($body['userId'] ?? '');
-    $lat = isset($body['latitude']) ? floatval($body['latitude']) : null;
-    $lng = isset($body['longitude']) ? floatval($body['longitude']) : null;
+    $lat = isset($body['latitude']) && is_numeric($body['latitude']) ? floatval($body['latitude']) : null;
+    $lng = isset($body['longitude']) && is_numeric($body['longitude']) ? floatval($body['longitude']) : null;
 
-    if (empty($callerUserId) || $lat === null || $lng === null) {
+    if ($lat === null || $lng === null) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Missing required location fields: userId, latitude, longitude.']);
+        echo json_encode(['success' => false, 'error' => 'Missing required location fields: latitude, longitude.']);
         exit;
     }
 
-    $userId = trim($callerUserId);
-    $employeeCode = trim($body['employeeCode'] ?? '');
-    $name = trim($body['name'] ?? '');
-    $role = trim($body['role'] ?? '');
-    $email = trim($body['email'] ?? '');
+    $verified = resolveVerifiedFieldStaffPhp($pdo, $authUser['id'] ?? '', $authUser['email'] ?? '', $authUser['employeeId'] ?? '');
+    if (!$verified) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Only active verified field personnel can submit GPS coordinates.']);
+        exit;
+    }
+
     $accuracy = isset($body['accuracy']) ? floatval($body['accuracy']) : null;
     $heading = isset($body['heading']) ? floatval($body['heading']) : null;
     $speed = isset($body['speed']) ? floatval($body['speed']) : null;
@@ -5602,24 +5770,6 @@ if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/u
     $isMoving = ($speed !== null && $speed > 3);
     $activity = trim($body['activity'] ?? ($isMoving ? 'In Transit / Moving' : 'On Site / Active'));
     $status = $isMoving ? 'moving' : 'idle';
-
-    $pdo = getDbConnection($dbConfig);
-    ensureRequiredTables($pdo);
-
-    // If name or role or employeeCode empty, look up in solar_users
-    if (empty($name) || empty($role) || empty($employeeCode)) {
-        try {
-            $uStmt = $pdo->prepare("SELECT name, role, email, employee_id FROM `solar_users` WHERE id = ? OR email = ? LIMIT 1");
-            $uStmt->execute([$userId, $email ?: $userId]);
-            $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
-            if ($uRow) {
-                if (empty($name)) $name = $uRow['name'] ?? '';
-                if (empty($role)) $role = $uRow['role'] ?? '';
-                if (empty($email)) $email = $uRow['email'] ?? '';
-                if (empty($employeeCode)) $employeeCode = $uRow['employee_id'] ?? '';
-            }
-        } catch (Exception $e) {}
-    }
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_workforce_locations` (
@@ -5629,10 +5779,10 @@ if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/u
             `status`, `last_seen_at`
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, NOW())
         ON DUPLICATE KEY UPDATE
-            `employee_code` = COALESCE(NULLIF(VALUES(`employee_code`), ''), `employee_code`),
-            `name` = COALESCE(NULLIF(VALUES(`name`), ''), `name`),
-            `email` = COALESCE(NULLIF(VALUES(`email`), ''), `email`),
-            `role` = COALESCE(NULLIF(VALUES(`role`), ''), `role`),
+            `employee_code` = VALUES(`employee_code`),
+            `name` = VALUES(`name`),
+            `email` = VALUES(`email`),
+            `role` = VALUES(`role`),
             `latitude` = VALUES(`latitude`),
             `longitude` = VALUES(`longitude`),
             `accuracy` = VALUES(`accuracy`),
@@ -5647,11 +5797,11 @@ if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/u
     ");
 
     $stmt->execute([
-        $userId,
-        $employeeCode ?: null,
-        $name ?: null,
-        $email ?: null,
-        $role ?: null,
+        $verified['id'],
+        $verified['employeeCode'] ?: null,
+        $verified['name'] ?: null,
+        $verified['email'] ?: null,
+        $verified['role'] ?: null,
         $lat,
         $lng,
         $accuracy,
@@ -5667,7 +5817,10 @@ if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/u
         'success' => true,
         'broadcasted' => true,
         'payload' => [
-            'userId' => $userId,
+            'userId' => $verified['id'],
+            'employeeCode' => $verified['employeeCode'],
+            'name' => $verified['name'],
+            'role' => $verified['role'],
             'latitude' => $lat,
             'longitude' => $lng,
             'accuracy' => $accuracy,
@@ -5682,45 +5835,32 @@ if ($method === 'POST' && in_array($cleanPath, ['/update-location', '/location/u
     exit;
 }
 
-// POST /api/presence/heartbeat - Field Worker Presence Heartbeat
+// POST /api/presence/heartbeat - Field Worker Presence Heartbeat (Authenticated Verified Field Staff Only)
 if ($method === 'POST' && in_array($cleanPath, ['/presence/heartbeat', '/presence', '/presence/heartbeat/', '/presence/'])) {
-    if (isCustomerRequestPhp()) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+
+    $authUser = requireAuthUserPhp($pdo);
+    if (strtolower(trim($authUser['role'] ?? '')) === 'customer') {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => 'Customer accounts cannot register field presence.']);
         exit;
     }
 
-    $callerUserId = $_SERVER['HTTP_X_USER_ID'] ?? ($body['userId'] ?? '');
-    $email = trim($body['email'] ?? '');
-    $employeeCode = trim($body['employeeCode'] ?? '');
-    $name = trim($body['name'] ?? '');
-    $role = trim($body['role'] ?? '');
-    $isSharing = isset($body['isSharingLocation']) ? (bool)$body['isSharingLocation'] : false;
-
-    if (empty($callerUserId) && empty($email) && empty($employeeCode)) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Missing userId in heartbeat payload.']);
+    $verified = resolveVerifiedFieldStaffPhp($pdo, $authUser['id'] ?? '', $authUser['email'] ?? '', $authUser['employeeId'] ?? '');
+    if (!$verified) {
+        http_response_code(200);
+        echo json_encode([
+            'success' => true,
+            'tracked' => false,
+            'online' => false,
+            'isOnline' => false,
+            'message' => 'Non-field staff account; field presence tracking skipped.'
+        ]);
         exit;
     }
 
-    $userId = trim($callerUserId ?: ($employeeCode ?: $email));
-    $pdo = getDbConnection($dbConfig);
-    ensureRequiredTables($pdo);
-
-    // Look up missing user details in solar_users
-    if (empty($name) || empty($role) || empty($employeeCode)) {
-        try {
-            $uStmt = $pdo->prepare("SELECT name, role, email, employee_id FROM `solar_users` WHERE id = ? OR email = ? LIMIT 1");
-            $uStmt->execute([$userId, $email ?: $userId]);
-            $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
-            if ($uRow) {
-                if (empty($name)) $name = $uRow['name'] ?? '';
-                if (empty($role)) $role = $uRow['role'] ?? '';
-                if (empty($email)) $email = $uRow['email'] ?? '';
-                if (empty($employeeCode)) $employeeCode = $uRow['employee_id'] ?? '';
-            }
-        } catch (Exception $e) {}
-    }
+    $isSharing = isset($body['isSharingLocation']) ? (bool)$body['isSharingLocation'] : false;
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_workforce_locations` (
@@ -5728,10 +5868,10 @@ if ($method === 'POST' && in_array($cleanPath, ['/presence/heartbeat', '/presenc
             `is_online`, `is_sharing_location`, `status`, `last_seen_at`
         ) VALUES (?, ?, ?, ?, ?, 1, ?, 'online', NOW())
         ON DUPLICATE KEY UPDATE
-            `employee_code` = COALESCE(NULLIF(VALUES(`employee_code`), ''), `employee_code`),
-            `name` = COALESCE(NULLIF(VALUES(`name`), ''), `name`),
-            `email` = COALESCE(NULLIF(VALUES(`email`), ''), `email`),
-            `role` = COALESCE(NULLIF(VALUES(`role`), ''), `role`),
+            `employee_code` = VALUES(`employee_code`),
+            `name` = VALUES(`name`),
+            `email` = VALUES(`email`),
+            `role` = VALUES(`role`),
             `is_online` = 1,
             `is_sharing_location` = VALUES(`is_sharing_location`),
             `status` = CASE
@@ -5744,20 +5884,21 @@ if ($method === 'POST' && in_array($cleanPath, ['/presence/heartbeat', '/presenc
     ");
 
     $stmt->execute([
-        $userId,
-        $employeeCode ?: null,
-        $name ?: null,
-        $email ?: null,
-        $role ?: null,
+        $verified['id'],
+        $verified['employeeCode'] ?: null,
+        $verified['name'] ?: null,
+        $verified['email'] ?: null,
+        $verified['role'] ?: null,
         $isSharing ? 1 : 0
     ]);
 
     http_response_code(200);
     echo json_encode([
         'success' => true,
+        'tracked' => true,
         'online' => true,
         'isOnline' => true,
-        'userId' => $userId,
+        'userId' => $verified['id'],
         'timestamp' => gmdate('Y-m-d\TH:i:s.000\Z')
     ]);
     exit;
@@ -5765,21 +5906,20 @@ if ($method === 'POST' && in_array($cleanPath, ['/presence/heartbeat', '/presenc
 
 // POST /api/presence/offline - Field Worker Logout or Explicit Disconnect
 if ($method === 'POST' && in_array($cleanPath, ['/presence/offline', '/presence/offline/'])) {
-    $callerUserId = $_SERVER['HTTP_X_USER_ID'] ?? ($body['userId'] ?? '');
-    $email = trim($body['email'] ?? '');
-    $employeeCode = trim($body['employeeCode'] ?? '');
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
 
-    $userId = trim($callerUserId ?: ($employeeCode ?: $email));
-    if (!empty($userId)) {
-        $pdo = getDbConnection($dbConfig);
-        ensureRequiredTables($pdo);
+    $authUser = getAuthenticatedUserPhp($pdo);
+    if ($authUser) {
+        $targetId = $authUser['id'] ?? '';
+        $targetEmail = strtolower(trim((string)($authUser['email'] ?? '')));
         try {
             $stmt = $pdo->prepare("
                 UPDATE `solar_workforce_locations`
                 SET `is_online` = 0, `is_sharing_location` = 0, `status` = 'offline', `last_seen_at` = NOW()
-                WHERE `user_id` = ? OR `email` = ? OR `employee_code` = ?
+                WHERE `user_id` = ? OR LOWER(`email`) = ?
             ");
-            $stmt->execute([$userId, $userId, $userId]);
+            $stmt->execute([$targetId, $targetEmail]);
         } catch (Exception $e) {}
     }
 
