@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const FinanceView: React.FC = () => {
-  const { settings, showToast, openImportExportModal, triggerRefresh } = useApp();
+  const { settings, showToast, openImportExportModal, triggerRefresh, refreshTrigger } = useApp();
   const { currentUser, canEditFinancials } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'RECEIPTS' | 'EXPENSES' | 'TALLY_QUEUE'>('RECEIPTS');
@@ -44,8 +44,8 @@ export const FinanceView: React.FC = () => {
     transactionReference: ''
   });
 
-  const payments = useMemo(() => storageService.getPayments(), []);
-  const expenses = useMemo(() => storageService.getExpenses(), []);
+  const payments = useMemo(() => storageService.getPayments(), [refreshTrigger]);
+  const expenses = useMemo(() => storageService.getExpenses(), [refreshTrigger]);
 
   const totalInflow = payments.filter(p => p.status === 'PAID').reduce((s, p) => s + p.amount, 0);
   const totalOutflow = expenses.reduce((s, e) => s + e.amount, 0);

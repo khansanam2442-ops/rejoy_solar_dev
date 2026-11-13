@@ -420,8 +420,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }, 0);
     };
 
+    const handleStorageError = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const msg = detail?.error || 'Failed to save changes to MySQL database.';
+      showToast(msg, 'error');
+    };
+
     window.addEventListener('solarpulse_storage_updated', handleStorageUpdate);
-    return () => window.removeEventListener('solarpulse_storage_updated', handleStorageUpdate);
+    window.addEventListener('solarpulse_storage_error', handleStorageError);
+    return () => {
+      window.removeEventListener('solarpulse_storage_updated', handleStorageUpdate);
+      window.removeEventListener('solarpulse_storage_error', handleStorageError);
+    };
   }, []);
 
   const openCustomerControlCenter = (customerId: string, projectId?: string) => {

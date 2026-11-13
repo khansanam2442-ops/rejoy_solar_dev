@@ -237,15 +237,68 @@ class StorageService {
                    cleaned = cleaned.map((a: any) => ({
                     ...a,
                     date: a.date || a.attendanceDate || (a.createdAt ? String(a.createdAt).slice(0, 10) : ''),
-                    attendanceDate: a.attendanceDate || a.date
+                    attendanceDate: a.attendanceDate || a.date,
+                    gpsCheckIn: a.gpsCheckIn || (typeof a.checkInGps === 'object' ? a.checkInGps : undefined),
+                    gpsCheckOut: a.gpsCheckOut || (typeof a.checkOutGps === 'object' ? a.checkOutGps : undefined)
                   }));
                 } else if (collectionKey === 'quotations') {
                   cleaned = cleaned.map((q: any) => ({
                     ...q,
                     quotationDate: q.quotationDate || (q.createdAt ? String(q.createdAt).slice(0, 10) : '')
                   }));
+                } else if (collectionKey === 'expenses') {
+                  cleaned = cleaned.map((e: any) => ({
+                    ...e,
+                    date: e.date || e.expenseDate || (e.createdAt ? String(e.createdAt).slice(0, 10) : '')
+                  }));
+                } else if (collectionKey === 'purchase_orders') {
+                  cleaned = cleaned.map((po: any) => ({
+                    ...po,
+                    purchaseNumber: po.purchaseNumber || po.poNumber || po.id,
+                    purchaseDate: po.purchaseDate || po.poDate || po.orderDate || (po.createdAt ? String(po.createdAt).slice(0, 10) : ''),
+                    taxAmount: po.taxAmount ?? po.gstAmount ?? 0,
+                    deliveryReceipts: po.deliveryReceipts || po.receipts || []
+                  }));
+                } else if (collectionKey === 'warehouses') {
+                  cleaned = cleaned.map((w: any) => ({
+                    ...w,
+                    contactPerson: w.contactPerson || w.managerName || '',
+                    contactPhone: w.contactPhone || w.managerPhone || '',
+                    status: w.status || (w.isActive === false ? 'INACTIVE' : 'ACTIVE')
+                  }));
+                } else if (collectionKey === 'stock_audits') {
+                  cleaned = cleaned.map((sa: any) => ({
+                    ...sa,
+                    auditedBy: sa.auditedBy || sa.auditorName || '',
+                    discrepanciesFound: sa.discrepanciesFound ?? sa.discrepanciesCount ?? 0,
+                    itemsAudited: sa.itemsAudited ?? (Array.isArray(sa.items) ? sa.items.length : 0),
+                    netAdjustmentValue: sa.netAdjustmentValue ?? 0
+                  }));
+                } else if (collectionKey === 'boms') {
+                  cleaned = cleaned.map((b: any) => ({
+                    ...b,
+                    capacityKw: b.capacityKw ?? b.systemCapacityKw ?? 0,
+                    totalCost: b.totalCost ?? b.totalEstimatedCost ?? 0
+                  }));
+                } else if (collectionKey === 'products') {
+                  cleaned = cleaned.map((p: any) => ({
+                    ...p,
+                    minStockThreshold: p.minStockThreshold ?? p.reorderLevel ?? p.minStockLevel ?? 10,
+                    sellingPrice: p.sellingPrice ?? p.unitPrice ?? 0,
+                    location: p.location || p.warehouseName || ''
+                  }));
+                } else if (collectionKey === 'notifications') {
+                  cleaned = cleaned.map((n: any) => ({
+                    ...n,
+                    read: typeof n.read === 'boolean' ? n.read : Boolean(n.isRead),
+                    timestamp: n.timestamp || n.createdAt || ''
+                  }));
                 }
                 this.memStore.set(storageKey, cleaned);
+              } else if (collectionKey === 'settings') {
+                if (typeof backendItems === 'object' && !Array.isArray(backendItems) && Object.keys(backendItems).length > 0) {
+                  this.memStore.set(storageKey, { ...initialSettings, ...backendItems });
+                }
               } else {
                 this.memStore.set(storageKey, backendItems);
               }
@@ -684,9 +737,6 @@ class StorageService {
     const customers = this.getCustomers().filter(c => c.id !== id);
     this.set(STORAGE_KEYS.CUSTOMERS, customers);
     this.deleteSync('customers', id);
-    if (typeof fetch !== 'undefined') {
-      fetch(`/api/customers/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
-    }
   }
 
   async importCustomers(customers: any[]): Promise<{
@@ -1271,9 +1321,12 @@ class StorageService {
     this.saveProject(project);
 
     if (typeof fetch !== 'undefined') {
-      fetch(`/api/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(stageIdOrKey)}`, {
+      const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
+        ? (window as any).__SOLAR_API_URL__
+        : apiClient.getBaseUrl();
+      fetch(`${apiUrl}/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(stageIdOrKey)}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiClient.getAuthHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
         body: JSON.stringify(updates)
       }).catch(err => console.warn('[Backend Stage Sync]:', err));
@@ -1504,10 +1557,6 @@ class StorageService {
     const employees = this.getEmployees().filter(e => e.id !== id);
     this.set(STORAGE_KEYS.EMPLOYEES, employees);
     this.deleteSync('employees', id);
-    if (typeof fetch !== 'undefined') {
-      fetch(`/api/employees/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
-      fetch(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
-    }
   }
 
   async importEmployees(employees: any[]): Promise<{
@@ -1938,7 +1987,8 @@ class StorageService {
 
   markNotificationAsRead(id: string): void {
     const notifications = this.getNotifications().map(n => n.id === id ? { ...n, read: true } : n);
-    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications);
+    const updated = notifications.find(n => n.id === id);
+    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications, updated);
   }
 
   markAllNotificationsAsRead(): void {
@@ -1971,18 +2021,20 @@ class StorageService {
     const validation = validateProduct(product, products, product.id);
     assertValid(validation);
 
-    const idx = products.findIndex(p => p.id === product.id);
+    const now = new Date().toISOString();
+    const savedProduct: ProductItem = {
+      ...product,
+      id: product.id || `prod-${Date.now()}`,
+      createdAt: product.createdAt || now,
+      updatedAt: now
+    };
+    const idx = products.findIndex(p => p.id === savedProduct.id);
     if (idx >= 0) {
-      products[idx] = { ...product, updatedAt: new Date().toISOString() };
+      products[idx] = savedProduct;
     } else {
-      products.unshift({
-        ...product,
-        id: product.id || `prod-${Date.now()}`,
-        createdAt: product.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      products.unshift(savedProduct);
     }
-    this.set(STORAGE_KEYS.PRODUCTS, products, product);
+    this.set(STORAGE_KEYS.PRODUCTS, products, savedProduct);
   }
 
   deleteProduct(id: string): void {
@@ -2086,18 +2138,20 @@ class StorageService {
     const validation = validateVendor(vendor, vendors, vendor.id);
     assertValid(validation);
 
-    const idx = vendors.findIndex(v => v.id === vendor.id);
+    const now = new Date().toISOString();
+    const savedVendor: Vendor = {
+      ...vendor,
+      id: vendor.id || `vnd-${Date.now()}`,
+      createdAt: vendor.createdAt || now,
+      updatedAt: now
+    };
+    const idx = vendors.findIndex(v => v.id === savedVendor.id);
     if (idx >= 0) {
-      vendors[idx] = { ...vendor, updatedAt: new Date().toISOString() };
+      vendors[idx] = savedVendor;
     } else {
-      vendors.unshift({
-        ...vendor,
-        id: vendor.id || `vnd-${Date.now()}`,
-        createdAt: vendor.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      vendors.unshift(savedVendor);
     }
-    this.set(STORAGE_KEYS.VENDORS, vendors, vendor);
+    this.set(STORAGE_KEYS.VENDORS, vendors, savedVendor);
   }
 
   deleteVendor(id: string): void {
@@ -2385,7 +2439,7 @@ class StorageService {
     order.stockUpdated = anyReceived;
     order.updatedAt = new Date().toISOString();
 
-    this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders);
+    this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders, order);
     return order;
   }
 
@@ -2417,7 +2471,7 @@ class StorageService {
       order.status = 'RECEIVED';
       order.stockUpdated = true;
       order.updatedAt = new Date().toISOString();
-      this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders);
+      this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders, order);
     }
   }
 
@@ -2439,18 +2493,20 @@ class StorageService {
     const validation = validateBOM(bom, boms, bom.id);
     assertValid(validation);
 
-    const idx = boms.findIndex(b => b.id === bom.id);
+    const now = new Date().toISOString();
+    const savedBom: BillOfMaterials = {
+      ...bom,
+      id: bom.id || `bom-${Date.now()}`,
+      createdAt: bom.createdAt || now,
+      updatedAt: now
+    };
+    const idx = boms.findIndex(b => b.id === savedBom.id);
     if (idx >= 0) {
-      boms[idx] = { ...bom, updatedAt: new Date().toISOString() };
+      boms[idx] = savedBom;
     } else {
-      boms.unshift({
-        ...bom,
-        id: bom.id || `bom-${Date.now()}`,
-        createdAt: bom.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      boms.unshift(savedBom);
     }
-    this.set(STORAGE_KEYS.BOMS, boms, bom);
+    this.set(STORAGE_KEYS.BOMS, boms, savedBom);
   }
 
   allocateBOMStock(bomId: string, performedBy: string = 'Project Engineer'): boolean {
@@ -2498,7 +2554,7 @@ class StorageService {
         bom.status = 'APPROVED';
       }
       bom.updatedAt = new Date().toISOString();
-      this.set(STORAGE_KEYS.BOMS, boms);
+      this.set(STORAGE_KEYS.BOMS, boms, bom);
       return true;
     }
 
@@ -2587,12 +2643,13 @@ class StorageService {
 
   addStockMovement(movement: Omit<StockMovement, 'id' | 'timestamp'>): void {
     const movements = this.getStockMovements();
-    movements.unshift({
+    const newMovement: StockMovement = {
       ...movement,
       id: `sm-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: new Date().toISOString()
-    });
-    this.set(STORAGE_KEYS.STOCK_MOVEMENTS, movements);
+    };
+    movements.unshift(newMovement);
+    this.set(STORAGE_KEYS.STOCK_MOVEMENTS, movements, newMovement);
   }
 
   // ==========================================
@@ -2699,13 +2756,14 @@ class StorageService {
 
   addAclAuditLog(log: Omit<AclAuditLogEntry, 'id' | 'timestamp'>): void {
     const logs = this.getAclAuditLogs();
-    logs.unshift({
+    const newLog: AclAuditLogEntry = {
       ...log,
       id: `acl-log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: new Date().toISOString()
-    });
+    };
+    logs.unshift(newLog);
     // Keep max 50 recent audit records
-    this.set(STORAGE_KEYS.ACL_AUDIT_LOGS, logs.slice(0, 50));
+    this.set(STORAGE_KEYS.ACL_AUDIT_LOGS, logs.slice(0, 50), newLog);
   }
 
   // ==========================================
@@ -2717,18 +2775,29 @@ class StorageService {
 
   saveWarehouse(warehouse: Warehouse): void {
     const list = this.getWarehouses();
-    const idx = list.findIndex(w => w.id === warehouse.id);
-    if (warehouse.isDefault) {
+    const now = new Date().toISOString();
+    const savedWarehouse: Warehouse = {
+      ...warehouse,
+      id: warehouse.id || `wh-${Date.now()}`,
+      createdAt: warehouse.createdAt || now,
+      updatedAt: now
+    };
+    const idx = list.findIndex(w => w.id === savedWarehouse.id);
+    let defaultCleared = false;
+    if (savedWarehouse.isDefault) {
       list.forEach(w => {
-        if (w.id !== warehouse.id) w.isDefault = false;
+        if (w.id !== savedWarehouse.id && w.isDefault) {
+          w.isDefault = false;
+          defaultCleared = true;
+        }
       });
     }
     if (idx >= 0) {
-      list[idx] = { ...warehouse, updatedAt: new Date().toISOString() };
+      list[idx] = savedWarehouse;
     } else {
-      list.push({ ...warehouse, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      list.push(savedWarehouse);
     }
-    this.set(STORAGE_KEYS.WAREHOUSES, list, warehouse);
+    this.set(STORAGE_KEYS.WAREHOUSES, list, defaultCleared ? undefined : savedWarehouse);
   }
 
   deleteWarehouse(id: string): { success: boolean; message?: string } {
@@ -2755,13 +2824,18 @@ class StorageService {
 
   saveStockAudit(audit: StockAuditRecord): void {
     const list = this.getStockAudits();
-    const idx = list.findIndex(a => a.id === audit.id);
+    const savedAudit: StockAuditRecord = {
+      ...audit,
+      id: audit.id || `sa-${Date.now()}`,
+      createdAt: audit.createdAt || new Date().toISOString()
+    };
+    const idx = list.findIndex(a => a.id === savedAudit.id);
     if (idx >= 0) {
-      list[idx] = audit;
+      list[idx] = savedAudit;
     } else {
-      list.unshift(audit);
+      list.unshift(savedAudit);
     }
-    this.set(STORAGE_KEYS.STOCK_AUDITS, list, audit);
+    this.set(STORAGE_KEYS.STOCK_AUDITS, list, savedAudit);
   }
 
   transferStock(
@@ -2791,7 +2865,7 @@ class StorageService {
     prod.warehouseStocks[fromWarehouseId] = currentFromStock - quantity;
     prod.warehouseStocks[toWarehouseId] = (prod.warehouseStocks[toWarehouseId] ?? 0) + quantity;
     prod.updatedAt = new Date().toISOString();
-    this.set(STORAGE_KEYS.PRODUCTS, products);
+    this.set(STORAGE_KEYS.PRODUCTS, products, prod);
 
     this.addStockMovement({
       productId: prod.id,

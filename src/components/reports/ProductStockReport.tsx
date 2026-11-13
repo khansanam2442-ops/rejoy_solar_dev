@@ -3,6 +3,7 @@ import { ProductItem, StockMovement, StockAuditRecord, Warehouse } from '../../t
 import { ReportFilterState, ReportCategoryMeta } from '../../types/reports';
 import { exportToCSV } from '../../services/exportImport';
 import { storageService } from '../../services/storage';
+import { useApp } from '../../context/AppContext';
 import { ReportFilterBar } from './ReportFilterBar';
 import {
   Package,
@@ -45,11 +46,12 @@ export const ProductStockReport: React.FC<ProductStockReportProps> = ({
   meta,
   showToast
 }) => {
+  const { refreshTrigger } = useApp();
   const [activeReportSubTab, setActiveReportSubTab] = useState<'LEVELS' | 'MOVEMENTS' | 'AUDITS'>('LEVELS');
 
-  const warehouses = useMemo(() => storageService.getWarehouses(), []);
-  const allMovements = useMemo(() => storageService.getStockMovements(), []);
-  const allAudits = useMemo(() => storageService.getStockAudits(), []);
+  const warehouses = useMemo(() => storageService.getWarehouses(), [refreshTrigger]);
+  const allMovements = useMemo(() => storageService.getStockMovements(), [refreshTrigger]);
+  const allAudits = useMemo(() => storageService.getStockAudits(), [refreshTrigger]);
 
   // Helper to get warehouse-specific stock
   const getProductStock = (p: ProductItem, whId?: string) => {

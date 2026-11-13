@@ -3,6 +3,7 @@ import { PurchaseOrder } from '../../types/solar';
 import { ReportFilterState, ReportCategoryMeta } from '../../types/reports';
 import { exportToCSV } from '../../services/exportImport';
 import { storageService } from '../../services/storage';
+import { useApp } from '../../context/AppContext';
 import { ReportFilterBar } from './ReportFilterBar';
 import { ShoppingCart, PackageCheck, Clock, Percent, Building2, Warehouse as WarehouseIcon } from 'lucide-react';
 import {
@@ -44,7 +45,8 @@ export const PurchaseReport: React.FC<PurchaseReportProps> = ({
   meta,
   showToast
 }) => {
-  const warehouses = useMemo(() => storageService.getWarehouses(), []);
+  const { refreshTrigger } = useApp();
+  const warehouses = useMemo(() => storageService.getWarehouses(), [refreshTrigger]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter(po => {

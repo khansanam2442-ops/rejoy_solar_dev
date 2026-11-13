@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storage';
+import { apiClient } from '../../services/apiClient';
 import { SolarProject, Customer, ProjectStage } from '../../types/solar';
 import { StageCard } from '../workflow/StageCard';
 import { StatusBadge } from '../common/StatusBadge';
@@ -59,11 +60,10 @@ export const CustomerControlCenterView: React.FC = () => {
     window.addEventListener('solarpulse_storage_updated', handleStorageUpdate);
 
     // Refresh projects directly from backend MySQL to ensure latest progress
-    fetch('/api/projects', { credentials: 'include' })
-      .then(res => res.json())
-      .then(res => {
-        if (res.success && Array.isArray(res.data)) {
-          storageService.setProjectsFromBackend(res.data);
+    apiClient.getProjects()
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          storageService.setProjectsFromBackend(data);
           setLocalUpdateCounter(prev => prev + 1);
         }
       })

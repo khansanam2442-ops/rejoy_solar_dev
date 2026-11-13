@@ -318,7 +318,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (isMounted) {
             saveUserProfile(verifiedProfile, verifyRes.token || undefined);
-            storageService.hydrateFromBackend().catch(() => {});
+            await storageService.hydrateFromBackend().catch(() => {});
           }
         } else {
           if (isMounted) {
@@ -426,7 +426,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       // If an existing administrator is already authenticated, send credentials for privilege escalation authorization
-      const existingToken = apiClient.getToken() || safeStorage.getItem(AUTH_TOKEN_KEY);
+      const existingToken = apiClient.getToken();
       if (existingToken) {
         headers['Authorization'] = existingToken.startsWith('Bearer ') ? existingToken : `Bearer ${existingToken}`;
         headers['x-admin-token'] = existingToken;
@@ -436,6 +436,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch(`${apiClient.getBaseUrl()}/auth/register`, {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify({
           name: cleanName,
           email: cleanEmail,

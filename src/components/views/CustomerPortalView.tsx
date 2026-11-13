@@ -2,6 +2,7 @@ import React, { useMemo, useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storage';
+import { apiClient } from '../../services/apiClient';
 import { StatusBadge } from '../common/StatusBadge';
 import {
   SunMedium,
@@ -27,11 +28,10 @@ export const CustomerPortalView: React.FC = () => {
 
   useEffect(() => {
     // Fetch latest project progress directly from MySQL backend
-    fetch('/api/projects', { credentials: 'include' })
-      .then(res => res.json())
-      .then(res => {
-        if (res.success && Array.isArray(res.data)) {
-          storageService.setProjectsFromBackend(res.data);
+    apiClient.getProjects()
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          storageService.setProjectsFromBackend(data);
           setLocalCounter(prev => prev + 1);
         }
       })

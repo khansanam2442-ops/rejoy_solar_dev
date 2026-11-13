@@ -167,31 +167,121 @@ function ensureRequiredTables($pdo) {
         }
     }
 
-    // Auto-migrate missing columns on solar_attendance
-    try {
-        $cols = $pdo->query("SHOW COLUMNS FROM `solar_attendance` LIKE 'fuel_expense_json'")->fetchAll();
-        if (empty($cols)) {
-            $pdo->exec("ALTER TABLE `solar_attendance` ADD COLUMN `fuel_expense_json` LONGTEXT DEFAULT NULL");
-        }
-    } catch (Exception $e) {}
+    $addColIfMissing = function($table, $col, $def) use ($pdo) {
+        try {
+            $check = $pdo->query("SHOW COLUMNS FROM `$table` LIKE '$col'")->fetchAll();
+            if (empty($check)) {
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$col` $def");
+            }
+        } catch (Exception $e) {}
+    };
 
-    // Auto-migrate missing columns on solar_payslips
-    try {
-        $neededCols = [
+    $schemaMigrations = [
+        'solar_projects' => [
+            'location' => "VARCHAR(255) DEFAULT ''",
+            'latitude' => 'DECIMAL(10,7) DEFAULT NULL',
+            'longitude' => 'DECIMAL(10,7) DEFAULT NULL',
+            'system_type' => "VARCHAR(64) DEFAULT ''"
+        ],
+        'solar_employees' => [
+            'documents_json' => 'LONGTEXT DEFAULT NULL'
+        ],
+        'solar_products' => [
+            'selling_price' => 'DECIMAL(12,2) DEFAULT 0.00',
+            'location' => "VARCHAR(255) DEFAULT ''",
+            'warehouse_name' => "VARCHAR(255) DEFAULT ''",
+            'warehouse_stocks_json' => 'LONGTEXT DEFAULT NULL',
+            'preferred_vendor_id' => "VARCHAR(64) DEFAULT ''",
+            'preferred_vendor_name' => "VARCHAR(255) DEFAULT ''"
+        ],
+        'solar_purchase_orders' => [
+            'warehouse_id' => "VARCHAR(64) DEFAULT ''",
+            'warehouse_name' => "VARCHAR(255) DEFAULT ''",
+            'project_title' => "VARCHAR(255) DEFAULT ''",
+            'received_date' => 'DATE DEFAULT NULL',
+            'payment_due_date' => 'DATE DEFAULT NULL',
+            'invoice_reference' => "VARCHAR(128) DEFAULT ''",
+            'stock_updated' => 'TINYINT(1) DEFAULT 0'
+        ],
+        'solar_boms' => [
+            'project_code' => "VARCHAR(64) DEFAULT ''",
+            'customer_name' => "VARCHAR(255) DEFAULT ''",
+            'warehouse_id' => "VARCHAR(64) DEFAULT ''",
+            'warehouse_name' => "VARCHAR(255) DEFAULT ''",
+            'stock_allocated' => 'TINYINT(1) DEFAULT 0',
+            'approved_at' => 'DATETIME DEFAULT NULL',
+            'eway_bill_number' => "VARCHAR(64) DEFAULT ''",
+            'eway_bill_date' => 'DATE DEFAULT NULL'
+        ],
+        'solar_sales_invoices' => [
+            'invoice_type' => "VARCHAR(64) DEFAULT 'TAX_INVOICE'",
+            'customer_gst' => "VARCHAR(64) DEFAULT ''",
+            'customer_address' => 'TEXT DEFAULT NULL',
+            'project_title' => "VARCHAR(255) DEFAULT ''",
+            'payment_terms' => "VARCHAR(128) DEFAULT ''",
+            'status' => "VARCHAR(32) DEFAULT 'DRAFT'",
+            'deduct_stock' => 'TINYINT(1) DEFAULT 0',
+            'stock_deducted' => 'TINYINT(1) DEFAULT 0'
+        ],
+        'solar_warehouses' => [
+            'email' => "VARCHAR(191) DEFAULT ''",
+            'capacity_sqft' => 'DECIMAL(12,2) DEFAULT 0.00',
+            'is_default' => 'TINYINT(1) DEFAULT 0',
+            'status' => "VARCHAR(32) DEFAULT 'ACTIVE'",
+            'notes' => 'TEXT DEFAULT NULL'
+        ],
+        'solar_stock_movements' => [
+            'warehouse_name' => "VARCHAR(255) DEFAULT ''",
+            'target_warehouse_id' => "VARCHAR(64) DEFAULT ''",
+            'target_warehouse_name' => "VARCHAR(255) DEFAULT ''",
+            'reference_id' => "VARCHAR(64) DEFAULT ''"
+        ],
+        'solar_stock_audits' => [
+            'items_audited' => 'INT DEFAULT 0',
+            'net_adjustment_value' => 'DECIMAL(14,2) DEFAULT 0.00'
+        ],
+        'solar_notifications' => [
+            'project_name' => "VARCHAR(255) DEFAULT ''"
+        ],
+        'solar_site_surveys' => [
+            'rejection_reason' => 'TEXT DEFAULT NULL'
+        ],
+        'solar_attendance' => [
+            'fuel_expense_json' => 'LONGTEXT DEFAULT NULL',
+            'total_hours' => 'DECIMAL(6,2) DEFAULT NULL',
+            'total_duration_text' => "VARCHAR(64) DEFAULT ''",
+            'reimbursed_in_payslip_id' => "VARCHAR(64) DEFAULT ''",
+            'reimbursement_status' => "VARCHAR(32) DEFAULT ''",
+            'auth_uid' => "VARCHAR(64) DEFAULT ''",
+            'employee_code' => "VARCHAR(64) DEFAULT ''",
+            'employee_email' => "VARCHAR(191) DEFAULT ''",
+            'site_location' => "VARCHAR(255) DEFAULT ''"
+        ],
+        'solar_holidays' => [
+            'is_optional' => 'TINYINT(1) DEFAULT 0',
+            'applicable_departments_json' => 'LONGTEXT DEFAULT NULL',
+            'created_by' => "VARCHAR(128) DEFAULT ''",
+            'updated_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+        ],
+        'solar_quotations' => [
+            'extra_json' => 'LONGTEXT DEFAULT NULL'
+        ],
+        'solar_payslips' => [
             'additional_expenses_json' => 'LONGTEXT DEFAULT NULL',
             'deductions_json' => 'LONGTEXT DEFAULT NULL',
             'overtime_hours' => 'DECIMAL(6,2) DEFAULT 0.00',
             'overtime_rate' => 'DECIMAL(10,2) DEFAULT 0.00',
             'payment_mode' => "VARCHAR(64) DEFAULT 'NEFT/RTGS Bank Transfer'",
-            'bank_reference_no' => "VARCHAR(128) DEFAULT ''"
-        ];
-        foreach ($neededCols as $c => $def) {
-            $check = $pdo->query("SHOW COLUMNS FROM `solar_payslips` LIKE '$c'")->fetchAll();
-            if (empty($check)) {
-                $pdo->exec("ALTER TABLE `solar_payslips` ADD COLUMN `$c` $def");
-            }
+            'bank_reference_no' => "VARCHAR(128) DEFAULT ''",
+            'extra_json' => 'LONGTEXT DEFAULT NULL'
+        ]
+    ];
+
+    foreach ($schemaMigrations as $tbl => $cols) {
+        foreach ($cols as $c => $def) {
+            $addColIfMissing($tbl, $c, $def);
         }
-    } catch (Exception $e) {}
+    }
 
     // Auto-create centralized authentication tables (solar_auth_credentials & solar_auth_sessions)
     try {
@@ -671,11 +761,16 @@ function saveProjectToDb($pdo, $item) {
     $projectManagerName = $item['projectManagerName'] ?? $item['project_manager_name'] ?? '';
     $siteAddress = $item['siteAddress'] ?? $item['site_address'] ?? 'Site Address';
     $city = $item['city'] ?? 'Ahmedabad';
+    $location = $item['location'] ?? '';
+    $latitude = isset($item['latitude']) && $item['latitude'] !== '' ? floatval($item['latitude']) : null;
+    $longitude = isset($item['longitude']) && $item['longitude'] !== '' ? floatval($item['longitude']) : null;
+    $systemType = $item['systemType'] ?? $item['system_type'] ?? '';
     $inverterModel = $item['inverterModel'] ?? $item['inverter_model'] ?? '';
     $panelModel = $item['panelModel'] ?? $item['panel_model'] ?? '';
     $structureType = $item['structureType'] ?? $item['structure_type'] ?? 'Elevated GI Structure';
     $startDate = !empty($item['startDate'] ?? $item['start_date']) ? substr($item['startDate'] ?? $item['start_date'], 0, 10) : null;
     $expectedCompletionDate = !empty($item['expectedCompletionDate'] ?? $item['expected_completion_date']) ? substr($item['expectedCompletionDate'] ?? $item['expected_completion_date'], 0, 10) : null;
+    $actualCompletionDate = !empty($item['actualCompletionDate'] ?? $item['actual_completion_date']) ? substr($item['actualCompletionDate'] ?? $item['actual_completion_date'], 0, 10) : null;
     $notes = $item['notes'] ?? '';
     $assignedUsers = $item['assignedUsers'] ?? $item['assignments'] ?? [];
     $assignmentsJson = is_string($assignedUsers) ? $assignedUsers : json_encode($assignedUsers);
@@ -685,10 +780,10 @@ function saveProjectToDb($pdo, $item) {
             `id`, `project_code`, `customer_id`, `customer_name`, `title`,
             `capacity_kw`, `total_value`, `status`, `current_stage_key`,
             `completion_percentage`, `project_manager_id`, `project_manager_name`,
-            `site_address`, `city`, `inverter_model`, `panel_model`,
-            `structure_type`, `start_date`, `expected_completion_date`,
-            `notes`, `assignments_json`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `site_address`, `city`, `location`, `latitude`, `longitude`, `system_type`,
+            `inverter_model`, `panel_model`, `structure_type`, `start_date`,
+            `expected_completion_date`, `actual_completion_date`, `notes`, `assignments_json`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `customer_name` = VALUES(`customer_name`),
             `title` = VALUES(`title`),
@@ -701,11 +796,16 @@ function saveProjectToDb($pdo, $item) {
             `project_manager_name` = VALUES(`project_manager_name`),
             `site_address` = VALUES(`site_address`),
             `city` = VALUES(`city`),
+            `location` = VALUES(`location`),
+            `latitude` = VALUES(`latitude`),
+            `longitude` = VALUES(`longitude`),
+            `system_type` = VALUES(`system_type`),
             `inverter_model` = VALUES(`inverter_model`),
             `panel_model` = VALUES(`panel_model`),
             `structure_type` = VALUES(`structure_type`),
             `start_date` = VALUES(`start_date`),
             `expected_completion_date` = VALUES(`expected_completion_date`),
+            `actual_completion_date` = VALUES(`actual_completion_date`),
             `notes` = VALUES(`notes`),
             `assignments_json` = VALUES(`assignments_json`)
     ");
@@ -713,9 +813,9 @@ function saveProjectToDb($pdo, $item) {
         $item['id'], $projectCode, $customerId, $customerName, $title,
         $capacityKw, $totalValue, $status, $currentStageKey,
         $completionPercentage, $projectManagerId, $projectManagerName,
-        $siteAddress, $city, $inverterModel, $panelModel,
-        $structureType, $startDate, $expectedCompletionDate,
-        $notes, $assignmentsJson
+        $siteAddress, $city, $location, $latitude, $longitude, $systemType,
+        $inverterModel, $panelModel, $structureType, $startDate,
+        $expectedCompletionDate, $actualCompletionDate, $notes, $assignmentsJson
     ]);
 
     // Also persist stages into solar_project_stages if present
@@ -796,14 +896,16 @@ function saveEmployeeToDb($pdo, $item) {
     $systemRole = $item['systemRole'] ?? $item['system_role'] ?? 'Super Admin';
     $isFieldWorker = (!empty($item['isFieldWorker']) || !empty($item['is_field_worker'])) ? 1 : 0;
     $accountStatus = $item['accountStatus'] ?? $item['account_status'] ?? 'ACTIVE';
+    $documents = $item['documents'] ?? [];
+    $documentsJson = is_string($documents) ? $documents : json_encode($documents);
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_employees` (
             `id`, `employee_code`, `name`, `photo_url`, `department`,
             `designation`, `phone`, `email`, `joining_date`, `salary_monthly`,
             `status`, `current_site_location`, `login_enabled`, `system_role`,
-            `is_field_worker`, `account_status`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `is_field_worker`, `account_status`, `documents_json`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `name` = VALUES(`name`),
             `photo_url` = VALUES(`photo_url`),
@@ -818,13 +920,14 @@ function saveEmployeeToDb($pdo, $item) {
             `login_enabled` = VALUES(`login_enabled`),
             `system_role` = VALUES(`system_role`),
             `is_field_worker` = VALUES(`is_field_worker`),
-            `account_status` = VALUES(`account_status`)
+            `account_status` = VALUES(`account_status`),
+            `documents_json` = VALUES(`documents_json`)
     ");
     $stmt->execute([
         $item['id'], $code, $name, $photoUrl, $dept,
         $desig, $phone, $email, $joiningDate, $salary,
         $status, $siteLoc, $loginEnabled, $systemRole,
-        $isFieldWorker, $accountStatus
+        $isFieldWorker, $accountStatus, $documentsJson
     ]);
 
     // Ensure authoritative base table solar_employee is also updated
@@ -965,7 +1068,8 @@ function saveExpenseToDb($pdo, $item) {
     $vendorName = $item['vendorName'] ?? $item['vendor_name'] ?? 'Vendor';
     $category = $item['category'] ?? 'Miscellaneous';
     $amount = floatval($item['amount'] ?? 0);
-    $expDate = !empty($item['expenseDate'] ?? $item['expense_date']) ? substr($item['expenseDate'] ?? $item['expense_date'], 0, 10) : date('Y-m-d');
+    $rawExpDate = $item['expenseDate'] ?? $item['date'] ?? $item['expense_date'] ?? null;
+    $expDate = !empty($rawExpDate) ? substr($rawExpDate, 0, 10) : date('Y-m-d');
     $mode = $item['paymentMode'] ?? $item['payment_mode'] ?? 'Bank Payment';
     $refNo = $item['referenceNo'] ?? $item['reference_no'] ?? '';
     $notes = $item['notes'] ?? '';
@@ -1008,21 +1112,30 @@ function saveProductToDb($pdo, $item) {
     $brand = $item['brand'] ?? '';
     $model = $item['model'] ?? '';
     $specs = $item['specifications'] ?? $item['specification'] ?? '';
-    $unit = $item['unit'] ?? 'Nos';
+    $unit = $item['unit'] ?? 'NOS';
     $hsnCode = $item['hsnCode'] ?? $item['hsn_code'] ?? '';
     $gstRate = floatval($item['gstRate'] ?? $item['taxRate'] ?? $item['gst_rate'] ?? 18);
     $unitPrice = floatval($item['unitPrice'] ?? $item['unit_price'] ?? 0);
+    $sellingPrice = floatval($item['sellingPrice'] ?? $item['selling_price'] ?? 0);
     $currentStock = floatval($item['currentStock'] ?? $item['current_stock'] ?? 0);
-    $reorderLevel = floatval($item['reorderLevel'] ?? $item['minStockLevel'] ?? $item['reorder_level'] ?? 10);
+    $reorderLevel = floatval($item['minStockThreshold'] ?? $item['reorderLevel'] ?? $item['minStockLevel'] ?? $item['reorder_level'] ?? 10);
+    $location = $item['location'] ?? '';
     $warehouseId = $item['warehouseId'] ?? $item['warehouse_id'] ?? '';
+    $warehouseName = $item['warehouseName'] ?? $item['warehouse_name'] ?? '';
+    $whStocks = $item['warehouseStocks'] ?? $item['warehouse_stocks'] ?? null;
+    $whStocksJson = $whStocks !== null ? (is_string($whStocks) ? $whStocks : json_encode($whStocks)) : null;
+    $prefVendorId = $item['preferredVendorId'] ?? $item['preferred_vendor_id'] ?? '';
+    $prefVendorName = $item['preferredVendorName'] ?? $item['preferred_vendor_name'] ?? '';
     $status = $item['status'] ?? 'ACTIVE';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_products` (
             `id`, `name`, `sku`, `category`, `brand`, `model`,
             `specifications`, `unit`, `hsn_code`, `gst_rate`,
-            `unit_price`, `current_stock`, `reorder_level`, `warehouse_id`, `status`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `unit_price`, `selling_price`, `current_stock`, `reorder_level`,
+            `location`, `warehouse_id`, `warehouse_name`, `warehouse_stocks_json`,
+            `preferred_vendor_id`, `preferred_vendor_name`, `status`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `name` = VALUES(`name`),
             `sku` = VALUES(`sku`),
@@ -1034,15 +1147,23 @@ function saveProductToDb($pdo, $item) {
             `hsn_code` = VALUES(`hsn_code`),
             `gst_rate` = VALUES(`gst_rate`),
             `unit_price` = VALUES(`unit_price`),
+            `selling_price` = VALUES(`selling_price`),
             `current_stock` = VALUES(`current_stock`),
             `reorder_level` = VALUES(`reorder_level`),
+            `location` = VALUES(`location`),
             `warehouse_id` = VALUES(`warehouse_id`),
+            `warehouse_name` = VALUES(`warehouse_name`),
+            `warehouse_stocks_json` = VALUES(`warehouse_stocks_json`),
+            `preferred_vendor_id` = VALUES(`preferred_vendor_id`),
+            `preferred_vendor_name` = VALUES(`preferred_vendor_name`),
             `status` = VALUES(`status`)
     ");
     $stmt->execute([
         $item['id'], $name, $sku, $category, $brand, $model,
         $specs, $unit, $hsnCode, $gstRate,
-        $unitPrice, $currentStock, $reorderLevel, $warehouseId, $status
+        $unitPrice, $sellingPrice, $currentStock, $reorderLevel,
+        $location, $warehouseId, $warehouseName, $whStocksJson,
+        $prefVendorId, $prefVendorName, $status
     ]);
     return $item;
 }
@@ -1099,46 +1220,68 @@ function saveVendorToDb($pdo, $item) {
 // Helper: Purchase Orders
 function savePurchaseOrderToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'po-' . round(microtime(true) * 1000);
-    $poNumber = $item['poNumber'] ?? $item['po_number'] ?? $item['id'];
+    $poNumber = $item['purchaseNumber'] ?? $item['poNumber'] ?? $item['po_number'] ?? $item['id'];
     $vendorId = $item['vendorId'] ?? $item['vendor_id'] ?? '';
     $vendorName = $item['vendorName'] ?? $item['vendor_name'] ?? 'Vendor';
-    $poDate = !empty($item['poDate'] ?? $item['orderDate'] ?? $item['po_date']) ? substr($item['poDate'] ?? $item['orderDate'] ?? $item['po_date'], 0, 10) : date('Y-m-d');
+    $rawPoDate = $item['purchaseDate'] ?? $item['poDate'] ?? $item['orderDate'] ?? $item['po_date'] ?? null;
+    $poDate = !empty($rawPoDate) ? substr($rawPoDate, 0, 10) : date('Y-m-d');
     $expDate = !empty($item['expectedDeliveryDate'] ?? $item['expected_delivery_date']) ? substr($item['expectedDeliveryDate'] ?? $item['expected_delivery_date'], 0, 10) : null;
+    $receivedDate = !empty($item['receivedDate'] ?? $item['received_date']) ? substr($item['receivedDate'] ?? $item['received_date'], 0, 10) : null;
     $projectId = $item['projectId'] ?? $item['project_id'] ?? '';
+    $projectTitle = $item['projectTitle'] ?? $item['project_title'] ?? '';
+    $warehouseId = $item['warehouseId'] ?? $item['warehouse_id'] ?? '';
+    $warehouseName = $item['warehouseName'] ?? $item['warehouse_name'] ?? '';
     $items = $item['items'] ?? [];
     $itemsJson = is_string($items) ? $items : json_encode($items);
     $subtotal = floatval($item['subtotal'] ?? 0);
-    $gstAmount = floatval($item['gstAmount'] ?? $item['taxAmount'] ?? $item['gst_amount'] ?? 0);
+    $gstAmount = floatval($item['taxAmount'] ?? $item['gstAmount'] ?? $item['gst_amount'] ?? 0);
     $totalAmount = floatval($item['totalAmount'] ?? $item['grandTotal'] ?? $item['total_amount'] ?? ($subtotal + $gstAmount));
-    $status = $item['status'] ?? 'ISSUED';
-    $paymentStatus = $item['paymentStatus'] ?? $item['payment_status'] ?? 'PENDING';
-    $receipts = $item['receipts'] ?? [];
+    $status = $item['status'] ?? 'ORDERED';
+    $paymentStatus = $item['paymentStatus'] ?? $item['payment_status'] ?? 'UNPAID';
+    $paymentDueDate = !empty($item['paymentDueDate'] ?? $item['payment_due_date']) ? substr($item['paymentDueDate'] ?? $item['payment_due_date'], 0, 10) : null;
+    $invoiceRef = $item['invoiceReference'] ?? $item['invoice_reference'] ?? '';
+    $stockUpdated = !empty($item['stockUpdated'] ?? $item['stock_updated']) ? 1 : 0;
+    $receipts = $item['deliveryReceipts'] ?? $item['receipts'] ?? [];
     $receiptsJson = is_string($receipts) ? $receipts : json_encode($receipts);
     $notes = $item['notes'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_purchase_orders` (
             `id`, `po_number`, `vendor_id`, `vendor_name`, `po_date`,
-            `expected_delivery_date`, `project_id`, `items_json`, `subtotal`,
+            `expected_delivery_date`, `received_date`, `project_id`, `project_title`,
+            `warehouse_id`, `warehouse_name`, `items_json`, `subtotal`,
             `gst_amount`, `total_amount`, `status`, `payment_status`,
+            `payment_due_date`, `invoice_reference`, `stock_updated`,
             `receipts_json`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
+            `vendor_id` = VALUES(`vendor_id`),
             `vendor_name` = VALUES(`vendor_name`),
+            `po_date` = VALUES(`po_date`),
             `expected_delivery_date` = VALUES(`expected_delivery_date`),
+            `received_date` = VALUES(`received_date`),
+            `project_id` = VALUES(`project_id`),
+            `project_title` = VALUES(`project_title`),
+            `warehouse_id` = VALUES(`warehouse_id`),
+            `warehouse_name` = VALUES(`warehouse_name`),
             `subtotal` = VALUES(`subtotal`),
             `gst_amount` = VALUES(`gst_amount`),
             `total_amount` = VALUES(`total_amount`),
             `status` = VALUES(`status`),
             `payment_status` = VALUES(`payment_status`),
+            `payment_due_date` = VALUES(`payment_due_date`),
+            `invoice_reference` = VALUES(`invoice_reference`),
+            `stock_updated` = VALUES(`stock_updated`),
             `items_json` = VALUES(`items_json`),
             `receipts_json` = VALUES(`receipts_json`),
             `notes` = VALUES(`notes`)
     ");
     $stmt->execute([
         $item['id'], $poNumber, $vendorId, $vendorName, $poDate,
-        $expDate, $projectId, $itemsJson, $subtotal,
+        $expDate, $receivedDate, $projectId, $projectTitle,
+        $warehouseId, $warehouseName, $itemsJson, $subtotal,
         $gstAmount, $totalAmount, $status, $paymentStatus,
+        $paymentDueDate, $invoiceRef, $stockUpdated,
         $receiptsJson, $notes
     ]);
     return $item;
@@ -1149,35 +1292,57 @@ function saveBOMToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'bom-' . round(microtime(true) * 1000);
     $bomNumber = $item['bomNumber'] ?? $item['bom_number'] ?? $item['id'];
     $projectId = $item['projectId'] ?? $item['project_id'] ?? '';
+    $projectCode = $item['projectCode'] ?? $item['project_code'] ?? '';
     $projectTitle = $item['projectTitle'] ?? $item['project_title'] ?? 'Solar Project Installation';
-    $capacityKw = floatval($item['systemCapacityKw'] ?? $item['capacityKw'] ?? $item['system_capacity_kw'] ?? 0);
+    $customerName = $item['customerName'] ?? $item['customer_name'] ?? '';
+    $capacityKw = floatval($item['capacityKw'] ?? $item['systemCapacityKw'] ?? $item['system_capacity_kw'] ?? 0);
     $version = $item['version'] ?? '1.0';
+    $warehouseId = $item['warehouseId'] ?? $item['warehouse_id'] ?? '';
+    $warehouseName = $item['warehouseName'] ?? $item['warehouse_name'] ?? '';
     $status = $item['status'] ?? 'APPROVED';
     $items = $item['items'] ?? [];
     $itemsJson = is_string($items) ? $items : json_encode($items);
-    $totalCost = floatval($item['totalEstimatedCost'] ?? $item['totalCost'] ?? $item['total_estimated_cost'] ?? 0);
+    $totalCost = floatval($item['totalCost'] ?? $item['totalEstimatedCost'] ?? $item['total_estimated_cost'] ?? 0);
     $createdBy = $item['createdBy'] ?? $item['created_by'] ?? '';
     $approvedBy = $item['approvedBy'] ?? $item['approved_by'] ?? '';
+    $approvedAt = !empty($item['approvedAt'] ?? $item['approved_at']) ? date('Y-m-d H:i:s', strtotime($item['approvedAt'] ?? $item['approved_at'])) : null;
+    $stockAllocated = !empty($item['stockAllocated'] ?? $item['stock_allocated']) ? 1 : 0;
+    $ewayBillNo = $item['ewayBillNumber'] ?? $item['eway_bill_number'] ?? '';
+    $ewayBillDate = !empty($item['ewayBillDate'] ?? $item['eway_bill_date']) ? substr($item['ewayBillDate'] ?? $item['eway_bill_date'], 0, 10) : null;
     $notes = $item['notes'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_boms` (
-            `id`, `bom_number`, `project_id`, `project_title`, `system_capacity_kw`,
-            `version`, `status`, `items_json`, `total_estimated_cost`, `created_by`, `approved_by`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `id`, `bom_number`, `project_id`, `project_code`, `project_title`,
+            `customer_name`, `system_capacity_kw`, `version`, `warehouse_id`, `warehouse_name`,
+            `status`, `items_json`, `total_estimated_cost`, `created_by`,
+            `approved_by`, `approved_at`, `stock_allocated`, `eway_bill_number`,
+            `eway_bill_date`, `notes`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
+            `project_code` = VALUES(`project_code`),
             `project_title` = VALUES(`project_title`),
+            `customer_name` = VALUES(`customer_name`),
             `system_capacity_kw` = VALUES(`system_capacity_kw`),
             `version` = VALUES(`version`),
+            `warehouse_id` = VALUES(`warehouse_id`),
+            `warehouse_name` = VALUES(`warehouse_name`),
             `status` = VALUES(`status`),
             `items_json` = VALUES(`items_json`),
             `total_estimated_cost` = VALUES(`total_estimated_cost`),
             `approved_by` = VALUES(`approved_by`),
+            `approved_at` = VALUES(`approved_at`),
+            `stock_allocated` = VALUES(`stock_allocated`),
+            `eway_bill_number` = VALUES(`eway_bill_number`),
+            `eway_bill_date` = VALUES(`eway_bill_date`),
             `notes` = VALUES(`notes`)
     ");
     $stmt->execute([
-        $item['id'], $bomNumber, $projectId, $projectTitle, $capacityKw,
-        $version, $status, $itemsJson, $totalCost, $createdBy, $approvedBy, $notes
+        $item['id'], $bomNumber, $projectId, $projectCode, $projectTitle,
+        $customerName, $capacityKw, $version, $warehouseId, $warehouseName,
+        $status, $itemsJson, $totalCost, $createdBy,
+        $approvedBy, $approvedAt, $stockAllocated, $ewayBillNo,
+        $ewayBillDate, $notes
     ]);
     return $item;
 }
@@ -1186,19 +1351,27 @@ function saveBOMToDb($pdo, $item) {
 function saveSalesInvoiceToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'inv-' . round(microtime(true) * 1000);
     $invNumber = $item['invoiceNumber'] ?? $item['invoice_number'] ?? $item['id'];
+    $invType = $item['invoiceType'] ?? $item['invoice_type'] ?? 'TAX_INVOICE';
     $projectId = $item['projectId'] ?? $item['project_id'] ?? '';
+    $projectTitle = $item['projectTitle'] ?? $item['project_title'] ?? '';
     $customerId = $item['customerId'] ?? $item['customer_id'] ?? '';
     $customerName = $item['customerName'] ?? $item['customer_name'] ?? 'Customer';
+    $customerGst = $item['customerGst'] ?? $item['customer_gst'] ?? '';
+    $customerAddress = $item['customerAddress'] ?? $item['customer_address'] ?? '';
     $invDate = !empty($item['invoiceDate'] ?? $item['invoice_date']) ? substr($item['invoiceDate'] ?? $item['invoice_date'], 0, 10) : date('Y-m-d');
     $dueDate = !empty($item['dueDate'] ?? $item['due_date']) ? substr($item['dueDate'] ?? $item['due_date'], 0, 10) : null;
     $items = $item['items'] ?? [];
     $itemsJson = is_string($items) ? $items : json_encode($items);
     $subtotal = floatval($item['subtotal'] ?? 0);
-    $gstAmount = floatval($item['gstAmount'] ?? $item['gst_amount'] ?? 0);
+    $gstAmount = floatval($item['taxAmount'] ?? $item['gstAmount'] ?? $item['gst_amount'] ?? 0);
     $totalAmount = floatval($item['totalAmount'] ?? $item['total_amount'] ?? ($subtotal + $gstAmount));
-    $paymentStatus = $item['paymentStatus'] ?? $item['payment_status'] ?? 'UNPAID';
-    $paidAmount = floatval($item['paidAmount'] ?? $item['paid_amount'] ?? 0);
-    $balanceAmount = floatval($item['balanceAmount'] ?? $item['balance_amount'] ?? ($totalAmount - $paidAmount));
+    $status = $item['status'] ?? $item['paymentStatus'] ?? $item['payment_status'] ?? 'DRAFT';
+    $paymentStatus = $item['paymentStatus'] ?? $item['payment_status'] ?? $status;
+    $paidAmount = floatval($item['paidAmount'] ?? $item['paid_amount'] ?? ($status === 'PAID' ? $totalAmount : 0));
+    $balanceAmount = floatval($item['balanceAmount'] ?? $item['balance_amount'] ?? max(0, $totalAmount - $paidAmount));
+    $paymentTerms = $item['paymentTerms'] ?? $item['payment_terms'] ?? '';
+    $deductStock = !empty($item['deductStock'] ?? $item['deduct_stock']) ? 1 : 0;
+    $stockDeducted = !empty($item['stockDeducted'] ?? $item['stock_deducted']) ? 1 : 0;
     $ewayBill = $item['ewayBillNumber'] ?? $item['eway_bill_number'] ?? '';
     $ewayDetails = $item['ewayBillDetails'] ?? $item['eway_bill_details_json'] ?? null;
     $ewayDetailsJson = $ewayDetails ? (is_string($ewayDetails) ? $ewayDetails : json_encode($ewayDetails)) : null;
@@ -1207,30 +1380,43 @@ function saveSalesInvoiceToDb($pdo, $item) {
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_sales_invoices` (
-            `id`, `invoice_number`, `project_id`, `customer_id`, `customer_name`,
+            `id`, `invoice_number`, `invoice_type`, `project_id`, `project_title`,
+            `customer_id`, `customer_name`, `customer_gst`, `customer_address`,
             `invoice_date`, `due_date`, `items_json`, `subtotal`, `gst_amount`,
-            `total_amount`, `payment_status`, `paid_amount`, `balance_amount`,
+            `total_amount`, `status`, `payment_status`, `paid_amount`, `balance_amount`,
+            `payment_terms`, `deduct_stock`, `stock_deducted`,
             `eway_bill_number`, `eway_bill_details_json`, `warehouse_id`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
+            `invoice_type` = VALUES(`invoice_type`),
+            `project_id` = VALUES(`project_id`),
+            `project_title` = VALUES(`project_title`),
             `customer_name` = VALUES(`customer_name`),
+            `customer_gst` = VALUES(`customer_gst`),
+            `customer_address` = VALUES(`customer_address`),
             `due_date` = VALUES(`due_date`),
             `items_json` = VALUES(`items_json`),
             `subtotal` = VALUES(`subtotal`),
             `gst_amount` = VALUES(`gst_amount`),
             `total_amount` = VALUES(`total_amount`),
+            `status` = VALUES(`status`),
             `payment_status` = VALUES(`payment_status`),
             `paid_amount` = VALUES(`paid_amount`),
             `balance_amount` = VALUES(`balance_amount`),
+            `payment_terms` = VALUES(`payment_terms`),
+            `deduct_stock` = VALUES(`deduct_stock`),
+            `stock_deducted` = VALUES(`stock_deducted`),
             `eway_bill_number` = VALUES(`eway_bill_number`),
             `eway_bill_details_json` = VALUES(`eway_bill_details_json`),
             `warehouse_id` = VALUES(`warehouse_id`),
             `notes` = VALUES(`notes`)
     ");
     $stmt->execute([
-        $item['id'], $invNumber, $projectId, $customerId, $customerName,
+        $item['id'], $invNumber, $invType, $projectId, $projectTitle,
+        $customerId, $customerName, $customerGst, $customerAddress,
         $invDate, $dueDate, $itemsJson, $subtotal, $gstAmount,
-        $totalAmount, $paymentStatus, $paidAmount, $balanceAmount,
+        $totalAmount, $status, $paymentStatus, $paidAmount, $balanceAmount,
+        $paymentTerms, $deductStock, $stockDeducted,
         $ewayBill, $ewayDetailsJson, $warehouseId, $notes
     ]);
     return $item;
@@ -1241,25 +1427,36 @@ function saveAttendanceToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'att-' . round(microtime(true) * 1000);
     $empId = $item['employeeId'] ?? $item['employee_id'] ?? '';
     $empName = $item['employeeName'] ?? $item['employee_name'] ?? 'Employee';
-    $attDate = !empty($item['attendanceDate'] ?? $item['attendance_date']) ? substr($item['attendanceDate'] ?? $item['attendance_date'], 0, 10) : date('Y-m-d');
+    $rawAttDate = $item['attendanceDate'] ?? $item['date'] ?? $item['attendance_date'] ?? null;
+    $attDate = !empty($rawAttDate) ? substr($rawAttDate, 0, 10) : date('Y-m-d');
     $checkInTime = $item['checkInTime'] ?? $item['check_in_time'] ?? '09:00';
     $checkOutTime = $item['checkOutTime'] ?? $item['check_out_time'] ?? null;
-    $checkInGps = $item['checkInGps'] ?? $item['check_in_gps_json'] ?? null;
+    $checkInGps = $item['gpsCheckIn'] ?? $item['checkInGps'] ?? $item['check_in_gps_json'] ?? null;
     $checkInGpsJson = $checkInGps ? (is_string($checkInGps) ? $checkInGps : json_encode($checkInGps)) : null;
-    $checkOutGps = $item['checkOutGps'] ?? $item['check_out_gps_json'] ?? null;
+    $checkOutGps = $item['gpsCheckOut'] ?? $item['checkOutGps'] ?? $item['check_out_gps_json'] ?? null;
     $checkOutGpsJson = $checkOutGps ? (is_string($checkOutGps) ? $checkOutGps : json_encode($checkOutGps)) : null;
     $projId = $item['siteProjectId'] ?? $item['site_project_id'] ?? '';
     $projTitle = $item['siteProjectTitle'] ?? $item['site_project_title'] ?? '';
     $status = $item['status'] ?? 'PRESENT';
     $fuelExpense = $item['fuelExpense'] ?? $item['fuel_expense'] ?? $item['fuel_expense_json'] ?? null;
     $fuelExpenseJson = $fuelExpense ? (is_string($fuelExpense) ? $fuelExpense : json_encode($fuelExpense)) : null;
+    $totalHours = isset($item['totalHours']) && $item['totalHours'] !== '' ? floatval($item['totalHours']) : null;
+    $totalDurationText = $item['totalDurationText'] ?? $item['total_duration_text'] ?? '';
+    $reimbursedPayslipId = $item['reimbursedInPayslipId'] ?? $item['reimbursed_in_payslip_id'] ?? '';
+    $reimbursementStatus = $item['reimbursementStatus'] ?? $item['reimbursement_status'] ?? '';
+    $authUid = $item['authUid'] ?? $item['auth_uid'] ?? '';
+    $empCode = $item['employeeCode'] ?? $item['employee_code'] ?? '';
+    $empEmail = $item['employeeEmail'] ?? $item['employee_email'] ?? '';
+    $siteLoc = $item['siteLocation'] ?? $item['site_location'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_attendance` (
             `id`, `employee_id`, `employee_name`, `attendance_date`, `check_in_time`,
             `check_out_time`, `check_in_gps_json`, `check_out_gps_json`, `site_project_id`,
-            `site_project_title`, `status`, `fuel_expense_json`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `site_project_title`, `status`, `fuel_expense_json`,
+            `total_hours`, `total_duration_text`, `reimbursed_in_payslip_id`, `reimbursement_status`,
+            `auth_uid`, `employee_code`, `employee_email`, `site_location`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `employee_name` = VALUES(`employee_name`),
             `attendance_date` = VALUES(`attendance_date`),
@@ -1270,12 +1467,22 @@ function saveAttendanceToDb($pdo, $item) {
             `site_project_id` = VALUES(`site_project_id`),
             `site_project_title` = VALUES(`site_project_title`),
             `status` = VALUES(`status`),
-            `fuel_expense_json` = VALUES(`fuel_expense_json`)
+            `fuel_expense_json` = VALUES(`fuel_expense_json`),
+            `total_hours` = VALUES(`total_hours`),
+            `total_duration_text` = VALUES(`total_duration_text`),
+            `reimbursed_in_payslip_id` = VALUES(`reimbursed_in_payslip_id`),
+            `reimbursement_status` = VALUES(`reimbursement_status`),
+            `auth_uid` = VALUES(`auth_uid`),
+            `employee_code` = VALUES(`employee_code`),
+            `employee_email` = VALUES(`employee_email`),
+            `site_location` = VALUES(`site_location`)
     ");
     $stmt->execute([
         $item['id'], $empId, $empName, $attDate, $checkInTime,
         $checkOutTime, $checkInGpsJson, $checkOutGpsJson, $projId,
-        $projTitle, $status, $fuelExpenseJson
+        $projTitle, $status, $fuelExpenseJson,
+        $totalHours, $totalDurationText, $reimbursedPayslipId, $reimbursementStatus,
+        $authUid, $empCode, $empEmail, $siteLoc
     ]);
     return $item;
 }
@@ -1303,6 +1510,14 @@ function savePayslipToDb($pdo, $item) {
     $overtimeRate = floatval($item['overtimeRatePerHour'] ?? $item['overtime_rate'] ?? 0);
     $paymentMode = $item['paymentMode'] ?? $item['payment_mode'] ?? 'NEFT/RTGS Bank Transfer';
     $bankRefNo = $item['bankReferenceNo'] ?? $item['bank_reference_no'] ?? '';
+    $extraJson = json_encode([
+        'payslipNumber' => $item['payslipNumber'] ?? $item['id'],
+        'employeeCode' => $item['employeeCode'] ?? $empId,
+        'department' => $item['department'] ?? '',
+        'designation' => $item['designation'] ?? '',
+        'generatedDate' => $item['generatedDate'] ?? date('Y-m-d'),
+        'overtimeType' => $item['overtimeType'] ?? ($overtimeHours > 0 ? 'CALCULATED' : 'DIRECT')
+    ]);
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_payslips` (
@@ -1310,8 +1525,8 @@ function savePayslipToDb($pdo, $item) {
             `basic_salary`, `allowances`, `deductions`, `net_salary`,
             `payment_status`, `payment_date`, `notes`,
             `additional_expenses_json`, `deductions_json`, `overtime_hours`, `overtime_rate`,
-            `payment_mode`, `bank_reference_no`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `payment_mode`, `bank_reference_no`, `extra_json`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `employee_name` = VALUES(`employee_name`),
             `month` = VALUES(`month`),
@@ -1328,14 +1543,15 @@ function savePayslipToDb($pdo, $item) {
             `overtime_hours` = VALUES(`overtime_hours`),
             `overtime_rate` = VALUES(`overtime_rate`),
             `payment_mode` = VALUES(`payment_mode`),
-            `bank_reference_no` = VALUES(`bank_reference_no`)
+            `bank_reference_no` = VALUES(`bank_reference_no`),
+            `extra_json` = VALUES(`extra_json`)
     ");
     $stmt->execute([
         $item['id'], $empId, $empName, $month, $year,
         $basic, $allow, $ded, $net,
         $status, $payDate, $notes,
         $additionalExpensesJson, $deductionsJson, $overtimeHours, $overtimeRate,
-        $paymentMode, $bankRefNo
+        $paymentMode, $bankRefNo, $extraJson
     ]);
     return $item;
 }
@@ -1345,20 +1561,63 @@ function saveHolidayToDb($pdo, $item) {
     if (empty($item['id'])) $item['id'] = 'hol-' . round(microtime(true) * 1000);
     $name = $item['name'] ?? 'Holiday';
     $hDate = !empty($item['holidayDate'] ?? $item['date'] ?? $item['holiday_date']) ? substr($item['holidayDate'] ?? $item['date'] ?? $item['holiday_date'], 0, 10) : date('Y-m-d');
-    $type = $item['type'] ?? 'Mandatory';
+    $type = $item['type'] ?? 'NATIONAL';
     $desc = $item['description'] ?? '';
+    $isOptional = !empty($item['isOptional'] ?? $item['is_optional']) ? 1 : 0;
+    $appDepts = $item['applicableDepartments'] ?? $item['applicable_departments'] ?? [];
+    $appDeptsJson = is_string($appDepts) ? $appDepts : json_encode($appDepts);
+    $createdBy = $item['createdBy'] ?? $item['created_by'] ?? '';
 
     $stmt = $pdo->prepare("
-        INSERT INTO `solar_holidays` (`id`, `name`, `holiday_date`, `type`, `description`)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO `solar_holidays` (
+            `id`, `name`, `holiday_date`, `type`, `description`,
+            `is_optional`, `applicable_departments_json`, `created_by`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `name` = VALUES(`name`),
             `holiday_date` = VALUES(`holiday_date`),
             `type` = VALUES(`type`),
-            `description` = VALUES(`description`)
+            `description` = VALUES(`description`),
+            `is_optional` = VALUES(`is_optional`),
+            `applicable_departments_json` = VALUES(`applicable_departments_json`),
+            `created_by` = VALUES(`created_by`)
     ");
-    $stmt->execute([$item['id'], $name, $hDate, $type, $desc]);
+    $stmt->execute([$item['id'], $name, $hDate, $type, $desc, $isOptional, $appDeptsJson, $createdBy]);
     return $item;
+}
+
+// Helper: Format Quotation Row consistently
+function formatQuotationRow($r) {
+    $extra = json_decode($r['extra_json'] ?? '{}', true);
+    if (!is_array($extra)) $extra = [];
+    $base = [
+        'id' => $r['id'],
+        'quotationNumber' => $r['quotation_number'],
+        'quotationDate' => $extra['quotationDate'] ?? (!empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d')),
+        'customerId' => $r['customer_id'] ?? '',
+        'customerName' => $r['customer_name'],
+        'projectId' => $r['project_id'] ?? '',
+        'capacityKw' => floatval($r['capacity_kw'] ?? 0),
+        'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
+        'baseAmount' => floatval($r['base_amount'] ?? 0),
+        'taxAmount' => floatval($r['tax_amount'] ?? 0),
+        'panelBrand' => $r['panel_brand'] ?? '',
+        'inverterBrand' => $r['inverter_brand'] ?? '',
+        'structureType' => $r['structure_type'] ?? '',
+        'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
+        'subtotal' => floatval($r['subtotal'] ?? 0),
+        'discountAmount' => floatval($r['discount_amount'] ?? 0),
+        'gstPercent' => floatval($r['gst_percent'] ?? 13.8),
+        'gstAmount' => floatval($r['gst_amount'] ?? 0),
+        'totalAmount' => floatval($r['total_amount'] ?? 0),
+        'paymentTerms' => $r['payment_terms'] ?? '',
+        'warrantyDetails' => $r['warranty_details'] ?? '',
+        'termsAndConditions' => $r['terms_and_conditions'] ?? '',
+        'status' => $r['status'] ?? 'DRAFT',
+        'validUntil' => $r['valid_until'],
+        'createdAt' => $r['created_at']
+    ];
+    return array_merge($base, $extra);
 }
 
 // Helper: Quotations
@@ -1370,23 +1629,41 @@ function saveQuotationToDb($pdo, $item) {
     $projectId = $item['projectId'] ?? $item['project_id'] ?? '';
     $capacityKw = floatval($item['capacityKw'] ?? $item['capacity_kw'] ?? 5);
     $ratePerWp = floatval($item['ratePerWp'] ?? $item['rate_per_wp'] ?? 0);
-    $baseAmount = floatval($item['baseAmount'] ?? $item['base_amount'] ?? 0);
-    $taxAmount = floatval($item['taxAmount'] ?? $item['tax_amount'] ?? 0);
+    $baseAmount = floatval($item['baseAmount'] ?? $item['baseProjectPrice'] ?? $item['base_amount'] ?? 0);
+    $taxAmount = floatval($item['taxAmount'] ?? $item['gstAmount'] ?? $item['tax_amount'] ?? 0);
     $panelBrand = $item['panelBrand'] ?? $item['panel_brand'] ?? '';
     $inverterBrand = $item['inverterBrand'] ?? $item['inverter_brand'] ?? '';
     $structureType = $item['structureType'] ?? $item['structure_type'] ?? '';
     $items = $item['items'] ?? [];
     $itemsJson = is_string($items) ? $items : json_encode($items);
-    $subtotal = floatval($item['subtotal'] ?? 0);
+    $subtotal = floatval($item['subtotal'] ?? $item['bomSubtotal'] ?? 0);
     $discount = floatval($item['discountAmount'] ?? $item['discount_amount'] ?? 0);
     $gstPercent = floatval($item['gstPercent'] ?? $item['gst_percent'] ?? 13.8);
-    $gstAmount = floatval($item['gstAmount'] ?? $item['gst_amount'] ?? 0);
-    $totalAmount = floatval($item['totalAmount'] ?? $item['total_amount'] ?? ($subtotal + $gstAmount - $discount));
+    $gstAmount = floatval($item['gstAmount'] ?? $item['gst_amount'] ?? $taxAmount);
+    $totalAmount = floatval($item['totalAmount'] ?? $item['finalProjectInvestment'] ?? $item['totalProjectCost'] ?? $item['total_amount'] ?? ($subtotal + $gstAmount - $discount));
     $paymentTerms = $item['paymentTerms'] ?? $item['payment_terms'] ?? '';
     $warranty = $item['warrantyDetails'] ?? $item['warranty_details'] ?? '';
     $terms = $item['termsAndConditions'] ?? $item['terms_and_conditions'] ?? '';
     $status = $item['status'] ?? 'DRAFT';
-    $validUntil = !empty($item['validUntil'] ?? $item['valid_until']) ? substr($item['validUntil'] ?? $item['valid_until'], 0, 10) : null;
+    $rawValidUntil = $item['validUntil'] ?? $item['validTill'] ?? $item['valid_until'] ?? null;
+    $validUntil = !empty($rawValidUntil) ? substr($rawValidUntil, 0, 10) : null;
+
+    $extraKeys = [
+        'quotationDate', 'companyName', 'customerPhone', 'customerEmail', 'siteAddress',
+        'city', 'customerGst', 'systemType', 'panelType', 'bomSubtotal',
+        'installationCharges', 'transportationCharges', 'otherCharges', 'baseProjectPrice',
+        'costPerKw', 'gstEquipmentPercent', 'gstEquipmentRate', 'gstServicesPercent',
+        'gstServicesRate', 'totalProjectCost', 'centralSubsidy', 'stateSubsidy',
+        'totalSubsidy', 'finalProjectInvestment', 'amountInWords', 'validityDays',
+        'validTill', 'paymentMilestones', 'acceptedAt', 'updatedAt'
+    ];
+    $extra = [];
+    foreach ($extraKeys as $k) {
+        if (array_key_exists($k, $item)) {
+            $extra[$k] = $item[$k];
+        }
+    }
+    $extraJson = json_encode($extra);
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_quotations` (
@@ -1394,10 +1671,12 @@ function saveQuotationToDb($pdo, $item) {
             `capacity_kw`, `rate_per_wp`, `base_amount`, `tax_amount`, `panel_brand`,
             `inverter_brand`, `structure_type`, `items_json`, `subtotal`, `discount_amount`,
             `gst_percent`, `gst_amount`, `total_amount`, `payment_terms`, `warranty_details`,
-            `terms_and_conditions`, `status`, `valid_until`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `terms_and_conditions`, `status`, `valid_until`, `extra_json`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
+            `customer_id` = VALUES(`customer_id`),
             `customer_name` = VALUES(`customer_name`),
+            `project_id` = VALUES(`project_id`),
             `capacity_kw` = VALUES(`capacity_kw`),
             `rate_per_wp` = VALUES(`rate_per_wp`),
             `base_amount` = VALUES(`base_amount`),
@@ -1415,14 +1694,15 @@ function saveQuotationToDb($pdo, $item) {
             `warranty_details` = VALUES(`warranty_details`),
             `terms_and_conditions` = VALUES(`terms_and_conditions`),
             `status` = VALUES(`status`),
-            `valid_until` = VALUES(`valid_until`)
+            `valid_until` = VALUES(`valid_until`),
+            `extra_json` = VALUES(`extra_json`)
     ");
     $stmt->execute([
         $item['id'], $qtnNumber, $customerId, $customerName, $projectId,
         $capacityKw, $ratePerWp, $baseAmount, $taxAmount, $panelBrand,
         $inverterBrand, $structureType, $itemsJson, $subtotal, $discount,
         $gstPercent, $gstAmount, $totalAmount, $paymentTerms, $warranty,
-        $terms, $status, $validUntil
+        $terms, $status, $validUntil, $extraJson
     ]);
     return $item;
 }
@@ -1437,23 +1717,29 @@ function saveSurveyToDb($pdo, $item) {
     $srvDate = !empty($item['surveyDate'] ?? $item['survey_date']) ? substr($item['surveyDate'] ?? $item['survey_date'], 0, 10) : date('Y-m-d');
     $status = $item['status'] ?? 'APPROVED';
     $siteAddr = $item['siteAddress'] ?? $item['address'] ?? $item['site_address'] ?? 'Site Address';
-    $lat = !empty($item['latitude']) ? floatval($item['latitude']) : null;
-    $lng = !empty($item['longitude']) ? floatval($item['longitude']) : null;
-    $locName = $item['locationName'] ?? $item['city'] ?? $item['location_name'] ?? '';
+    $gpsObj = is_array($item['gps'] ?? null) ? $item['gps'] : null;
+    $rawLat = $item['latitude'] ?? ($gpsObj['latitude'] ?? null);
+    $rawLng = $item['longitude'] ?? ($gpsObj['longitude'] ?? null);
+    $lat = ($rawLat !== null && $rawLat !== '') ? floatval($rawLat) : null;
+    $lng = ($rawLng !== null && $rawLng !== '') ? floatval($rawLng) : null;
+    $locName = $item['locationName'] ?? ($gpsObj['locationName'] ?? ($item['city'] ?? $item['location_name'] ?? ''));
     $roofType = $item['roofType'] ?? $item['roof_type'] ?? 'RCC Flat';
     $roofArea = floatval($item['roofAreaSqft'] ?? $item['roofAreaSqFt'] ?? $item['roof_area_sqft'] ?? 0);
     $shadowFreeArea = floatval($item['shadowFreeAreaSqft'] ?? $item['shadowFreeAreaSqFt'] ?? $item['shadow_free_area_sqft'] ?? 0);
     $obstacles = $item['shadowObstacles'] ?? $item['shadow_obstacles'] ?? '';
     $billNo = $item['electricityBillNumber'] ?? $item['electricity_bill_number'] ?? '';
-    $consumption = floatval($item['monthlyAvgConsumption'] ?? $item['monthly_avg_consumption'] ?? 0);
+    $consumption = floatval($item['monthlyAverageConsumptionUnits'] ?? $item['monthlyAvgConsumption'] ?? $item['monthly_avg_consumption'] ?? 0);
     $load = floatval($item['sanctionedLoadKw'] ?? $item['sanctioned_load_kw'] ?? 0);
-    $tariff = floatval($item['tariffRate'] ?? $item['tariff_rate'] ?? 0);
+    $tariff = floatval($item['tariffRatePerUnit'] ?? $item['tariffRate'] ?? $item['tariff_rate'] ?? 0);
     $structureCond = $item['existingStructureCondition'] ?? $item['existing_structure_condition'] ?? '';
     $recCap = floatval($item['recommendedCapacityKw'] ?? $item['proposedCapacityKw'] ?? $item['recommended_capacity_kw'] ?? 0);
     $feasibility = $item['feasibilityScore'] ?? $item['feasibility_score'] ?? 'GOOD';
     $photos = $item['photos'] ?? [];
     $photosJson = is_string($photos) ? $photos : json_encode($photos);
     $notes = $item['notes'] ?? '';
+    $reviewedBy = $item['reviewedBy'] ?? $item['reviewed_by'] ?? '';
+    $reviewedAt = !empty($item['reviewedAt'] ?? $item['reviewed_at']) ? date('Y-m-d H:i:s', strtotime($item['reviewedAt'] ?? $item['reviewed_at'])) : null;
+    $rejectionReason = $item['rejectionReason'] ?? $item['rejection_reason'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_site_surveys` (
@@ -1462,8 +1748,9 @@ function saveSurveyToDb($pdo, $item) {
             `location_name`, `roof_type`, `roof_area_sqft`, `shadow_free_area_sqft`,
             `shadow_obstacles`, `electricity_bill_number`, `monthly_avg_consumption`,
             `sanctioned_load_kw`, `tariff_rate`, `existing_structure_condition`,
-            `recommended_capacity_kw`, `feasibility_score`, `photos_json`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `recommended_capacity_kw`, `feasibility_score`, `photos_json`, `notes`,
+            `reviewed_by`, `reviewed_at`, `rejection_reason`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `engineer_name` = VALUES(`engineer_name`),
             `survey_date` = VALUES(`survey_date`),
@@ -1475,10 +1762,19 @@ function saveSurveyToDb($pdo, $item) {
             `roof_type` = VALUES(`roof_type`),
             `roof_area_sqft` = VALUES(`roof_area_sqft`),
             `shadow_free_area_sqft` = VALUES(`shadow_free_area_sqft`),
+            `shadow_obstacles` = VALUES(`shadow_obstacles`),
+            `electricity_bill_number` = VALUES(`electricity_bill_number`),
+            `monthly_avg_consumption` = VALUES(`monthly_avg_consumption`),
+            `sanctioned_load_kw` = VALUES(`sanctioned_load_kw`),
+            `tariff_rate` = VALUES(`tariff_rate`),
+            `existing_structure_condition` = VALUES(`existing_structure_condition`),
             `recommended_capacity_kw` = VALUES(`recommended_capacity_kw`),
             `feasibility_score` = VALUES(`feasibility_score`),
             `photos_json` = VALUES(`photos_json`),
-            `notes` = VALUES(`notes`)
+            `notes` = VALUES(`notes`),
+            `reviewed_by` = VALUES(`reviewed_by`),
+            `reviewed_at` = VALUES(`reviewed_at`),
+            `rejection_reason` = VALUES(`rejection_reason`)
     ");
     $stmt->execute([
         $item['id'], $projId, $custId, $engId, $engName,
@@ -1486,7 +1782,8 @@ function saveSurveyToDb($pdo, $item) {
         $locName, $roofType, $roofArea, $shadowFreeArea,
         $obstacles, $billNo, $consumption,
         $load, $tariff, $structureCond,
-        $recCap, $feasibility, $photosJson, $notes
+        $recCap, $feasibility, $photosJson, $notes,
+        $reviewedBy, $reviewedAt, $rejectionReason
     ]);
     return $item;
 }
@@ -1500,16 +1797,22 @@ function saveWarehouseToDb($pdo, $item) {
     $city = $item['city'] ?? '';
     $state = $item['state'] ?? '';
     $pincode = $item['pincode'] ?? '';
-    $managerName = $item['managerName'] ?? $item['manager_name'] ?? '';
-    $managerPhone = $item['managerPhone'] ?? $item['manager_phone'] ?? '';
+    $managerName = $item['contactPerson'] ?? $item['managerName'] ?? $item['manager_name'] ?? '';
+    $managerPhone = $item['contactPhone'] ?? $item['managerPhone'] ?? $item['manager_phone'] ?? '';
+    $email = $item['email'] ?? '';
+    $capacitySqft = floatval($item['capacitySqFt'] ?? $item['capacity_sqft'] ?? 0);
     $gst = $item['gstNumber'] ?? $item['gst_number'] ?? '';
-    $isActive = (!isset($item['isActive']) || $item['isActive']) ? 1 : 0;
+    $status = $item['status'] ?? ((!isset($item['isActive']) || $item['isActive']) ? 'ACTIVE' : 'INACTIVE');
+    $isActive = ($status === 'ACTIVE') ? 1 : 0;
+    $isDefault = !empty($item['isDefault'] ?? $item['is_default']) ? 1 : 0;
+    $notes = $item['notes'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_warehouses` (
             `id`, `name`, `code`, `address`, `city`, `state`,
-            `pincode`, `manager_name`, `manager_phone`, `gst_number`, `is_active`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `pincode`, `manager_name`, `manager_phone`, `gst_number`, `is_active`,
+            `email`, `capacity_sqft`, `is_default`, `status`, `notes`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `name` = VALUES(`name`),
             `code` = VALUES(`code`),
@@ -1520,11 +1823,17 @@ function saveWarehouseToDb($pdo, $item) {
             `manager_name` = VALUES(`manager_name`),
             `manager_phone` = VALUES(`manager_phone`),
             `gst_number` = VALUES(`gst_number`),
-            `is_active` = VALUES(`is_active`)
+            `is_active` = VALUES(`is_active`),
+            `email` = VALUES(`email`),
+            `capacity_sqft` = VALUES(`capacity_sqft`),
+            `is_default` = VALUES(`is_default`),
+            `status` = VALUES(`status`),
+            `notes` = VALUES(`notes`)
     ");
     $stmt->execute([
         $item['id'], $name, $code, $address, $city, $state,
-        $pincode, $managerName, $managerPhone, $gst, $isActive
+        $pincode, $managerName, $managerPhone, $gst, $isActive,
+        $email, $capacitySqft, $isDefault, $status, $notes
     ]);
     return $item;
 }
@@ -1539,7 +1848,11 @@ function saveStockMovementToDb($pdo, $item) {
     $qty = floatval($item['quantity'] ?? 0);
     $balance = floatval($item['balanceAfter'] ?? $item['balance_after'] ?? 0);
     $refNo = $item['referenceNumber'] ?? $item['reference_number'] ?? '';
+    $refId = $item['referenceId'] ?? $item['reference_id'] ?? '';
     $whId = $item['warehouseId'] ?? $item['warehouse_id'] ?? '';
+    $whName = $item['warehouseName'] ?? $item['warehouse_name'] ?? '';
+    $targetWhId = $item['targetWarehouseId'] ?? $item['target_warehouse_id'] ?? '';
+    $targetWhName = $item['targetWarehouseName'] ?? $item['target_warehouse_name'] ?? '';
     $notes = $item['notes'] ?? '';
     $ts = !empty($item['timestamp']) ? date('Y-m-d H:i:s', strtotime($item['timestamp'])) : date('Y-m-d H:i:s');
     $by = $item['performedBy'] ?? $item['performed_by'] ?? '';
@@ -1547,18 +1860,23 @@ function saveStockMovementToDb($pdo, $item) {
     $stmt = $pdo->prepare("
         INSERT INTO `solar_stock_movements` (
             `id`, `product_id`, `product_name`, `sku`, `movement_type`,
-            `quantity`, `balance_after`, `reference_number`, `warehouse_id`,
+            `quantity`, `balance_after`, `reference_number`, `reference_id`,
+            `warehouse_id`, `warehouse_name`, `target_warehouse_id`, `target_warehouse_name`,
             `notes`, `timestamp`, `performed_by`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `product_name` = VALUES(`product_name`),
             `quantity` = VALUES(`quantity`),
             `balance_after` = VALUES(`balance_after`),
+            `warehouse_name` = VALUES(`warehouse_name`),
+            `target_warehouse_id` = VALUES(`target_warehouse_id`),
+            `target_warehouse_name` = VALUES(`target_warehouse_name`),
             `notes` = VALUES(`notes`)
     ");
     $stmt->execute([
         $item['id'], $prodId, $prodName, $sku, $type,
-        $qty, $balance, $refNo, $whId,
+        $qty, $balance, $refNo, $refId,
+        $whId, $whName, $targetWhId, $targetWhName,
         $notes, $ts, $by
     ]);
     return $item;
@@ -1571,28 +1889,35 @@ function saveStockAuditToDb($pdo, $item) {
     $whId = $item['warehouseId'] ?? $item['warehouse_id'] ?? '';
     $whName = $item['warehouseName'] ?? $item['warehouse_name'] ?? 'Warehouse';
     $auditDate = !empty($item['auditDate'] ?? $item['audit_date']) ? substr($item['auditDate'] ?? $item['audit_date'], 0, 10) : date('Y-m-d');
-    $auditorName = $item['auditorName'] ?? $item['auditor_name'] ?? 'Auditor';
+    $auditorName = $item['auditedBy'] ?? $item['auditorName'] ?? $item['auditor_name'] ?? 'Auditor';
     $status = $item['status'] ?? 'COMPLETED';
-    $discrepancies = intval($item['discrepanciesCount'] ?? $item['discrepancies_count'] ?? 0);
+    $discrepancies = intval($item['discrepanciesFound'] ?? $item['discrepanciesCount'] ?? $item['discrepancies_count'] ?? 0);
     $items = $item['items'] ?? [];
+    $itemsAudited = intval($item['itemsAudited'] ?? $item['items_audited'] ?? (is_array($items) ? count($items) : 0));
+    $netAdjValue = floatval($item['netAdjustmentValue'] ?? $item['net_adjustment_value'] ?? 0);
     $itemsJson = is_string($items) ? $items : json_encode($items);
     $notes = $item['notes'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_stock_audits` (
             `id`, `audit_number`, `warehouse_id`, `warehouse_name`, `audit_date`,
-            `auditor_name`, `status`, `discrepancies_count`, `items_json`, `notes`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `auditor_name`, `status`, `discrepancies_count`, `items_audited`, `net_adjustment_value`,
+            `items_json`, `notes`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `warehouse_name` = VALUES(`warehouse_name`),
+            `auditor_name` = VALUES(`auditor_name`),
             `status` = VALUES(`status`),
             `discrepancies_count` = VALUES(`discrepancies_count`),
+            `items_audited` = VALUES(`items_audited`),
+            `net_adjustment_value` = VALUES(`net_adjustment_value`),
             `items_json` = VALUES(`items_json`),
             `notes` = VALUES(`notes`)
     ");
     $stmt->execute([
         $item['id'], $auditNo, $whId, $whName, $auditDate,
-        $auditorName, $status, $discrepancies, $itemsJson, $notes
+        $auditorName, $status, $discrepancies, $itemsAudited, $netAdjValue,
+        $itemsJson, $notes
     ]);
     return $item;
 }
@@ -1697,28 +2022,30 @@ function saveNotificationToDb($pdo, $item) {
     $title = $item['title'] ?? 'Notification';
     $message = $item['message'] ?? '';
     $type = $item['type'] ?? 'INFO';
-    $isRead = !empty($item['isRead'] ?? $item['is_read']) ? 1 : 0;
+    $isRead = !empty($item['read'] ?? $item['isRead'] ?? $item['is_read']) ? 1 : 0;
     $linkType = $item['linkType'] ?? $item['link_type'] ?? null;
     $linkId = $item['linkId'] ?? $item['link_id'] ?? null;
     $custId = $item['customerId'] ?? $item['customer_id'] ?? null;
     $projId = $item['projectId'] ?? $item['project_id'] ?? null;
+    $projName = $item['projectName'] ?? $item['project_name'] ?? '';
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_notifications` (
             `id`, `user_id`, `title`, `message`, `type`, `is_read`,
-            `link_type`, `link_id`, `customer_id`, `project_id`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `link_type`, `link_id`, `customer_id`, `project_id`, `project_name`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `title` = VALUES(`title`),
             `message` = VALUES(`message`),
             `type` = VALUES(`type`),
             `is_read` = VALUES(`is_read`),
             `link_type` = VALUES(`link_type`),
-            `link_id` = VALUES(`link_id`)
+            `link_id` = VALUES(`link_id`),
+            `project_name` = VALUES(`project_name`)
     ");
     $stmt->execute([
         $item['id'], $userId, $title, $message, $type, $isRead,
-        $linkType, $linkId, $custId, $projId
+        $linkType, $linkId, $custId, $projId, $projName
     ]);
     return $item;
 }
@@ -2983,37 +3310,10 @@ if ($method === 'DELETE' && preg_match('#^/leads/([^/]+)/?$#', $cleanPath, $matc
 // GET /api/quotations
 if ($method === 'GET' && in_array($cleanPath, ['/quotations', '/quotations/'])) {
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $stmt = $pdo->query('SELECT * FROM `solar_quotations` ORDER BY `created_at` DESC');
     $rows = $stmt->fetchAll();
-    $quotations = array_map(function ($r) {
-        return [
-            'id' => $r['id'],
-            'quotationNumber' => $r['quotation_number'],
-            'customerId' => $r['customer_id'] ?? '',
-            'customerName' => $r['customer_name'],
-            'projectId' => $r['project_id'] ?? '',
-            'capacityKw' => floatval($r['capacity_kw'] ?? 0),
-            'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
-            'baseAmount' => floatval($r['base_amount'] ?? 0),
-            'taxAmount' => floatval($r['tax_amount'] ?? 0),
-            'panelBrand' => $r['panel_brand'] ?? '',
-            'inverterBrand' => $r['inverter_brand'] ?? '',
-            'structureType' => $r['structure_type'] ?? '',
-            'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
-            'subtotal' => floatval($r['base_amount'] ?? 0),
-            'discountAmount' => 0,
-            'gstPercent' => 13.8,
-            'gstAmount' => floatval($r['tax_amount'] ?? 0),
-            'totalAmount' => floatval($r['total_amount'] ?? 0),
-            'paymentTerms' => $r['payment_terms'] ?? '',
-            'warrantyDetails' => $r['warranty_details'] ?? '',
-            'termsAndConditions' => $r['terms_and_conditions'] ?? '',
-            'status' => $r['status'] ?? 'DRAFT',
-            'validUntil' => $r['valid_until'],
-            'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
-            'createdAt' => $r['created_at']
-        ];
-    }, $rows ?: []);
+    $quotations = array_map('formatQuotationRow', $rows ?: []);
     http_response_code(200);
     echo json_encode(['success' => true, 'count' => count($quotations), 'data' => $quotations]);
     exit;
@@ -3023,6 +3323,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/quotations', '/quotations/'])) 
 if ($method === 'GET' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $matches)) {
     $id = $matches[1];
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $stmt = $pdo->prepare('SELECT * FROM `solar_quotations` WHERE `id` = ? LIMIT 1');
     $stmt->execute([$id]);
     $r = $stmt->fetch();
@@ -3031,33 +3332,7 @@ if ($method === 'GET' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $ma
         echo json_encode(['success' => false, 'error' => "Quotation '$id' not found in MySQL"]);
         exit;
     }
-    $quotation = [
-        'id' => $r['id'],
-        'quotationNumber' => $r['quotation_number'],
-        'customerId' => $r['customer_id'] ?? '',
-        'customerName' => $r['customer_name'],
-        'projectId' => $r['project_id'] ?? '',
-        'capacityKw' => floatval($r['capacity_kw'] ?? 0),
-        'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
-        'baseAmount' => floatval($r['base_amount'] ?? 0),
-        'taxAmount' => floatval($r['tax_amount'] ?? 0),
-        'panelBrand' => $r['panel_brand'] ?? '',
-        'inverterBrand' => $r['inverter_brand'] ?? '',
-        'structureType' => $r['structure_type'] ?? '',
-        'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
-        'subtotal' => floatval($r['base_amount'] ?? 0),
-        'discountAmount' => 0,
-        'gstPercent' => 13.8,
-        'gstAmount' => floatval($r['tax_amount'] ?? 0),
-        'totalAmount' => floatval($r['total_amount'] ?? 0),
-        'paymentTerms' => $r['payment_terms'] ?? '',
-        'warrantyDetails' => $r['warranty_details'] ?? '',
-        'termsAndConditions' => $r['terms_and_conditions'] ?? '',
-        'status' => $r['status'] ?? 'DRAFT',
-        'validUntil' => $r['valid_until'],
-        'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
-        'createdAt' => $r['created_at']
-    ];
+    $quotation = formatQuotationRow($r);
     http_response_code(200);
     echo json_encode(['success' => true, 'data' => $quotation]);
     exit;
@@ -3066,6 +3341,7 @@ if ($method === 'GET' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $ma
 // POST /api/quotations
 if ($method === 'POST' && in_array($cleanPath, ['/quotations', '/quotations/'])) {
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $saved = saveQuotationToDb($pdo, $body);
     http_response_code(200);
     echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Quotation saved to MySQL successfully.']);
@@ -3076,6 +3352,7 @@ if ($method === 'POST' && in_array($cleanPath, ['/quotations', '/quotations/']))
 if ($method === 'PUT' && preg_match('#^/quotations/([^/]+)/?$#', $cleanPath, $matches)) {
     $id = $matches[1];
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $body['id'] = $id;
     $saved = saveQuotationToDb($pdo, $body);
     http_response_code(200);
@@ -3254,11 +3531,16 @@ if ($method === 'GET' && in_array($cleanPath, ['/projects', '/projects/'])) {
             'projectManagerName' => $r['project_manager_name'] ?? '',
             'siteAddress' => $r['site_address'] ?? '',
             'city' => $r['city'] ?? 'Ahmedabad',
+            'location' => $r['location'] ?? '',
+            'latitude' => isset($r['latitude']) && $r['latitude'] !== null ? floatval($r['latitude']) : null,
+            'longitude' => isset($r['longitude']) && $r['longitude'] !== null ? floatval($r['longitude']) : null,
+            'systemType' => $r['system_type'] ?? '',
             'inverterModel' => $r['inverter_model'] ?? '',
             'panelModel' => $r['panel_model'] ?? '',
             'structureType' => $r['structure_type'] ?? 'Elevated GI Structure',
             'startDate' => $r['start_date'],
             'expectedCompletionDate' => $r['expected_completion_date'],
+            'actualCompletionDate' => $r['actual_completion_date'] ?? null,
             'notes' => $r['notes'] ?? '',
             'assignedUsers' => $assignments,
             'stages' => $stagesByProject[$r['id']] ?? [],
@@ -3275,6 +3557,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/projects', '/projects/'])) {
 if ($method === 'GET' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matches)) {
     $id = $matches[1];
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $stmt = $pdo->prepare('SELECT * FROM `solar_projects` WHERE `id` = ? LIMIT 1');
     $stmt->execute([$id]);
     $r = $stmt->fetch();
@@ -3329,11 +3612,16 @@ if ($method === 'GET' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matc
         'projectManagerName' => $r['project_manager_name'] ?? '',
         'siteAddress' => $r['site_address'] ?? '',
         'city' => $r['city'] ?? 'Ahmedabad',
+        'location' => $r['location'] ?? '',
+        'latitude' => isset($r['latitude']) && $r['latitude'] !== null ? floatval($r['latitude']) : null,
+        'longitude' => isset($r['longitude']) && $r['longitude'] !== null ? floatval($r['longitude']) : null,
+        'systemType' => $r['system_type'] ?? '',
         'inverterModel' => $r['inverter_model'] ?? '',
         'panelModel' => $r['panel_model'] ?? '',
         'structureType' => $r['structure_type'] ?? 'Elevated GI Structure',
         'startDate' => $r['start_date'],
         'expectedCompletionDate' => $r['expected_completion_date'],
+        'actualCompletionDate' => $r['actual_completion_date'] ?? null,
         'notes' => $r['notes'] ?? '',
         'assignedUsers' => $assignments,
         'stages' => $stages,
@@ -3348,9 +3636,32 @@ if ($method === 'GET' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matc
 // POST /api/projects
 if ($method === 'POST' && in_array($cleanPath, ['/projects', '/projects/'])) {
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $saved = saveProjectToDb($pdo, $body);
     http_response_code(200);
     echo json_encode(['success' => true, 'data' => $saved, 'message' => 'Project saved to MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/projects/{id}/stages/{stageKey}
+if ($method === 'PUT' && preg_match('#^/projects/([^/]+)/stages/([^/]+)/?$#', $cleanPath, $matches)) {
+    $projectId = $matches[1];
+    $stageKeyOrId = $matches[2];
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+    $status = $body['status'] ?? 'IN PROGRESS';
+    $notes = $body['notes'] ?? null;
+    $completedDate = ($status === 'COMPLETED' || $status === 'APPROVED') ? date('Y-m-d') : null;
+    $stmt = $pdo->prepare("
+        UPDATE `solar_project_stages`
+        SET `status` = ?,
+            `notes` = COALESCE(?, `notes`),
+            `completed_date` = COALESCE(?, `completed_date`)
+        WHERE `project_id` = ? AND (`id` = ? OR `stage_key` = ?)
+    ");
+    $stmt->execute([$status, $notes, $completedDate, $projectId, $stageKeyOrId, $stageKeyOrId]);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Project stage updated in MySQL successfully.']);
     exit;
 }
 
@@ -3358,6 +3669,7 @@ if ($method === 'POST' && in_array($cleanPath, ['/projects', '/projects/'])) {
 if ($method === 'PUT' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $matches)) {
     $id = $matches[1];
     $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
     $body['id'] = $id;
     $saved = saveProjectToDb($pdo, $body);
     http_response_code(200);
@@ -3372,6 +3684,28 @@ if ($method === 'DELETE' && preg_match('#^/projects/([^/]+)/?$#', $cleanPath, $m
     deleteItemFromDb($pdo, 'projects', $id);
     http_response_code(200);
     echo json_encode(['success' => true, 'message' => 'Project deleted from MySQL successfully.']);
+    exit;
+}
+
+// PUT /api/notifications/read-all
+if ($method === 'PUT' && in_array($cleanPath, ['/notifications/read-all', '/notifications/read-all/'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+    $pdo->exec('UPDATE `solar_notifications` SET `is_read` = 1');
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'All notifications marked as read in MySQL.']);
+    exit;
+}
+
+// PUT /api/notifications/{id}/read
+if ($method === 'PUT' && preg_match('#^/notifications/([^/]+)/read/?$#', $cleanPath, $matches)) {
+    $id = $matches[1];
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+    $stmt = $pdo->prepare('UPDATE `solar_notifications` SET `is_read` = 1 WHERE `id` = ?');
+    $stmt->execute([$id]);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'message' => 'Notification marked as read in MySQL.']);
     exit;
 }
 
@@ -5018,11 +5352,16 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'projectManagerName' => $r['project_manager_name'] ?? '',
                 'siteAddress' => $r['site_address'] ?? '',
                 'city' => $r['city'] ?? 'Ahmedabad',
+                'location' => $r['location'] ?? '',
+                'latitude' => isset($r['latitude']) && $r['latitude'] !== null ? floatval($r['latitude']) : null,
+                'longitude' => isset($r['longitude']) && $r['longitude'] !== null ? floatval($r['longitude']) : null,
+                'systemType' => $r['system_type'] ?? '',
                 'inverterModel' => $r['inverter_model'] ?? '',
                 'panelModel' => $r['panel_model'] ?? '',
                 'structureType' => $r['structure_type'] ?? 'Elevated GI Structure',
                 'startDate' => $r['start_date'],
                 'expectedCompletionDate' => $r['expected_completion_date'],
+                'actualCompletionDate' => $r['actual_completion_date'] ?? null,
                 'notes' => $r['notes'] ?? '',
                 'assignedUsers' => $assignments,
                 'stages' => $stagesByProject[$r['id']] ?? [],
@@ -5055,6 +5394,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'systemRole' => $r['system_role'] ?? 'Super Admin',
                 'isFieldWorker' => (bool)($r['is_field_worker'] ?? 0),
                 'accountStatus' => $r['account_status'] ?? 'ACTIVE',
+                'documents' => json_decode($r['documents_json'] ?? '[]', true) ?: [],
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);
@@ -5099,6 +5439,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'vendorName' => $r['vendor_name'],
                 'category' => $r['category'],
                 'amount' => floatval($r['amount'] ?? 0),
+                'date' => $r['expense_date'],
                 'expenseDate' => $r['expense_date'],
                 'paymentMode' => $r['payment_mode'] ?? 'Bank Payment',
                 'referenceNo' => $r['reference_no'] ?? '',
@@ -5116,6 +5457,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_products` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['products'] = array_map(function ($r) {
+            $whStocks = json_decode($r['warehouse_stocks_json'] ?? 'null', true);
             return [
                 'id' => $r['id'],
                 'name' => $r['name'],
@@ -5126,15 +5468,22 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'model' => $r['model'] ?? '',
                 'specifications' => $r['specifications'] ?? '',
                 'specification' => $r['specifications'] ?? '',
-                'unit' => $r['unit'] ?? 'Nos',
+                'unit' => $r['unit'] ?? 'NOS',
                 'hsnCode' => $r['hsn_code'] ?? '',
                 'gstRate' => floatval($r['gst_rate'] ?? 18),
                 'taxRate' => floatval($r['gst_rate'] ?? 18),
                 'unitPrice' => floatval($r['unit_price'] ?? 0),
+                'sellingPrice' => floatval($r['selling_price'] ?? 0),
                 'currentStock' => floatval($r['current_stock'] ?? 0),
+                'minStockThreshold' => floatval($r['reorder_level'] ?? 0),
                 'reorderLevel' => floatval($r['reorder_level'] ?? 0),
                 'minStockLevel' => floatval($r['reorder_level'] ?? 0),
+                'location' => $r['location'] ?? '',
                 'warehouseId' => $r['warehouse_id'] ?? '',
+                'warehouseName' => $r['warehouse_name'] ?? '',
+                'warehouseStocks' => is_array($whStocks) ? $whStocks : null,
+                'preferredVendorId' => $r['preferred_vendor_id'] ?? '',
+                'preferredVendorName' => $r['preferred_vendor_name'] ?? '',
                 'status' => $r['status'] ?? 'ACTIVE',
                 'createdAt' => $r['created_at']
             ];
@@ -5174,16 +5523,22 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_purchase_orders` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['purchase_orders'] = array_map(function ($r) {
+            $receipts = json_decode($r['receipts_json'] ?? '[]', true) ?: [];
             return [
                 'id' => $r['id'],
+                'purchaseNumber' => $r['po_number'],
                 'poNumber' => $r['po_number'],
                 'vendorId' => $r['vendor_id'],
                 'vendorName' => $r['vendor_name'],
-                'projectId' => $r['project_id'],
-                'projectTitle' => $r['project_id'] ?? '',
+                'projectId' => $r['project_id'] ?? '',
+                'projectTitle' => !empty($r['project_title']) ? $r['project_title'] : ($r['project_id'] ?? ''),
+                'warehouseId' => $r['warehouse_id'] ?? '',
+                'warehouseName' => $r['warehouse_name'] ?? '',
+                'purchaseDate' => $r['po_date'],
                 'orderDate' => $r['po_date'],
                 'poDate' => $r['po_date'],
                 'expectedDeliveryDate' => $r['expected_delivery_date'],
+                'receivedDate' => $r['received_date'] ?? null,
                 'subtotal' => floatval($r['subtotal'] ?? 0),
                 'gstAmount' => floatval($r['gst_amount'] ?? 0),
                 'taxAmount' => floatval($r['gst_amount'] ?? 0),
@@ -5191,8 +5546,12 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'grandTotal' => floatval($r['total_amount'] ?? 0),
                 'status' => $r['status'],
                 'paymentStatus' => $r['payment_status'],
+                'paymentDueDate' => $r['payment_due_date'] ?? null,
+                'invoiceReference' => $r['invoice_reference'] ?? '',
+                'stockUpdated' => (bool)($r['stock_updated'] ?? 0),
                 'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
-                'receipts' => json_decode($r['receipts_json'] ?? '[]', true) ?: [],
+                'deliveryReceipts' => $receipts,
+                'receipts' => $receipts,
                 'notes' => $r['notes'] ?? '',
                 'createdAt' => $r['created_at']
             ];
@@ -5204,18 +5563,30 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_boms` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['boms'] = array_map(function ($r) {
+            $cap = floatval($r['system_capacity_kw'] ?? 0);
+            $cost = floatval($r['total_estimated_cost'] ?? 0);
             return [
                 'id' => $r['id'],
                 'bomNumber' => $r['bom_number'],
                 'projectId' => $r['project_id'],
+                'projectCode' => $r['project_code'] ?? '',
                 'projectTitle' => $r['project_title'],
-                'systemCapacityKw' => floatval($r['system_capacity_kw'] ?? 0),
+                'customerName' => $r['customer_name'] ?? '',
+                'capacityKw' => $cap,
+                'systemCapacityKw' => $cap,
                 'version' => $r['version'] ?? '1.0',
+                'warehouseId' => $r['warehouse_id'] ?? '',
+                'warehouseName' => $r['warehouse_name'] ?? '',
                 'status' => $r['status'] ?? 'APPROVED',
                 'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
-                'totalEstimatedCost' => floatval($r['total_estimated_cost'] ?? 0),
+                'totalCost' => $cost,
+                'totalEstimatedCost' => $cost,
                 'createdBy' => $r['created_by'] ?? '',
                 'approvedBy' => $r['approved_by'] ?? '',
+                'approvedAt' => $r['approved_at'] ?? null,
+                'stockAllocated' => (bool)($r['stock_allocated'] ?? 0),
+                'ewayBillNumber' => $r['eway_bill_number'] ?? '',
+                'ewayBillDate' => $r['eway_bill_date'] ?? null,
                 'notes' => $r['notes'] ?? '',
                 'createdAt' => $r['created_at']
             ];
@@ -5227,21 +5598,32 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_sales_invoices` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['sales_invoices'] = array_map(function ($r) {
+            $taxAmt = floatval($r['gst_amount'] ?? 0);
+            $status = !empty($r['status']) ? $r['status'] : ($r['payment_status'] ?? 'DRAFT');
             return [
                 'id' => $r['id'],
                 'invoiceNumber' => $r['invoice_number'],
+                'invoiceType' => $r['invoice_type'] ?? 'TAX_INVOICE',
                 'projectId' => $r['project_id'] ?? '',
+                'projectTitle' => $r['project_title'] ?? '',
                 'customerId' => $r['customer_id'],
                 'customerName' => $r['customer_name'],
+                'customerGst' => $r['customer_gst'] ?? '',
+                'customerAddress' => $r['customer_address'] ?? '',
                 'invoiceDate' => $r['invoice_date'],
                 'dueDate' => $r['due_date'],
                 'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
                 'subtotal' => floatval($r['subtotal'] ?? 0),
-                'gstAmount' => floatval($r['gst_amount'] ?? 0),
+                'taxAmount' => $taxAmt,
+                'gstAmount' => $taxAmt,
                 'totalAmount' => floatval($r['total_amount'] ?? 0),
-                'paymentStatus' => $r['payment_status'] ?? 'UNPAID',
+                'status' => $status,
+                'paymentStatus' => $r['payment_status'] ?? $status,
                 'paidAmount' => floatval($r['paid_amount'] ?? 0),
                 'balanceAmount' => floatval($r['balance_amount'] ?? 0),
+                'paymentTerms' => $r['payment_terms'] ?? '',
+                'deductStock' => (bool)($r['deduct_stock'] ?? 0),
+                'stockDeducted' => (bool)($r['stock_deducted'] ?? 0),
                 'ewayBillNumber' => $r['eway_bill_number'] ?? '',
                 'ewayBillDetails' => json_decode($r['eway_bill_details_json'] ?? 'null', true),
                 'warehouseId' => $r['warehouse_id'] ?? '',
@@ -5260,20 +5642,32 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
             if (!empty($r['fuel_expense_json'])) {
                 $fuelExpense = json_decode($r['fuel_expense_json'], true);
             }
+            $inGps = json_decode($r['check_in_gps_json'] ?? 'null', true);
+            $outGps = json_decode($r['check_out_gps_json'] ?? 'null', true);
             return [
                 'id' => $r['id'],
                 'employeeId' => $r['employee_id'],
                 'employeeName' => $r['employee_name'],
+                'authUid' => $r['auth_uid'] ?? '',
+                'employeeCode' => $r['employee_code'] ?? '',
+                'employeeEmail' => $r['employee_email'] ?? '',
                 'attendanceDate' => $r['attendance_date'],
                 'date' => $r['attendance_date'],
                 'checkInTime' => $r['check_in_time'],
                 'checkOutTime' => $r['check_out_time'],
-                'checkInGps' => json_decode($r['check_in_gps_json'] ?? 'null', true),
-                'checkOutGps' => json_decode($r['check_out_gps_json'] ?? 'null', true),
+                'gpsCheckIn' => is_array($inGps) ? $inGps : null,
+                'checkInGps' => $inGps,
+                'gpsCheckOut' => is_array($outGps) ? $outGps : null,
+                'checkOutGps' => $outGps,
+                'siteLocation' => $r['site_location'] ?? '',
                 'siteProjectId' => $r['site_project_id'] ?? '',
                 'siteProjectTitle' => $r['site_project_title'] ?? '',
                 'status' => $r['status'] ?? 'PRESENT',
+                'totalHours' => isset($r['total_hours']) && $r['total_hours'] !== null ? floatval($r['total_hours']) : null,
+                'totalDurationText' => $r['total_duration_text'] ?? '',
                 'fuelExpense' => $fuelExpense,
+                'reimbursedInPayslipId' => $r['reimbursed_in_payslip_id'] ?? '',
+                'reimbursementStatus' => $r['reimbursement_status'] ?? '',
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);
@@ -5293,20 +5687,25 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
             $basic = floatval($r['basic_salary'] ?? 0);
             $overtimeAmt = floatval($r['allowances'] ?? 0);
             $net = floatval($r['net_salary'] ?? ($basic + $overtimeAmt + $totalExpenses - $totalDeductions));
+            $extra = json_decode($r['extra_json'] ?? '{}', true);
+            if (!is_array($extra)) $extra = [];
 
             return [
                 'id' => $r['id'],
-                'payslipNumber' => $r['id'],
+                'payslipNumber' => $extra['payslipNumber'] ?? $r['id'],
                 'employeeId' => $r['employee_id'],
                 'employeeName' => $r['employee_name'],
-                'employeeCode' => $r['employee_id'],
+                'employeeCode' => $extra['employeeCode'] ?? $r['employee_id'],
+                'department' => $extra['department'] ?? '',
+                'designation' => $extra['designation'] ?? '',
+                'generatedDate' => $extra['generatedDate'] ?? (!empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d')),
                 'month' => $r['month'],
                 'year' => intval($r['year']),
                 'baseSalary' => $basic,
                 'basicSalary' => $basic,
                 'allowances' => $overtimeAmt,
                 'overtimeAmount' => $overtimeAmt,
-                'overtimeType' => (!empty($r['overtime_hours']) && floatval($r['overtime_hours']) > 0) ? 'CALCULATED' : 'DIRECT',
+                'overtimeType' => $extra['overtimeType'] ?? ((!empty($r['overtime_hours']) && floatval($r['overtime_hours']) > 0) ? 'CALCULATED' : 'DIRECT'),
                 'overtimeHours' => floatval($r['overtime_hours'] ?? 0),
                 'overtimeRatePerHour' => floatval($r['overtime_rate'] ?? 0),
                 'additionalExpenses' => $addExpenses,
@@ -5337,9 +5736,13 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'name' => $r['name'],
                 'holidayDate' => $r['holiday_date'],
                 'date' => $r['holiday_date'],
-                'type' => $r['type'] ?? 'Mandatory',
+                'type' => $r['type'] ?? 'NATIONAL',
                 'description' => $r['description'] ?? '',
-                'createdAt' => $r['created_at']
+                'isOptional' => (bool)($r['is_optional'] ?? 0),
+                'applicableDepartments' => json_decode($r['applicable_departments_json'] ?? '[]', true) ?: [],
+                'createdBy' => $r['created_by'] ?? '',
+                'createdAt' => $r['created_at'],
+                'updatedAt' => $r['updated_at'] ?? $r['created_at']
             ];
         }, $rows ?: []);
     } catch (Exception $e) { $data['holidays'] = []; }
@@ -5348,35 +5751,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
     try {
         $stmt = $pdo->query('SELECT * FROM `solar_quotations` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
-        $data['quotations'] = array_map(function ($r) {
-            return [
-                'id' => $r['id'],
-                'quotationNumber' => $r['quotation_number'],
-                'customerId' => $r['customer_id'] ?? '',
-                'customerName' => $r['customer_name'],
-                'projectId' => $r['project_id'] ?? '',
-                'capacityKw' => floatval($r['capacity_kw'] ?? 0),
-                'ratePerWp' => floatval($r['rate_per_wp'] ?? 0),
-                'baseAmount' => floatval($r['base_amount'] ?? 0),
-                'taxAmount' => floatval($r['tax_amount'] ?? 0),
-                'panelBrand' => $r['panel_brand'] ?? '',
-                'inverterBrand' => $r['inverter_brand'] ?? '',
-                'structureType' => $r['structure_type'] ?? '',
-                'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
-                'subtotal' => floatval($r['subtotal'] ?? 0),
-                'discountAmount' => floatval($r['discount_amount'] ?? 0),
-                'gstPercent' => floatval($r['gst_percent'] ?? 13.8),
-                'gstAmount' => floatval($r['gst_amount'] ?? 0),
-                'totalAmount' => floatval($r['total_amount'] ?? 0),
-                'paymentTerms' => $r['payment_terms'] ?? '',
-                'warrantyDetails' => $r['warranty_details'] ?? '',
-                'termsAndConditions' => $r['terms_and_conditions'] ?? '',
-                'status' => $r['status'] ?? 'DRAFT',
-                'validUntil' => $r['valid_until'],
-                'quotationDate' => !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d'),
-                'createdAt' => $r['created_at']
-            ];
-        }, $rows ?: []);
+        $data['quotations'] = array_map('formatQuotationRow', $rows ?: []);
     } catch (Exception $e) { $data['quotations'] = []; }
 
     // 17. Surveys
@@ -5384,6 +5759,9 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_site_surveys` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['surveys'] = array_map(function ($r) {
+            $lat = $r['latitude'] !== null ? floatval($r['latitude']) : 0;
+            $lng = $r['longitude'] !== null ? floatval($r['longitude']) : 0;
+            $loc = $r['location_name'] ?? '';
             return [
                 'id' => $r['id'],
                 'projectId' => $r['project_id'] ?? '',
@@ -5395,10 +5773,15 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'status' => $r['status'] ?? 'APPROVED',
                 'siteAddress' => $r['site_address'],
                 'address' => $r['site_address'],
-                'latitude' => !empty($r['latitude']) ? floatval($r['latitude']) : null,
-                'longitude' => !empty($r['longitude']) ? floatval($r['longitude']) : null,
-                'locationName' => $r['location_name'] ?? '',
-                'city' => $r['location_name'] ?? '',
+                'gps' => [
+                    'latitude' => $lat,
+                    'longitude' => $lng,
+                    'locationName' => $loc
+                ],
+                'latitude' => $r['latitude'] !== null ? floatval($r['latitude']) : null,
+                'longitude' => $r['longitude'] !== null ? floatval($r['longitude']) : null,
+                'locationName' => $loc,
+                'city' => $loc,
                 'roofType' => $r['roof_type'] ?? 'RCC Flat',
                 'roofAreaSqft' => floatval($r['roof_area_sqft'] ?? 0),
                 'roofAreaSqFt' => floatval($r['roof_area_sqft'] ?? 0),
@@ -5406,8 +5789,10 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'shadowFreeAreaSqFt' => floatval($r['shadow_free_area_sqft'] ?? 0),
                 'shadowObstacles' => $r['shadow_obstacles'] ?? '',
                 'electricityBillNumber' => $r['electricity_bill_number'] ?? '',
+                'monthlyAverageConsumptionUnits' => floatval($r['monthly_avg_consumption'] ?? 0),
                 'monthlyAvgConsumption' => floatval($r['monthly_avg_consumption'] ?? 0),
                 'sanctionedLoadKw' => floatval($r['sanctioned_load_kw'] ?? 0),
+                'tariffRatePerUnit' => floatval($r['tariff_rate'] ?? 0),
                 'tariffRate' => floatval($r['tariff_rate'] ?? 0),
                 'existingStructureCondition' => $r['existing_structure_condition'] ?? '',
                 'recommendedCapacityKw' => floatval($r['recommended_capacity_kw'] ?? 0),
@@ -5416,6 +5801,8 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'photos' => json_decode($r['photos_json'] ?? '[]', true) ?: [],
                 'notes' => $r['notes'] ?? '',
                 'reviewedBy' => $r['reviewed_by'] ?? '',
+                'reviewedAt' => $r['reviewed_at'] ?? null,
+                'rejectionReason' => $r['rejection_reason'] ?? '',
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);
@@ -5426,6 +5813,7 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_warehouses` ORDER BY `created_at` DESC');
         $rows = $stmt->fetchAll();
         $data['warehouses'] = array_map(function ($r) {
+            $status = !empty($r['status']) ? $r['status'] : (!empty($r['is_active']) ? 'ACTIVE' : 'INACTIVE');
             return [
                 'id' => $r['id'],
                 'name' => $r['name'],
@@ -5434,10 +5822,17 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'city' => $r['city'],
                 'state' => $r['state'] ?? '',
                 'pincode' => $r['pincode'] ?? '',
+                'contactPerson' => $r['manager_name'] ?? '',
                 'managerName' => $r['manager_name'] ?? '',
+                'contactPhone' => $r['manager_phone'] ?? '',
                 'managerPhone' => $r['manager_phone'] ?? '',
+                'email' => $r['email'] ?? '',
+                'capacitySqFt' => floatval($r['capacity_sqft'] ?? 0),
                 'gstNumber' => $r['gst_number'] ?? '',
-                'isActive' => (bool)($r['is_active'] ?? 1),
+                'status' => $status,
+                'isActive' => $status === 'ACTIVE',
+                'isDefault' => (bool)($r['is_default'] ?? 0),
+                'notes' => $r['notes'] ?? '',
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);
@@ -5456,8 +5851,12 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
                 'movementType' => $r['movement_type'],
                 'quantity' => floatval($r['quantity'] ?? 0),
                 'balanceAfter' => floatval($r['balance_after'] ?? 0),
+                'referenceId' => $r['reference_id'] ?? '',
                 'referenceNumber' => $r['reference_number'] ?? '',
                 'warehouseId' => $r['warehouse_id'] ?? '',
+                'warehouseName' => $r['warehouse_name'] ?? '',
+                'targetWarehouseId' => $r['target_warehouse_id'] ?? '',
+                'targetWarehouseName' => $r['target_warehouse_name'] ?? '',
                 'notes' => $r['notes'] ?? '',
                 'timestamp' => $r['timestamp'],
                 'performedBy' => $r['performed_by'] ?? '',
@@ -5471,16 +5870,23 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_stock_audits` ORDER BY `audit_date` DESC');
         $rows = $stmt->fetchAll();
         $data['stock_audits'] = array_map(function ($r) {
+            $items = json_decode($r['items_json'] ?? '[]', true) ?: [];
+            $disc = intval($r['discrepancies_count'] ?? 0);
+            $itemsAudited = intval($r['items_audited'] ?? count($items));
             return [
                 'id' => $r['id'],
                 'auditNumber' => $r['audit_number'],
                 'warehouseId' => $r['warehouse_id'],
                 'warehouseName' => $r['warehouse_name'],
                 'auditDate' => $r['audit_date'],
+                'auditedBy' => $r['auditor_name'],
                 'auditorName' => $r['auditor_name'],
                 'status' => $r['status'] ?? 'COMPLETED',
-                'discrepanciesCount' => intval($r['discrepancies_count'] ?? 0),
-                'items' => json_decode($r['items_json'] ?? '[]', true) ?: [],
+                'itemsAudited' => $itemsAudited,
+                'discrepanciesFound' => $disc,
+                'discrepanciesCount' => $disc,
+                'netAdjustmentValue' => floatval($r['net_adjustment_value'] ?? 0),
+                'items' => $items,
                 'notes' => $r['notes'] ?? '',
                 'createdAt' => $r['created_at']
             ];
@@ -5551,17 +5957,21 @@ if ($method === 'GET' && in_array($cleanPath, ['/bootstrap', '/bootstrap/'])) {
         $stmt = $pdo->query('SELECT * FROM `solar_notifications` ORDER BY `created_at` DESC LIMIT 100');
         $rows = $stmt->fetchAll();
         $data['notifications'] = array_map(function ($r) {
+            $isRead = (bool)($r['is_read'] ?? 0);
             return [
                 'id' => $r['id'],
                 'userId' => $r['user_id'] ?? '',
                 'title' => $r['title'],
                 'message' => $r['message'],
                 'type' => $r['type'] ?? 'INFO',
-                'isRead' => (bool)($r['is_read'] ?? 0),
+                'read' => $isRead,
+                'isRead' => $isRead,
                 'linkType' => $r['link_type'],
                 'linkId' => $r['link_id'],
                 'customerId' => $r['customer_id'],
                 'projectId' => $r['project_id'],
+                'projectName' => $r['project_name'] ?? '',
+                'timestamp' => $r['created_at'],
                 'createdAt' => $r['created_at']
             ];
         }, $rows ?: []);

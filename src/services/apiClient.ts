@@ -28,8 +28,6 @@ export interface BatchImportResult {
   errors?: string[];
 }
 
-import { safeStorage } from './safeStorage';
-
 class ApiClient {
   private baseUrl: string = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL)
     ? String(import.meta.env.VITE_API_URL).replace(/\/$/, '')
@@ -194,14 +192,9 @@ class ApiClient {
 
   // --- Master Bootstrap Data ---
   async getBootstrapData(): Promise<Record<string, any> | null> {
-    try {
-      const res = await this.request(`${this.baseUrl}/bootstrap`);
-      if (!res.ok) return null;
-      const json = await res.json();
-      return json.data || null;
-    } catch {
-      return null;
-    }
+    const res = await this.request(`${this.baseUrl}/bootstrap`);
+    const json = await this.handleResponse<any>(res);
+    return json || null;
   }
 
   private async handleResponse<T = any>(res: Response): Promise<T> {
@@ -318,42 +311,29 @@ class ApiClient {
   }
 
   async updateCustomerPassword(customerId: string, newPassword: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/customers/${encodeURIComponent(customerId)}/password`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPassword })
-      });
-      const data = await res.json();
-      return Boolean(data.success);
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/customers/${encodeURIComponent(customerId)}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPassword })
+    });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Customers ---
   async getCustomers(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/customers`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/customers`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveCustomer(cust: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/customers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cust)
-      });
-      const data = await res.json();
-      return data.data || cust;
-    } catch {
-      return cust;
-    }
+    const res = await this.request(`${this.baseUrl}/customers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cust)
+    });
+    return await this.handleResponse(res);
   }
 
   async importCustomers(customers: any[]): Promise<{
@@ -380,50 +360,35 @@ class ApiClient {
   }
 
   async deleteCustomer(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/customers/${encodeURIComponent(id)}`, {
-        method: 'DELETE'
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/customers/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Leads ---
   async getLeads(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/leads`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/leads`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveLead(lead: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/leads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(lead)
-      });
-      const data = await res.json();
-      return data.data || lead;
-    } catch {
-      return lead;
-    }
+    const res = await this.request(`${this.baseUrl}/leads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(lead)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteLead(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/leads/${encodeURIComponent(id)}`, {
-        method: 'DELETE'
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/leads/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importLeads(leads: any[]): Promise<BatchImportResult> {
@@ -441,38 +406,26 @@ class ApiClient {
 
   // --- Projects ---
   async getProjects(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/projects`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/projects`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveProject(proj: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/projects`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(proj)
-      });
-      const data = await res.json();
-      return data.data || proj;
-    } catch {
-      return proj;
-    }
+    const res = await this.request(`${this.baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(proj)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/projects/${encodeURIComponent(id)}`, {
-        method: 'DELETE'
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importProjects(projects: any[]): Promise<{
@@ -500,38 +453,26 @@ class ApiClient {
 
   // --- Employees ---
   async getEmployees(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/employees`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/employees`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveEmployee(emp: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/employees`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emp)
-      });
-      const data = await res.json();
-      return data.data || emp;
-    } catch {
-      return emp;
-    }
+    const res = await this.request(`${this.baseUrl}/employees`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(emp)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteEmployee(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(id)}`, {
-        method: 'DELETE'
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/employees/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importEmployees(employees: any[]): Promise<BatchImportResult> {
@@ -604,36 +545,24 @@ class ApiClient {
 
   // --- Attendance ---
   async getAttendance(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/attendance`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/attendance`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveAttendance(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/attendance`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/attendance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteAttendance(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/attendance/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/attendance/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importAttendance(attendance: any[]): Promise<BatchImportResult> {
@@ -651,104 +580,68 @@ class ApiClient {
 
   // --- Payroll / Payslips ---
   async getPayslips(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/payslips`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/payslips`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async savePayslip(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/payslips`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/payslips`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deletePayslip(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/payslips/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/payslips/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Holidays ---
   async getHolidays(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/holidays`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/holidays`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveHoliday(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/holidays`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/holidays`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteHoliday(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/holidays/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/holidays/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Products ---
   async getProducts(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/products`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/products`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveProduct(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/products`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteProduct(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importProducts(products: any[]): Promise<BatchImportResult> {
@@ -766,36 +659,24 @@ class ApiClient {
 
   // --- Vendors ---
   async getVendors(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/vendors`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/vendors`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveVendor(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/vendors`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/vendors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteVendor(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/vendors/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/vendors/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importVendors(vendors: any[]): Promise<BatchImportResult> {
@@ -813,299 +694,194 @@ class ApiClient {
 
   // --- Purchase Orders ---
   async getPurchaseOrders(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/purchase-orders`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/purchase-orders`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async savePurchaseOrder(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/purchase-orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/purchase-orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deletePurchaseOrder(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/purchase-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/purchase-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Bill of Materials (BOM) ---
   async getBOMs(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/boms`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/boms`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveBOM(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/boms`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/boms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteBOM(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/boms/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/boms/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Sales Invoices ---
   async getSalesInvoices(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/sales-invoices`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/sales-invoices`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveSalesInvoice(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/sales-invoices`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/sales-invoices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteSalesInvoice(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/sales-invoices/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/sales-invoices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Warehouses ---
   async getWarehouses(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/warehouses`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/warehouses`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveWarehouse(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/warehouses`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/warehouses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteWarehouse(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/warehouses/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/warehouses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Stock Movements ---
   async getStockMovements(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/stock-movements`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/stock-movements`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveStockMovement(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/stock-movements`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/stock-movements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   // --- Stock Audits ---
   async getStockAudits(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/stock-audits`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/stock-audits`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveStockAudit(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/stock-audits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/stock-audits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteStockAudit(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/stock-audits/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/stock-audits/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Quotations ---
   async getQuotations(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/quotations`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/quotations`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveQuotation(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/quotations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/quotations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteQuotation(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/quotations/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/quotations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Site Surveys ---
   async getSurveys(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/surveys`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/surveys`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveSurvey(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/surveys`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/surveys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteSurvey(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/surveys/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/surveys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Payments ---
   async getPayments(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/payments`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/payments`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async savePayment(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/payments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deletePayment(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/payments/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/payments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importPayments(payments: any[]): Promise<BatchImportResult> {
@@ -1123,36 +899,24 @@ class ApiClient {
 
   // --- Expenses ---
   async getExpenses(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/expenses`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/expenses`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveExpense(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/expenses`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteExpense(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/expenses/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/expenses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importExpenses(expenses: any[]): Promise<BatchImportResult> {
@@ -1170,36 +934,24 @@ class ApiClient {
 
   // --- Service Tickets ---
   async getServiceTickets(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/service-tickets`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/service-tickets`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveServiceTicket(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/service-tickets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/service-tickets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteServiceTicket(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/service-tickets/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/service-tickets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async importServiceTickets(tickets: any[]): Promise<BatchImportResult> {
@@ -1217,117 +969,76 @@ class ApiClient {
 
   // --- AMC Contracts ---
   async getAMCContracts(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/amc-contracts`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/amc-contracts`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveAMCContract(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/amc-contracts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/amc-contracts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async deleteAMCContract(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/amc-contracts/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/amc-contracts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Notifications ---
   async getNotifications(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/notifications`);
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/notifications`);
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveNotification(item: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/notifications`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      return data.data || item;
-    } catch {
-      return item;
-    }
+    const res = await this.request(`${this.baseUrl}/notifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    return await this.handleResponse(res);
   }
 
   async markNotificationRead(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
+    await this.handleResponse(res);
+    return true;
   }
 
   async markAllNotificationsRead(): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/notifications/read-all`, { method: 'PUT' });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/notifications/read-all`, { method: 'PUT' });
+    await this.handleResponse(res);
+    return true;
   }
 
   // --- Settings ---
   async getSettings(): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/settings`);
-      const data = await res.json();
-      return data.data || null;
-    } catch {
-      return null;
-    }
+    const res = await this.request(`${this.baseUrl}/settings`);
+    return await this.handleResponse(res);
   }
 
   async saveSettings(settings: any): Promise<any> {
-    try {
-      const res = await this.request(`${this.baseUrl}/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-      const data = await res.json();
-      return data.data || settings;
-    } catch {
-      return settings;
-    }
+    const res = await this.request(`${this.baseUrl}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    return await this.handleResponse(res);
   }
 
   // --- Users & Passwords ---
   async getUsers(): Promise<any[]> {
-    try {
-      const res = await this.request(`${this.baseUrl}/users`, {
-        headers: this.getAuthHeaders()
-      });
-      const data = await res.json();
-      return data.data || [];
-    } catch {
-      return [];
-    }
+    const res = await this.request(`${this.baseUrl}/users`, {
+      headers: this.getAuthHeaders()
+    });
+    const data = await this.handleResponse<any[]>(res);
+    return Array.isArray(data) ? data : [];
   }
 
   async saveUser(user: any): Promise<any> {
@@ -1421,15 +1132,12 @@ class ApiClient {
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    try {
-      const res = await this.request(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders()
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const res = await this.request(`${this.baseUrl}/users/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders()
+    });
+    await this.handleResponse(res);
+    return true;
   }
 }
 

@@ -19,10 +19,10 @@ import {
 } from 'lucide-react';
 
 export const ServiceView: React.FC = () => {
-  const { openWhatsAppModal, openImportExportModal, showToast, triggerRefresh } = useApp();
+  const { openWhatsAppModal, openImportExportModal, showToast, triggerRefresh, refreshTrigger } = useApp();
   const { currentUser, isCustomer } = useAuth();
 
-  const customers = useMemo(() => storageService.getCustomers(), []);
+  const customers = useMemo(() => storageService.getCustomers(), [refreshTrigger]);
   const currentCustomer = useMemo(() => {
     if (isCustomer) {
       return (
@@ -57,7 +57,7 @@ export const ServiceView: React.FC = () => {
       );
     }
     return all;
-  }, [isCustomer, currentCustomer]);
+  }, [isCustomer, currentCustomer, refreshTrigger]);
 
   const filteredTickets = useMemo(() => {
     return tickets.filter(t =>
