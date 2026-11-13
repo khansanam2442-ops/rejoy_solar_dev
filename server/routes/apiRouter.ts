@@ -9,7 +9,7 @@ export const apiRouter = Router();
 
 // Initialize DB Manager
 dbManager.init().catch(err => {
-  console.error('[DB Manager] Startup error connecting to MySQL:', err?.message || err);
+  console.warn('[DB Manager] Startup notice connecting to MySQL:', err?.message || err);
 });
 
 // Role-based helper functions

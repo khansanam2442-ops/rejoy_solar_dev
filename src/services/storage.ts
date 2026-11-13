@@ -197,9 +197,17 @@ class StorageService {
           safeSessionStorage.removeItem(k);
         });
       } catch {}
+    }
+  }
 
-      // Asynchronously hydrate authoritative data directly from production MySQL backend
-      this.hydrateFromBackend();
+  public clearInMemoryData(): void {
+    this.memStore.clear();
+    this.isHydrated = false;
+    this.bootstrapStatus = 'idle';
+    this.bootstrapError = null;
+    this.lastSyncError = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
     }
   }
 

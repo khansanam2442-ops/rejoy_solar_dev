@@ -61,6 +61,8 @@ class LiveLocationService {
   private unsubscribeLocationPusher: (() => void) | null = null;
   private unsubscribePresencePusher: (() => void) | null = null;
   private staleCheckTimer: any = null;
+  private pollTimer: any = null;
+  private trackingEnabled: boolean = false;
   private isInitialFetched = false;
 
   constructor() {
@@ -75,20 +77,59 @@ class LiveLocationService {
     this.unsubscribePresencePusher = pusherService.onPresenceUpdate((payload) => {
       this.handleIncomingPresence(payload);
     });
+  }
 
-    // 3. Periodic stale presence checker (marks offline if heartbeat expires)
+  /**
+   * Enable or disable workforce location/presence polling based on authenticated staff session.
+   * Prevents unauthenticated /login or customer sessions from polling /api/workforce/locations.
+   */
+  public setTrackingEnabled(enabled: boolean): void {
+    if (this.trackingEnabled === enabled) {
+      if (enabled && typeof window !== 'undefined') {
+        this.initializeFieldWorkers();
+        this.fetchServerLocations();
+      }
+      return;
+    }
+
+    this.trackingEnabled = enabled;
+
+    if (!enabled) {
+      this.isLocationSharing = false;
+      this.isInitialFetched = false;
+      if (this.staleCheckTimer) {
+        clearInterval(this.staleCheckTimer);
+        this.staleCheckTimer = null;
+      }
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+      this.employeeLocations.clear();
+      this.alternateIdMap.clear();
+      this.notifyListeners();
+      return;
+    }
+
     if (typeof window !== 'undefined') {
-      this.staleCheckTimer = setInterval(() => {
-        this.checkStaleLocations();
-      }, 15000);
+      pusherService.init();
+      this.initializeFieldWorkers();
 
-      // Perform initial load from server
+      if (!this.staleCheckTimer) {
+        this.staleCheckTimer = setInterval(() => {
+          this.checkStaleLocations();
+        }, 15000);
+      }
+
+      // Perform initial load from server once authenticated
       this.fetchServerLocations();
 
       // Recurring background polling every 8s ensures admin console and map auto-sync with MySQL
-      setInterval(() => {
-        this.fetchServerLocations();
-      }, 8000);
+      if (!this.pollTimer) {
+        this.pollTimer = setInterval(() => {
+          this.fetchServerLocations();
+        }, 8000);
+      }
     }
   }
 
@@ -230,7 +271,7 @@ class LiveLocationService {
             employeeCode: u.employeeId || u.id,
             name: u.name,
             email: u.email,
-            phone: u.phone || '+91 98250 00000',
+            phone: u.phone || '',
             department: u.department || 'Operations',
             designation: u.designation || u.role,
             systemRole: u.role,
@@ -335,11 +376,10 @@ class LiveLocationService {
    * Admin Initial Load: Fetch latest known locations & presence from central server
    */
   async fetchServerLocations(): Promise<void> {
+    if (!this.trackingEnabled) return;
     try {
       const url = `${apiClient.getBaseUrl()}/workforce/locations`;
-      const res = await fetch(url, {
-        headers: apiClient.getAuthHeaders()
-      });
+      const res = await apiClient.request(url);
       if (!res.ok) return;
 
       const data = await res.json();
@@ -426,7 +466,7 @@ class LiveLocationService {
             name: srv.name || `Field Worker (${targetId.slice(0, 6)})`,
             email: srv.email,
             role: srv.role || 'Field Engineer',
-            phone: '+91 98250 00000',
+            phone: srv.phone || '',
             department: 'Operations',
             isOnline,
             isSharingLocation: srv.isSharingLocation ?? true,
@@ -521,7 +561,7 @@ class LiveLocationService {
         employeeCode: payload.employeeCode || canonicalId,
         name: payload.name || `Field Worker (${canonicalId.slice(0, 6)})`,
         role: payload.role || 'Field Engineer',
-        phone: '+91 98250 00000',
+        phone: '',
         department: 'Operations',
         isOnline: true,
         isSharingLocation: true,
@@ -629,7 +669,7 @@ class LiveLocationService {
         name: payload.name || `Field Worker (${canonicalId.slice(0, 6)})`,
         email: payload.email,
         role: payload.role || 'Field Engineer',
-        phone: '+91 98250 00000',
+        phone: '',
         department: 'Operations',
         isOnline,
         isSharingLocation: payload.isSharingLocation ?? true,
@@ -796,6 +836,11 @@ class LiveLocationService {
       clearInterval(this.staleCheckTimer);
       this.staleCheckTimer = null;
     }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    this.trackingEnabled = false;
     this.listeners.clear();
   }
 }

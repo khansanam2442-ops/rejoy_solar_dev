@@ -9,14 +9,12 @@ export function useWorkforcePresence(currentUser: UserProfile | null, isAuthenti
   currentUserRef.current = currentUser;
 
   useEffect(() => {
-    if (!isAuthenticated || !currentUser) {
+    if (!isAuthenticated || !currentUser || currentUser.role === 'Customer') {
+      liveLocationService.setTrackingEnabled(false);
       return;
     }
 
-    // Customer accounts do not participate in workforce presence
-    if (currentUser.role === 'Customer') {
-      return;
-    }
+    liveLocationService.setTrackingEnabled(true);
 
     const userId = currentUser.id;
     const employeeCode = currentUser.employeeId || currentUser.id;
@@ -69,6 +67,7 @@ export function useWorkforcePresence(currentUser: UserProfile | null, isAuthenti
       clearInterval(intervalTimer);
       window.removeEventListener('beforeunload', handleUnload);
       window.removeEventListener('pagehide', handleUnload);
+      liveLocationService.setTrackingEnabled(false);
       // NOTE: Do NOT send offline in React effect cleanup, as component re-renders or navigation
       // must not prematurely knock the user offline. Explicit offline is handled by logout or beforeunload.
     };

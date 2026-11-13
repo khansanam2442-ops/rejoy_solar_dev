@@ -54,8 +54,6 @@ class PusherService {
       } catch (e) {
         console.warn('[Pusher] Local broadcast fallback not initialized:', e);
       }
-
-      this.init();
     }
   }
 

@@ -66,7 +66,7 @@ class MySqlDatabaseManager {
       if (!isRunning) {
         this.isConnected = false;
         this.pool = null;
-        console.error(`[MySQL] Unavailable (${this.config.host}:${this.config.port} unreachable). Running in strict MySQL-only mode — API data requests will return HTTP 503 until MySQL connects.`);
+        console.warn(`[MySQL] Unavailable (${this.config.host}:${this.config.port} unreachable). Running in strict MySQL-only mode — API data requests will return HTTP 503 until MySQL connects.`);
         return { connected: false, error: 'Local MySQL daemon is not running' };
       }
     }
@@ -114,7 +114,7 @@ class MySqlDatabaseManager {
     } catch (err: any) {
       this.isConnected = false;
       this.pool = null;
-      console.error(`[MySQL] Connection failed (${this.config.host}:${this.config.port}):`, err?.message || err);
+      console.warn(`[MySQL] Connection unavailable (${this.config.host}:${this.config.port}):`, err?.message || err);
       return { connected: false, error: err.message };
     }
   }

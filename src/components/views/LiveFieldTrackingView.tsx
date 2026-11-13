@@ -70,6 +70,7 @@ export const LiveFieldTrackingView: React.FC = () => {
 
   // Initial load & periodic reconciliation: Fetch server locations immediately and every 10 seconds
   useEffect(() => {
+    liveLocationService.setTrackingEnabled(true);
     liveLocationService.fetchServerLocations();
     const interval = setInterval(() => {
       liveLocationService.fetchServerLocations();

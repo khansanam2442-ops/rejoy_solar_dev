@@ -123,7 +123,7 @@ async function createServerApp() {
   try {
     await dbManager.init();
   } catch (dbInitErr: any) {
-    console.error('[Server Startup] MySQL database initialization notice:', dbInitErr?.message || dbInitErr);
+    console.warn('[Server Startup] MySQL database initialization notice:', dbInitErr?.message || dbInitErr);
   }
 
   app.use(express.json({ limit: '50mb' }));
@@ -410,10 +410,16 @@ async function createServerApp() {
         users: dbRecords
       });
     } catch (err: any) {
-      console.error('[Workforce Locations] Error:', err);
-      const statusCode = err?.statusCode === 503 || err?.code === 'DB_UNAVAILABLE' ? 503 : 500;
+      const isUnavailable = err?.code === 'DB_UNAVAILABLE' || err?.statusCode === 503 || err?.name === 'DbConnectionError';
+      if (isUnavailable) {
+        console.warn('[Workforce Locations] MySQL unavailable (503):', err?.message || 'Disconnected');
+      } else {
+        console.error('[Workforce Locations] Error:', err);
+      }
+      const statusCode = isUnavailable ? 503 : 500;
       res.status(statusCode).json({
         success: false,
+        code: isUnavailable ? 'DB_UNAVAILABLE' : 'SERVER_ERROR',
         error: err?.message || 'Failed to fetch workforce locations from MySQL.'
       });
     }

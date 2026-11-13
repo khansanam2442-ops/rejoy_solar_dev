@@ -227,7 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             name: u.name || 'Solar Team Member',
             email: u.email,
             role: u.role as UserRole,
-            phone: u.phone || '+91 98250 11223',
+            phone: u.phone || '',
             department: u.department || (u.role === 'Customer' ? 'Client Portal' : 'Administration'),
             designation: u.designation || u.role,
             isFieldWorker: isFw,
@@ -313,7 +313,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         name: u.name || 'Solar Team Member',
         email: u.email,
         role: u.role as UserRole,
-        phone: u.phone || '+91 98250 11223',
+        phone: u.phone || '',
         department: u.department || (u.role === 'Customer' ? 'Client Portal' : 'Administration'),
         designation: u.designation || u.role,
         isFieldWorker: isFw,
@@ -338,7 +338,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     role: UserRole = 'Admin',
     department?: string,
     designation?: string,
-    phone: string = '+91 98250 11223'
+    phone: string = ''
   ): Promise<void> => {
     setLoading(true);
     try {
@@ -415,6 +415,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentUser?.id) {
         liveLocationService.sendOffline(currentUser.id, currentUser.email, currentUser.employeeId).catch(() => {});
       }
+      liveLocationService.setTrackingEnabled(false);
+      storageService.clearInMemoryData();
       try {
         await apiClient.logout();
       } catch (e) {
