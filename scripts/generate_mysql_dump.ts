@@ -41,7 +41,7 @@ export function generateFullSql(): string {
   \`id\` VARCHAR(64) PRIMARY KEY,
   \`name\` VARCHAR(255) NOT NULL,
   \`email\` VARCHAR(191) NOT NULL UNIQUE,
-  \`password\` VARCHAR(255) NOT NULL DEFAULT '123456',
+  \`password\` VARCHAR(255) NOT NULL DEFAULT '',
   \`role\` VARCHAR(64) NOT NULL DEFAULT 'Super Admin',
   \`phone\` VARCHAR(32) DEFAULT '',
   \`department\` VARCHAR(64) DEFAULT 'Operations',
@@ -715,68 +715,22 @@ export function generateFullSql(): string {
   lines.push('');
 
   lines.push('-- ==========================================================');
-  lines.push('-- SYSTEM CONFIGURATION & AUTHORIZED AUTHENTICATION BASELINE');
+  lines.push('-- SYSTEM CONFIGURATION BASELINE (NON-DESTRUCTIVE)');
+  lines.push('-- Initial administrators must be provisioned explicitly.');
   lines.push('-- ==========================================================');
   lines.push('');
 
-  // --- Seed solar_users ---
-  lines.push('-- Pushing users data into solar_users');
-  const adminUsers = [
-    {
-      id: "emp-1",
-      name: "Vikram Patel",
-      email: "admin@rejoysolar.com",
-      password: "123456",
-      role: "Admin",
-      phone: "+91 98250 11223",
-      department: "Administration",
-      designation: "Managing Director & Admin",
-      employeeId: "EMP001"
-    },
-    {
-      id: "usr-kunal",
-      name: "Kunal Das",
-      email: "kunaldas2442@gmail.com",
-      password: "123456",
-      role: "Admin",
-      phone: "+91 98250 11223",
-      department: "Administration",
-      designation: "Owner / Admin",
-      employeeId: "EMP000"
-    },
-    {
-      id: "usr-admin-fallback",
-      name: "Admin System Fallback",
-      email: "dasest404@gmail.com",
-      password: "123456",
-      role: "Admin",
-      phone: "+91 98250 11223",
-      department: "Administration",
-      designation: "Lead Administrator",
-      employeeId: "EMP-ADM-404"
-    }
-  ];
-
-  adminUsers.forEach(account => {
-    lines.push(`INSERT INTO \`solar_users\` (\`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`, \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`)
-VALUES (${escapeSql(account.id)}, ${escapeSql(account.name)}, ${escapeSql(account.email)}, ${escapeSql(account.password)}, ${escapeSql(account.role)}, ${escapeSql(account.phone)}, ${escapeSql(account.department)}, ${escapeSql(account.designation)}, ${escapeSql(account.employeeId)}, 0, 'ACTIVE')
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`role\` = VALUES(\`role\`), \`password\` = VALUES(\`password\`);`);
-  });
+  // --- Seed solar_acl_config (non-destructive) ---
+  lines.push('-- Initial ACL config (inserted only if missing)');
+  lines.push(`INSERT IGNORE INTO \`solar_acl_config\` (\`id\`, \`config_json\`)
+VALUES ('master_acl_config', ${escapeSql(DEFAULT_SYSTEM_ACL_CONFIG)});`);
   lines.push('');
 
-  // --- Seed solar_acl_config ---
-  lines.push('-- Pushing system ACL config');
-  lines.push(`INSERT INTO \`solar_acl_config\` (\`id\`, \`config_json\`)
-VALUES ('master_acl_config', ${escapeSql(DEFAULT_SYSTEM_ACL_CONFIG)})
-ON DUPLICATE KEY UPDATE \`config_json\` = VALUES(\`config_json\`);`);
-  lines.push('');
-
-  // --- Seed solar_system_settings ---
+  // --- Seed solar_system_settings (non-destructive) ---
   const settings = storageService.getSettings();
-  lines.push('-- Pushing system settings');
-  lines.push(`INSERT INTO \`solar_system_settings\` (\`setting_key\`, \`setting_value\`)
-VALUES ('global_settings', ${escapeSql(settings)})
-ON DUPLICATE KEY UPDATE \`setting_value\` = VALUES(\`setting_value\`);`);
+  lines.push('-- Initial system settings (inserted only if missing)');
+  lines.push(`INSERT IGNORE INTO \`solar_system_settings\` (\`setting_key\`, \`setting_value\`)
+VALUES ('global_settings', ${escapeSql(settings)});`);
   lines.push('');
 
   lines.push('SET FOREIGN_KEY_CHECKS = 1;');
