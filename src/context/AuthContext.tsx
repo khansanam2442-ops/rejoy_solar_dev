@@ -121,88 +121,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   }
 ];
 
-export interface DemoAccount {
-  name: string;
-  email: string;
-  role: UserRole;
-  password: string;
-  department: string;
-  isFieldWorker?: boolean;
-  profile: UserProfile;
-  description: string;
-  badgeColor: string;
-}
-
-export const DEMO_DEFAULT_PASSWORD = '123456';
-
-export const SYSTEM_ADMIN_ACCOUNTS: DemoAccount[] = [
-  {
-    name: 'System Administrator',
-    email: 'admin@rejoysolar.com',
-    role: 'Admin',
-    password: DEMO_DEFAULT_PASSWORD,
-    department: 'Administration',
-    isFieldWorker: false,
-    profile: {
-      id: 'usr-admin-1',
-      employeeId: 'EMP-ADMIN-1',
-      name: 'System Administrator',
-      email: 'admin@rejoysolar.com',
-      role: 'Admin',
-      phone: '+91 98250 11223',
-      department: 'Administration',
-      designation: 'Principal Admin',
-      isFieldWorker: false
-    },
-    description: 'Master system authority & administrative control',
-    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-300'
-  },
-  {
-    name: 'Kunal Das',
-    email: 'kunaldas2442@gmail.com',
-    role: 'Admin',
-    password: DEMO_DEFAULT_PASSWORD,
-    department: 'Administration',
-    isFieldWorker: false,
-    profile: {
-      id: 'usr-kunal-2',
-      employeeId: 'EMP-KUNAL-2',
-      name: 'Kunal Das',
-      email: 'kunaldas2442@gmail.com',
-      role: 'Admin',
-      phone: '+91 98250 11223',
-      department: 'Administration',
-      designation: 'Managing Director & Lead Administrator',
-      isFieldWorker: false
-    },
-    description: 'Managing Director & Lead Administrator',
-    badgeColor: 'bg-amber-100 text-amber-800 border-amber-300'
-  },
-  {
-    name: 'Dasest Admin',
-    email: 'dasest404@gmail.com',
-    role: 'Admin',
-    password: DEMO_DEFAULT_PASSWORD,
-    department: 'Administration',
-    isFieldWorker: false,
-    profile: {
-      id: 'usr-dasest-3',
-      employeeId: 'EMP-DASEST-3',
-      name: 'Dasest Admin',
-      email: 'dasest404@gmail.com',
-      role: 'Admin',
-      phone: '+91 98250 11223',
-      department: 'Administration',
-      designation: 'System Administrator',
-      isFieldWorker: false
-    },
-    description: 'System Administrator',
-    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300'
-  }
-];
-
-export const DEMO_ACCOUNTS: DemoAccount[] = SYSTEM_ADMIN_ACCOUNTS;
-
 export interface AuthContextType {
   currentUser: UserProfile | null;
   currentRole: UserRole;
@@ -318,7 +236,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (isMounted) {
             saveUserProfile(verifiedProfile, verifyRes.token || undefined);
-            await storageService.hydrateFromBackend().catch(() => {});
+            storageService.hydrateFromBackend().catch((syncErr) => {
+              console.error('[Auth] Initial MySQL bootstrap sync failed:', syncErr);
+            });
           }
         } else {
           if (isMounted) {
@@ -401,7 +321,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       saveUserProfile(authenticatedProfile, data.token);
-      await storageService.hydrateFromBackend().catch(() => {});
+      await storageService.hydrateFromBackend().catch((syncErr) => {
+        console.error('[Auth] Post-login MySQL bootstrap sync failed:', syncErr);
+      });
     } catch (err: any) {
       throw new Error(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
@@ -436,7 +358,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch(`${apiClient.getBaseUrl()}/auth/register`, {
         method: 'POST',
         headers,
-        credentials: 'include',
         body: JSON.stringify({
           name: cleanName,
           email: cleanEmail,
@@ -478,7 +399,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       saveUserProfile(newProfile, data.token);
-      await storageService.hydrateFromBackend().catch(() => {});
+      await storageService.hydrateFromBackend().catch((syncErr) => {
+        console.error('[Auth] Post-registration MySQL bootstrap sync failed:', syncErr);
+      });
     } catch (err: any) {
       throw new Error(err?.message || 'Registration failed.');
     } finally {
@@ -519,14 +442,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetPassword = async (email: string): Promise<void> => {
     const clean = email.trim().toLowerCase();
-    try {
-      const res = await apiClient.resetPassword(clean, DEMO_DEFAULT_PASSWORD);
-      if (!res.success) {
-        throw new Error(res.message || 'No user account found with that email address.');
-      }
-    } catch (err: any) {
-      throw new Error(err?.message || 'Failed to reset password. Please check your email or contact system admin.');
+    if (!clean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+      throw new Error('Please provide a valid email address.');
     }
+    throw new Error('Self-service password reset requires an email token; please ask your System Administrator to reset your password in User Management.');
   };
 
   const updateRole = (newRole: UserRole) => {

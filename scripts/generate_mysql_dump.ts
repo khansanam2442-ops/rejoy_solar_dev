@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { storageService } from '../src/services/storage';
 import { DEFAULT_SYSTEM_ACL_CONFIG } from '../src/services/aclDefaults';
-import { ROLE_DEFINITIONS, DEMO_ACCOUNTS } from '../src/context/AuthContext';
+import { ROLE_DEFINITIONS } from '../src/context/AuthContext';
 
 function escapeSql(val: any): string {
   if (val === null || val === undefined) return 'NULL';

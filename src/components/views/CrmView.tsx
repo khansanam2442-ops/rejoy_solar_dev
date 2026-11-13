@@ -100,7 +100,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
     customerType: 'Commercial' as 'Residential' | 'Commercial' | 'Industrial',
     phone: '',
     email: '',
-    password: '123456',
+    password: '',
     siteAddress: '',
     city: 'Ahmedabad',
     capacityKw: 25,
@@ -349,7 +349,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                   customerType: 'Commercial',
                   phone: '+91 ',
                   email: '',
-                  password: '123456',
+                  password: '',
                   siteAddress: '',
                   city: 'Ahmedabad',
                   capacityKw: 25,
@@ -650,8 +650,8 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                       onClick={(e) => {
                         e.stopPropagation();
                         setPasswordModalCustomer(cust);
-                        setNewCustomerPassword(cust.password || '123456');
-                        setConfirmCustomerPassword(cust.password || '123456');
+                        setNewCustomerPassword('');
+                        setConfirmCustomerPassword('');
                         setPasswordError('');
                         setShowUpdatePassword(false);
                         setIsUpdatePasswordOpen(true);
@@ -699,8 +699,8 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                   onClick={(e) => {
                     e.stopPropagation();
                     setPasswordModalCustomer(cust);
-                    setNewCustomerPassword(cust.password || '123456');
-                    setConfirmCustomerPassword(cust.password || '123456');
+                    setNewCustomerPassword('');
+                    setConfirmCustomerPassword('');
                     setPasswordError('');
                     setShowUpdatePassword(false);
                     setIsUpdatePasswordOpen(true);
@@ -1178,7 +1178,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                     className={`w-full text-xs border bg-white rounded-xl p-2.5 pr-8 focus:ring-2 focus:ring-amber-500 ${
                       customerErrors.password ? 'border-red-400 bg-red-50/50' : 'border-slate-200'
                     }`}
-                    placeholder="Set customer portal login password (e.g. 123456)"
+                    placeholder="Set customer portal login password (min 6 chars)"
                   />
                   <button
                     type="button"
@@ -1301,7 +1301,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
             </div>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
                 setPasswordError('');
                 const clean = newCustomerPassword.trim();
@@ -1318,10 +1318,14 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                   return;
                 }
 
-                storageService.updateCustomerPassword(passwordModalCustomer.id, clean);
-                showToast(`Portal password updated successfully for ${passwordModalCustomer.name}`, 'success');
-                setIsUpdatePasswordOpen(false);
-                triggerRefresh();
+                try {
+                  await storageService.updateCustomerPassword(passwordModalCustomer.id, clean);
+                  showToast(`Portal password updated successfully for ${passwordModalCustomer.name}`, 'success');
+                  setIsUpdatePasswordOpen(false);
+                  triggerRefresh();
+                } catch (err: any) {
+                  setPasswordError(err?.message || 'Failed to update customer password in MySQL');
+                }
               }}
               className="p-5 space-y-4"
             >
@@ -1375,7 +1379,7 @@ export const CrmView: React.FC<{ defaultTab?: 'LEADS' | 'CUSTOMERS' | 'QUOTATION
                       if (passwordError) setPasswordError('');
                     }}
                     className="w-full text-xs border border-slate-200 rounded-xl p-2.5 pr-8 focus:ring-2 focus:ring-amber-500"
-                    placeholder="Enter new password (e.g. 123456)"
+                    placeholder="Enter new password (min 6 chars)"
                   />
                   <button
                     type="button"

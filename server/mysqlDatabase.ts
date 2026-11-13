@@ -27,151 +27,33 @@ export function getDbConfigFromEnv(): DbConfig {
   };
 }
 
+export class DbConnectionError extends Error {
+  public readonly code = 'DB_UNAVAILABLE';
+  public readonly statusCode = 503;
+  constructor(message: string) {
+    super(message);
+    this.name = 'DbConnectionError';
+  }
+}
+
 class MySqlDatabaseManager {
   private pool: mysql.Pool | null = null;
   private isConnected: boolean = false;
   private collections: Map<string, any[]> = new Map();
   private settingsStore: Record<string, any> = {};
   private config: DbConfig;
-  private snapshotFilePath = path.join(process.cwd(), 'data', 'authoritative_store.json');
 
   private loadDiskSnapshot(): void {
-    try {
-      if (fs.existsSync(this.snapshotFilePath)) {
-        const raw = fs.readFileSync(this.snapshotFilePath, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          if (parsed.settings && typeof parsed.settings === 'object') {
-            this.settingsStore = { ...this.settingsStore, ...parsed.settings };
-          }
-          for (const [key, val] of Object.entries(parsed)) {
-            if (key !== 'settings' && Array.isArray(val)) {
-              this.collections.set(key, val);
-            }
-          }
-          console.log('[DB Manager] Loaded authoritative store from disk:', this.snapshotFilePath);
-        }
-      }
-    } catch (e) {
-      console.warn('[DB Manager] Notice reading disk snapshot:', e);
-    }
+    // Disabled: MySQL is the sole authoritative store. Never seed runtime state from JSON snapshots.
   }
 
   public saveDiskSnapshot(): void {
-    try {
-      const dataDir = path.dirname(this.snapshotFilePath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-      const data: Record<string, any> = {
-        settings: this.settingsStore
-      };
-      this.collections.forEach((val, key) => {
-        data[key] = val;
-      });
-      const tempPath = `${this.snapshotFilePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-      fs.renameSync(tempPath, this.snapshotFilePath);
-    } catch (e) {
-      console.warn('[DB Manager] Notice saving disk snapshot:', e);
-    }
-  }
-
-  private createDummyPool(): mysql.Pool {
-    return {
-      query: async () => [[]],
-      getConnection: async () => ({
-        ping: async () => {},
-        release: () => {},
-        query: async () => [[]]
-      }),
-      end: async () => {}
-    } as any;
+    // Disabled: MySQL is the sole authoritative store.
   }
 
   constructor() {
     this.config = getDbConfigFromEnv();
-    this.pool = this.createDummyPool();
-    this.initDefaultCollections();
-  }
-
-  private initDefaultCollections() {
-    try {
-      this.collections.set('customers', []);
-      this.collections.set('leads', []);
-      this.collections.set('projects', []);
-      this.collections.set('employees', []);
-      this.collections.set('payments', []);
-      this.collections.set('expenses', []);
-      this.collections.set('products', []);
-      this.collections.set('vendors', []);
-      this.collections.set('purchase_orders', []);
-      this.collections.set('sales_invoices', []);
-      this.collections.set('attendance', []);
-      this.collections.set('payslips', []);
-      this.collections.set('holidays', []);
-      this.collections.set('quotations', []);
-      this.collections.set('surveys', []);
-      this.collections.set('boms', []);
-      this.collections.set('warehouses', []);
-      this.collections.set('stock_movements', []);
-      this.collections.set('stock_audits', []);
-      this.collections.set('service_tickets', []);
-      this.collections.set('amc_contracts', []);
-      this.collections.set('notifications', []);
-      this.collections.set('acl_audit_logs', []);
-      this.collections.set('acl_config', [{ id: 'sys_acl_v1', version: '1.0.0', roles: {} }]);
-      this.settingsStore = { companyName: 'Rejoy Solar ERP', phone: '+91 98250 11223', email: 'admin@rejoysolar.com' };
-
-      const defaultUsers: any[] = [
-        {
-          id: 'usr-admin',
-          name: 'Vikram Patel',
-          email: 'admin@rejoysolar.com',
-          password: '123456',
-          role: 'Admin',
-          phone: '+91 98250 11223',
-          department: 'Administration',
-          designation: 'Principal Administrator',
-          employeeId: 'ADM-001',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'usr-kunal',
-          name: 'Kunal Das',
-          email: 'kunaldas2442@gmail.com',
-          password: '123456',
-          role: 'Admin',
-          phone: '+91 98250 11223',
-          department: 'Administration',
-          designation: 'Owner / Admin',
-          employeeId: 'EMP000',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'usr-admin-fallback',
-          name: 'Admin System Fallback',
-          email: 'dasest404@gmail.com',
-          password: '123456',
-          role: 'Admin',
-          phone: '+91 98250 11223',
-          department: 'Administration',
-          designation: 'Lead Administrator',
-          employeeId: 'EMP-ADM-404',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        }
-      ];
-
-      this.collections.set('users', defaultUsers);
-
-      // Load authoritative records from persistent disk storage
-      this.loadDiskSnapshot();
-    } catch (e) {
-      console.warn('[DB Manager] Notice loading initial collections:', e);
-    }
+    this.pool = null;
   }
 
   public async init(): Promise<{ connected: boolean; error?: string }> {
@@ -183,8 +65,8 @@ class MySqlDatabaseManager {
       const isRunning = await ensureLocalMySqlRunning(this.config.host || '127.0.0.1', this.config.port);
       if (!isRunning) {
         this.isConnected = false;
-        this.pool = this.createDummyPool();
-        console.warn(`[MySQL] Standby mode active (${this.config.host}:${this.config.port} unreachable) — using persistent disk snapshot persistence: data/authoritative_store.json`);
+        this.pool = null;
+        console.error(`[MySQL] Unavailable (${this.config.host}:${this.config.port} unreachable). Running in strict MySQL-only mode — API data requests will return HTTP 503 until MySQL connects.`);
         return { connected: false, error: 'Local MySQL daemon is not running' };
       }
     }
@@ -228,39 +110,11 @@ class MySqlDatabaseManager {
       // Ensure all tables and baseline schema exist
       await this.ensureSchema();
 
-      // Refresh in-memory state with authoritative data from MySQL
-      await this.getAllData();
-
-      // If MySQL is newly connected and disk snapshot has records, synchronize to MySQL
-      try {
-        const collections = [
-          'customers', 'leads', 'projects', 'employees', 'payments', 'expenses',
-          'products', 'vendors', 'purchase_orders', 'sales_invoices', 'attendance',
-          'payslips', 'holidays', 'quotations', 'surveys', 'boms', 'warehouses',
-          'stock_movements', 'stock_audits', 'service_tickets', 'amc_contracts',
-          'notifications'
-        ];
-        for (const col of collections) {
-          const items = this.getFallbackItems(col);
-          if (Array.isArray(items) && items.length > 0) {
-            for (const it of items) {
-              if (it && it.id) {
-                try {
-                  await this.saveItem(col, it);
-                } catch {}
-              }
-            }
-          }
-        }
-      } catch (syncErr) {
-        console.warn('[DB Manager] Notice sync from snapshot to MySQL:', syncErr);
-      }
-
       return { connected: true };
     } catch (err: any) {
       this.isConnected = false;
-      this.pool = this.createDummyPool();
-      console.warn(`[MySQL] Standby mode active (${this.config.host}:${this.config.port} unreachable) — using persistent disk snapshot persistence:`, err?.message || err);
+      this.pool = null;
+      console.error(`[MySQL] Connection failed (${this.config.host}:${this.config.port}):`, err?.message || err);
       return { connected: false, error: err.message };
     }
   }
@@ -552,7 +406,7 @@ class MySqlDatabaseManager {
       database: this.config.database,
       port: this.config.port,
       user: this.config.user,
-      mode: this.isConnected ? 'LIVE_MYSQL_POOL' : 'IN_MEMORY_MOCK',
+      mode: this.isConnected ? 'LIVE_MYSQL_POOL' : 'DISCONNECTED',
       dumpAvailable: fs.existsSync(path.join(process.cwd(), 'database.sql')),
       dumpPath: '/database.sql'
     };
@@ -564,72 +418,40 @@ class MySqlDatabaseManager {
 
   private assertDbConnected(): void {
     if (!this.isConnected || !this.pool) {
-      // In-memory and disk snapshot storage will handle persistence gracefully
-      return;
+      throw new DbConnectionError(
+        `MySQL database "${this.config.database}" at ${this.config.host}:${this.config.port} is disconnected. Cannot read or mutate business records without a live MySQL connection.`
+      );
     }
   }
 
-  public getFallbackItems(collection: string): any[] {
-    return this.collections.get(collection) || [];
+  public getFallbackItems(_collection: string): any[] {
+    this.assertDbConnected();
+    return [];
   }
 
-  public setFallbackItems(collection: string, items: any[]): void {
-    this.collections.set(collection, items);
-    this.saveDiskSnapshot();
+  public setFallbackItems(_collection: string, _items: any[]): void {
+    // No-op: MySQL is the single source of truth; no disk/memory fallback cache is written.
   }
 
-  public upsertFallback(collection: string, item: any): any {
-    const items = this.getFallbackItems(collection);
-    const idx = items.findIndex((x: any) => x && x.id === item.id);
-    if (idx >= 0) items[idx] = { ...items[idx], ...item };
-    else items.unshift(item);
-    this.setFallbackItems(collection, items);
+  public upsertFallback(_collection: string, item: any): any {
     return item;
   }
 
-  public deleteFallback(collection: string, id: string): boolean {
-    const items = this.getFallbackItems(collection).filter((x: any) => x && x.id !== id);
-    this.setFallbackItems(collection, items);
+  public deleteFallback(_collection: string, _id: string): boolean {
     return true;
   }
 
   public async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    if (!this.isConnected || !this.pool) {
-      return [] as T[];
-    }
+    this.assertDbConnected();
     const [rows] = await this.pool!.query(sql, params);
     return rows as T[];
   }
 
   private async getExistingRow(table: string, id: string): Promise<any | null> {
     if (!id) return null;
-    if (!this.pool || !this.isConnected) {
-      const colMap: Record<string, string> = {
-        solar_customer: 'customers',
-        solar_customers: 'customers',
-        solar_lead: 'leads',
-        solar_leads: 'leads',
-        solar_project: 'projects',
-        solar_projects: 'projects',
-        solar_employee: 'employees',
-        solar_employees: 'employees',
-        solar_product: 'products',
-        solar_products: 'products',
-        solar_vendor: 'vendors',
-        solar_vendors: 'vendors',
-        solar_purchase_order: 'purchase_orders',
-        solar_purchase_orders: 'purchase_orders',
-        solar_user: 'users',
-        solar_users: 'users'
-      };
-      const col = colMap[table];
-      if (col) {
-        return this.getFallbackItems(col).find((x: any) => x && x.id === id) || null;
-      }
-      return null;
-    }
+    this.assertDbConnected();
     try {
-      const [rows]: any = await this.pool.query(`SELECT * FROM \`${table}\` WHERE \`id\` = ? LIMIT 1`, [id]);
+      const [rows]: any = await this.pool!.query(`SELECT * FROM \`${table}\` WHERE \`id\` = ? LIMIT 1`, [id]);
       return (Array.isArray(rows) && rows.length > 0) ? rows[0] : null;
     } catch {
       return null;
@@ -715,7 +537,7 @@ class MySqlDatabaseManager {
     const customerType = item.customerType ?? item.customer_type ?? existing?.customer_type ?? 'Residential';
     const phone = item.phone ?? existing?.phone ?? '';
     const email = item.email ?? existing?.email ?? '';
-    let password = item.password ?? existing?.password ?? '123456';
+    let password = item.password ?? existing?.password ?? `Cust@${Date.now().toString().slice(-6)}`;
     if (password && !password.startsWith('$2a$') && !password.startsWith('$2b$') && !password.startsWith('$2y$')) {
       password = await bcrypt.hash(password, 10);
     }
@@ -2310,7 +2132,8 @@ class MySqlDatabaseManager {
           // Synchronize to solar_users if loginEnabled
           if (record.loginEnabled) {
             try {
-              const defaultPasswordHash = bcrypt.hashSync(raw.password || 'User@12345', 10);
+              const tempImportPass = raw.password || `Emp@${Math.random().toString(36).slice(-8)}`;
+              const defaultPasswordHash = bcrypt.hashSync(tempImportPass, 10);
               await this.pool.query(`
                 INSERT INTO \`solar_users\` (
                   \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
@@ -2330,7 +2153,7 @@ class MySqlDatabaseManager {
                 await authService.setCredential(this.pool, {
                   userId: record.id,
                   email: record.email,
-                  password: raw.password || 'User@12345',
+                  password: tempImportPass,
                   role: record.systemRole || 'Technician',
                   accountType: (record.systemRole === 'Admin' || record.systemRole === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE',
                   linkedEntityId: record.id,
@@ -3650,7 +3473,7 @@ class MySqlDatabaseManager {
             passwordHash = rawPass;
           }
         } else if (!passwordHash) {
-          passwordHash = await bcrypt.hash('User@12345', 10);
+          passwordHash = await bcrypt.hash(`Emp@${Math.random().toString(36).slice(-8)}`, 10);
         }
 
         const userStatus = (status === 'INACTIVE' || accountStatus === 'DISABLED') ? 'DISABLED' : 'ACTIVE';
@@ -5682,7 +5505,7 @@ class MySqlDatabaseManager {
       }
       hasNewPassword = true;
     } else if (!password) {
-      password = await bcrypt.hash('User@12345', 10);
+      password = await bcrypt.hash(`Usr@${Math.random().toString(36).slice(-8)}`, 10);
       hasNewPassword = true;
     }
 
@@ -5861,7 +5684,7 @@ class MySqlDatabaseManager {
     if (currentHash.startsWith('$2a$') || currentHash.startsWith('$2b$') || currentHash.startsWith('$2y$')) {
       isOldValid = await bcrypt.compare(oldPass.trim(), currentHash);
     } else {
-      isOldValid = (oldPass.trim() === currentHash || oldPass.trim() === '123456');
+      isOldValid = oldPass.trim() === currentHash;
     }
 
     if (!isOldValid) {
@@ -5869,55 +5692,47 @@ class MySqlDatabaseManager {
     }
 
     const newHashed = await bcrypt.hash(newPass.trim(), 10);
-    if (this.pool) {
-      await this.pool.query('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?', [newHashed, userId]);
-      await authService.updatePassword(this.pool, userId, newPass.trim());
-    }
+    await this.pool!.query('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?', [newHashed, userId]);
+    await authService.updatePassword(this.pool!, userId, newPass.trim());
     return { success: true, message: 'Password changed successfully.' };
   }
 
-  public async resetUserPassword(email: string, newPass: string = 'User@12345'): Promise<{ success: boolean; message: string }> {
+  public async resetUserPassword(email: string, newPass: string): Promise<{ success: boolean; message: string }> {
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPass = newPass.trim();
+    const cleanPass = (newPass || '').trim();
     if (cleanPass.length < 6) {
-      throw new Error('Password must be at least 6 characters long.');
+      throw new Error('Explicit new password (minimum 6 characters) is required.');
     }
     const hashed = await bcrypt.hash(cleanPass, 10);
     this.assertDbConnected();
-    if (this.pool) {
-      await this.pool.query(
-        'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
-        [hashed, cleanEmail]
-      );
-      await this.pool.query(
-        'UPDATE `solar_customers` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
-        [hashed, cleanEmail]
-      );
-      await authService.updatePassword(this.pool, cleanEmail, cleanPass);
-      return { success: true, message: `Password for ${cleanEmail} reset successfully in MySQL.` };
-    }
-    return { success: false, message: 'No user account found with that email address.' };
+    await this.pool!.query(
+      'UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
+      [hashed, cleanEmail]
+    );
+    await this.pool!.query(
+      'UPDATE `solar_customers` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE LOWER(`email`) = ?',
+      [hashed, cleanEmail]
+    );
+    await authService.updatePassword(this.pool!, cleanEmail, cleanPass);
+    return { success: true, message: `Password for ${cleanEmail} reset successfully in MySQL.` };
   }
 
   // ==========================================================
   // CRUD: SYSTEM SETTINGS
   // ==========================================================
   public async getSettings(): Promise<Record<string, any>> {
-    if (!this.isConnected || !this.pool) return this.settingsStore;
+    this.assertDbConnected();
     const [rows]: any = await this.pool!.query('SELECT `setting_value` FROM `solar_system_settings` WHERE `setting_key` = ?', ['global_settings']);
     if (Array.isArray(rows) && rows.length > 0 && rows[0].setting_value) {
       try {
-        const parsed = JSON.parse(rows[0].setting_value);
-        this.settingsStore = parsed;
-        return parsed;
+        return JSON.parse(rows[0].setting_value);
       } catch {}
     }
-    return this.settingsStore;
+    return {};
   }
 
   public async saveSettings(settings: any): Promise<any> {
-    this.settingsStore = settings;
-    if (!this.isConnected || !this.pool) return settings;
+    this.assertDbConnected();
     const val = JSON.stringify(settings);
     await this.pool!.query(
       'INSERT INTO `solar_system_settings` (`setting_key`, `setting_value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)',
@@ -5930,21 +5745,18 @@ class MySqlDatabaseManager {
   // CRUD: ACL CONFIG & AUDIT LOGS
   // ==========================================================
   public async getAclConfig(): Promise<any> {
-    if (!this.isConnected || !this.pool) return this.getFallbackItems('acl_config')[0] || {};
+    this.assertDbConnected();
     const [rows]: any = await this.pool!.query('SELECT `config_json` FROM `solar_acl_config` WHERE `id` = ?', ['master_acl_config']);
     if (Array.isArray(rows) && rows.length > 0 && rows[0].config_json) {
       try {
-        const parsed = JSON.parse(rows[0].config_json);
-        this.setFallbackItems('acl_config', [parsed]);
-        return parsed;
+        return JSON.parse(rows[0].config_json);
       } catch {}
     }
-    return this.getFallbackItems('acl_config')[0] || {};
+    return {};
   }
 
   public async saveAclConfig(config: any): Promise<any> {
-    this.setFallbackItems('acl_config', [config]);
-    if (!this.isConnected || !this.pool) return config;
+    this.assertDbConnected();
     const jsonStr = typeof config === 'string' ? config : JSON.stringify(config);
     await this.pool!.query(
       'INSERT INTO `solar_acl_config` (`id`, `config_json`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `config_json` = VALUES(`config_json`)',
@@ -5954,10 +5766,10 @@ class MySqlDatabaseManager {
   }
 
   public async getAclAuditLogs(): Promise<any[]> {
-    if (!this.isConnected || !this.pool) return this.getFallbackItems('acl_audit_logs');
+    this.assertDbConnected();
     const [rows]: any = await this.pool!.query('SELECT * FROM `solar_acl_audit_logs` ORDER BY `timestamp` DESC LIMIT 100');
     if (Array.isArray(rows)) {
-      const mapped = rows.map((r: any) => ({
+      return rows.map((r: any) => ({
         id: r.id,
         actorId: r.actor_id,
         actorName: r.actor_name,
@@ -5967,22 +5779,15 @@ class MySqlDatabaseManager {
         details: r.details,
         timestamp: r.timestamp
       }));
-      this.setFallbackItems('acl_audit_logs', mapped);
-      return mapped;
     }
-    return this.getFallbackItems('acl_audit_logs');
+    return [];
   }
 
   public async addAclAuditLog(log: any): Promise<any> {
+    this.assertDbConnected();
     const id = log.id || `acl-log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const ts = log.timestamp ? String(log.timestamp).replace('T', ' ').slice(0, 19) : new Date().toISOString().slice(0, 19).replace('T', ' ');
     const detailStr = typeof log.details === 'string' ? log.details : (log.detailsJson || JSON.stringify(log));
-
-    const items = this.getFallbackItems('acl_audit_logs');
-    items.unshift({ ...log, id, timestamp: ts });
-    this.setFallbackItems('acl_audit_logs', items.slice(0, 100));
-
-    if (!this.isConnected || !this.pool) return log;
 
     await this.pool!.query(
       `INSERT INTO \`solar_acl_audit_logs\` (
@@ -6116,38 +5921,19 @@ class MySqlDatabaseManager {
   }
 
   public async getAdminRegistrationStatus(): Promise<{ allowPublicRegistration: boolean; adminCount: number }> {
-    if (!this.isConnected) {
-      const users = this.getFallbackItems('users');
-      const adminList = users.filter((u: any) => (u.role === 'Admin' || u.role === 'Super Admin') && u.status !== 'INACTIVE');
-      const nonDemoAdmins = adminList.filter(
-        a => !a.email.toLowerCase().includes('admin@rejoysolar.com') && !String(a.id).startsWith('demo-')
-      );
-      return {
-        allowPublicRegistration: nonDemoAdmins.length === 0,
-        adminCount: adminList.length
-      };
-    }
     this.assertDbConnected();
-    try {
-      const [admins]: any = await this.pool!.query(
-        "SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'"
-      );
-      const adminList = Array.isArray(admins) ? admins : [];
-      const nonDemoAdmins = adminList.filter(
-        a => !a.email.toLowerCase().includes('admin@rejoysolar.com') && !a.id.startsWith('demo-')
-      );
-      // Public initial admin registration is allowed if no custom admin exists
-      const allowPublicRegistration = nonDemoAdmins.length === 0;
-      return {
-        allowPublicRegistration,
-        adminCount: adminList.length
-      };
-    } catch (err: any) {
-      return {
-        allowPublicRegistration: true,
-        adminCount: 0
-      };
-    }
+    const [admins]: any = await this.pool!.query(
+      "SELECT id, email FROM `solar_users` WHERE role IN ('Admin', 'Super Admin') AND status = 'ACTIVE'"
+    );
+    const adminList = Array.isArray(admins) ? admins : [];
+    const nonDemoAdmins = adminList.filter(
+      a => !a.email.toLowerCase().includes('admin@rejoysolar.com') && !a.id.startsWith('demo-')
+    );
+    const allowPublicRegistration = nonDemoAdmins.length === 0;
+    return {
+      allowPublicRegistration,
+      adminCount: adminList.length
+    };
   }
 
   public async registerAdmin(
@@ -6173,53 +5959,6 @@ class MySqlDatabaseManager {
     }
     if (!cleanPass || cleanPass.length < 6) {
       throw new Error('Password must be at least 6 characters in length.');
-    }
-
-    if (!this.isConnected) {
-      const status = await this.getAdminRegistrationStatus();
-      if (!status.allowPublicRegistration && !isAuthorizedByAdmin) {
-        throw new Error(
-          'Public administrator registration is closed. Additional administrators must be created by an existing authorized Administrator.'
-        );
-      }
-
-      const users = this.getFallbackItems('users');
-      if (users.some((u: any) => u.email && String(u.email).toLowerCase() === cleanEmail)) {
-        throw new Error('An account with this email address already exists in MySQL.');
-      }
-
-      const hashedPassword = await bcrypt.hash(cleanPass, 10);
-      const userId = `usr-admin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const empCode = `EMP-ADM-${Math.floor(100 + Math.random() * 900)}`;
-
-      const userObj = {
-        id: userId,
-        name: cleanName,
-        email: cleanEmail,
-        password: hashedPassword,
-        role: 'Admin',
-        phone: (data.phone || '+91 98250 11223').trim(),
-        department: (data.department || 'Administration').trim(),
-        designation: (data.designation || 'Lead Administrator').trim(),
-        employeeId: empCode,
-        isFieldWorker: false,
-        status: 'ACTIVE'
-      };
-
-      users.unshift(userObj);
-      this.setFallbackItems('users', users);
-
-      return {
-        id: userObj.id,
-        name: userObj.name,
-        email: userObj.email,
-        role: userObj.role,
-        phone: userObj.phone,
-        department: userObj.department,
-        designation: userObj.designation,
-        employeeId: userObj.employeeId,
-        isFieldWorker: false
-      };
     }
 
     this.assertDbConnected();
@@ -6319,7 +6058,7 @@ class MySqlDatabaseManager {
       console.warn('[DB Manager] Notice syncing admin credential:', err.message);
     }
 
-    const sanitized = {
+    return {
       id: userObj.id,
       name: userObj.name,
       email: userObj.email,
@@ -6330,12 +6069,6 @@ class MySqlDatabaseManager {
       employeeId: userObj.employee_id,
       isFieldWorker: false
     };
-
-    const items = this.getFallbackItems('users');
-    items.unshift(sanitized);
-    this.setFallbackItems('users', items);
-
-    return sanitized;
   }
 
   public async verifyCredentials(email: string, pass: string): Promise<any | null> {
@@ -6345,74 +6078,6 @@ class MySqlDatabaseManager {
   public async authenticateUser(email: string, pass: string): Promise<any | null> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = pass.trim();
-
-    if (!this.isConnected) {
-      const users = this.getFallbackItems('users');
-      const u = users.find((x: any) => x && x.email && String(x.email).trim().toLowerCase() === cleanEmail);
-      if (u) {
-        let isMatch = false;
-        if (u.password && (u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$'))) {
-          isMatch = await bcrypt.compare(cleanPass, u.password);
-        } else {
-          isMatch = (u.password === cleanPass || cleanPass === '123456');
-        }
-        if (isMatch) {
-          return {
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            role: u.role,
-            phone: u.phone,
-            department: u.department,
-            designation: u.designation,
-            employeeId: u.employeeId || u.employee_id,
-            isFieldWorker: Boolean(u.isFieldWorker || u.is_field_worker)
-          };
-        }
-      }
-
-      const customers = this.getFallbackItems('customers');
-      const c = customers.find((x: any) => x && x.email && String(x.email).trim().toLowerCase() === cleanEmail);
-      if (c) {
-        let isMatch = false;
-        if (c.password && (c.password.startsWith('$2a$') || c.password.startsWith('$2b$') || c.password.startsWith('$2y$'))) {
-          isMatch = await bcrypt.compare(cleanPass, c.password);
-        } else {
-          isMatch = (c.password === cleanPass || cleanPass === '123456');
-        }
-        if (isMatch) {
-          return {
-            id: `usr-${c.id}`,
-            customerId: c.id,
-            name: c.name,
-            email: c.email,
-            role: 'Customer',
-            phone: c.phone,
-            department: 'Customer',
-            designation: 'Customer',
-            isFieldWorker: false
-          };
-        }
-      }
-
-      const employees = this.getFallbackItems('employees');
-      const emp = employees.find((x: any) => x && x.email && String(x.email).trim().toLowerCase() === cleanEmail);
-      if (emp && cleanPass === '123456') {
-        return {
-          id: emp.id,
-          name: emp.name,
-          email: emp.email,
-          role: emp.systemRole || emp.designation || 'Technician',
-          phone: emp.phone,
-          department: emp.department,
-          designation: emp.designation,
-          employeeId: emp.employeeCode || emp.id,
-          isFieldWorker: Boolean(emp.isFieldWorker)
-        };
-      }
-
-      return null;
-    }
 
     this.assertDbConnected();
 
@@ -6436,7 +6101,7 @@ class MySqlDatabaseManager {
 
       if (u.password && (u.password.startsWith('$2a$') || u.password.startsWith('$2b$') || u.password.startsWith('$2y$'))) {
         isMatch = await bcrypt.compare(cleanPass, u.password);
-      } else if (u.password === cleanPass || cleanPass === '123456') {
+      } else if (u.password && u.password === cleanPass) {
         isMatch = true;
         // Automatically upgrade legacy plaintext to bcrypt in MySQL
         try {
@@ -6467,7 +6132,7 @@ class MySqlDatabaseManager {
 
       if (c.password && (c.password.startsWith('$2a$') || c.password.startsWith('$2b$') || c.password.startsWith('$2y$'))) {
         isMatch = await bcrypt.compare(cleanPass, c.password);
-      } else if (c.password === cleanPass || cleanPass === '123456') {
+      } else if (c.password && c.password === cleanPass) {
         isMatch = true;
         try {
           const hashed = await bcrypt.hash(cleanPass, 10);
@@ -6497,58 +6162,6 @@ class MySqlDatabaseManager {
     if (!idOrEmail) return null;
     const clean = idOrEmail.trim().toLowerCase();
     const cleanCustId = idOrEmail.startsWith('usr-') ? idOrEmail.slice(4) : idOrEmail;
-
-    if (!this.isConnected) {
-      const users = this.getFallbackItems('users');
-      const u = users.find((x: any) => x && (x.id === idOrEmail || (x.email && String(x.email).trim().toLowerCase() === clean)));
-      if (u) {
-        return {
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role: u.role,
-          phone: u.phone,
-          department: u.department,
-          designation: u.designation,
-          employeeId: u.employeeId || u.employee_id,
-          isFieldWorker: Boolean(u.isFieldWorker || u.is_field_worker),
-          status: u.status || 'ACTIVE'
-        };
-      }
-      const customers = this.getFallbackItems('customers');
-      const c = customers.find((x: any) => x && (x.id === idOrEmail || x.id === cleanCustId || (x.email && String(x.email).trim().toLowerCase() === clean)));
-      if (c) {
-        return {
-          id: `usr-${c.id}`,
-          customerId: c.id,
-          name: c.name,
-          email: c.email,
-          role: 'Customer',
-          phone: c.phone,
-          department: 'Customer',
-          designation: 'Customer',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        };
-      }
-      const employees = this.getFallbackItems('employees');
-      const emp = employees.find((x: any) => x && (x.id === idOrEmail || (x.email && String(x.email).trim().toLowerCase() === clean)));
-      if (emp) {
-        return {
-          id: emp.id,
-          name: emp.name,
-          email: emp.email,
-          role: emp.systemRole || emp.designation || 'Technician',
-          phone: emp.phone,
-          department: emp.department,
-          designation: emp.designation,
-          employeeId: emp.employeeCode || emp.id,
-          isFieldWorker: Boolean(emp.isFieldWorker),
-          status: emp.status || 'ACTIVE'
-        };
-      }
-      return null;
-    }
 
     this.assertDbConnected();
     const [users]: any = await this.pool!.query(
@@ -6730,9 +6343,6 @@ class MySqlDatabaseManager {
   // WORKFORCE LIVE TRACKING & PRESENCE (PERSISTED IN MYSQL)
   // ==========================================================
   public async getWorkforceLocations(): Promise<any[]> {
-    if (!this.isConnected) {
-      return this.getFallbackItems('workforce_locations');
-    }
     this.assertDbConnected();
 
     const query = `
@@ -6761,48 +6371,41 @@ class MySqlDatabaseManager {
       ORDER BY isOnline DESC, w.last_seen_at DESC
     `;
 
-    try {
-      const [rows]: any = await this.pool!.query(query);
-      const records = (Array.isArray(rows) ? rows : []).map((r: any) => {
-        const isOnline = Boolean(r.isOnline);
-        const hasCoords = typeof r.latitude === 'number' && typeof r.longitude === 'number' && !isNaN(r.latitude) && !isNaN(r.longitude);
-        const speed = typeof r.speed === 'number' ? r.speed : 0;
-        let effectiveStatus: string = r.status || 'offline';
-        if (!isOnline) {
-          effectiveStatus = 'offline';
-        } else if (hasCoords) {
-          effectiveStatus = speed > 3 ? 'moving' : 'idle';
-        } else {
-          effectiveStatus = 'online';
-        }
+    const [rows]: any = await this.pool!.query(query);
+    return (Array.isArray(rows) ? rows : []).map((r: any) => {
+      const isOnline = Boolean(r.isOnline);
+      const hasCoords = typeof r.latitude === 'number' && typeof r.longitude === 'number' && !isNaN(r.latitude) && !isNaN(r.longitude);
+      const speed = typeof r.speed === 'number' ? r.speed : 0;
+      let effectiveStatus: string = r.status || 'offline';
+      if (!isOnline) {
+        effectiveStatus = 'offline';
+      } else if (hasCoords) {
+        effectiveStatus = speed > 3 ? 'moving' : 'idle';
+      } else {
+        effectiveStatus = 'online';
+      }
 
-        return {
-          userId: r.userId,
-          employeeCode: r.employeeCode || r.userId,
-          name: r.name || `Field Worker (${r.userId})`,
-          email: r.email || '',
-          role: r.role || 'Field Engineer',
-          latitude: hasCoords ? r.latitude : undefined,
-          longitude: hasCoords ? r.longitude : undefined,
-          accuracy: typeof r.accuracy === 'number' ? r.accuracy : undefined,
-          heading: typeof r.heading === 'number' ? r.heading : undefined,
-          speed: typeof r.speed === 'number' ? r.speed : undefined,
-          batteryLevel: r.batteryLevel !== null && r.batteryLevel !== undefined ? Number(r.batteryLevel) : undefined,
-          activity: r.activity || (isOnline ? (hasCoords ? (speed > 3 ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline'),
-          isOnline,
-          isSharingLocation: Boolean(r.isSharingLocation),
-          hasLocation: hasCoords,
-          status: effectiveStatus,
-          lastSeenAt: r.lastSeenAt || new Date().toISOString(),
-          updatedAt: r.updatedAt || new Date().toISOString()
-        };
-      });
-
-      return records;
-    } catch (err) {
-      console.error('[DB Manager] Error querying workforce locations:', err);
-      return this.getFallbackItems('workforce_locations');
-    }
+      return {
+        userId: r.userId,
+        employeeCode: r.employeeCode || r.userId,
+        name: r.name || `Field Worker (${r.userId})`,
+        email: r.email || '',
+        role: r.role || 'Field Engineer',
+        latitude: hasCoords ? r.latitude : undefined,
+        longitude: hasCoords ? r.longitude : undefined,
+        accuracy: typeof r.accuracy === 'number' ? r.accuracy : undefined,
+        heading: typeof r.heading === 'number' ? r.heading : undefined,
+        speed: typeof r.speed === 'number' ? r.speed : undefined,
+        batteryLevel: r.batteryLevel !== null && r.batteryLevel !== undefined ? Number(r.batteryLevel) : undefined,
+        activity: r.activity || (isOnline ? (hasCoords ? (speed > 3 ? 'In Transit / Moving' : 'On Site / Active') : 'Online • Standby') : 'Offline'),
+        isOnline,
+        isSharingLocation: Boolean(r.isSharingLocation),
+        hasLocation: hasCoords,
+        status: effectiveStatus,
+        lastSeenAt: r.lastSeenAt || new Date().toISOString(),
+        updatedAt: r.updatedAt || new Date().toISOString()
+      };
+    });
   }
 
   public async saveWorkforceLocation(data: {
@@ -6821,6 +6424,7 @@ class MySqlDatabaseManager {
   }): Promise<boolean> {
     const userId = String(data.userId).trim();
     if (!userId) return false;
+    this.assertDbConnected();
 
     const lat = Number(data.latitude);
     const lng = Number(data.longitude);
@@ -6829,36 +6433,6 @@ class MySqlDatabaseManager {
     const status = isMoving ? 'moving' : 'idle';
     const activity = data.activity || (isMoving ? 'In Transit / Moving' : 'On Site / Active');
 
-    if (!this.isConnected) {
-      const list = this.getFallbackItems('workforce_locations');
-      const idx = list.findIndex((item: any) => item.userId === userId);
-      const rec = {
-        userId,
-        employeeCode: data.employeeCode || userId,
-        name: data.name || `Field Worker (${userId})`,
-        email: data.email || '',
-        role: data.role || 'Field Engineer',
-        latitude: lat,
-        longitude: lng,
-        accuracy: data.accuracy,
-        heading: data.heading,
-        speed,
-        batteryLevel: data.batteryLevel,
-        activity,
-        isOnline: true,
-        isSharingLocation: true,
-        hasLocation: true,
-        status,
-        lastSeenAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      if (idx >= 0) list[idx] = rec;
-      else list.push(rec);
-      this.setFallbackItems('workforce_locations', list);
-      return true;
-    }
-
-    this.assertDbConnected();
     const sql = `
       INSERT INTO \`solar_workforce_locations\` (
         \`user_id\`, \`employee_code\`, \`name\`, \`email\`, \`role\`,
@@ -6884,27 +6458,22 @@ class MySqlDatabaseManager {
         \`last_seen_at\` = NOW()
     `;
 
-    try {
-      await this.pool!.query(sql, [
-        userId,
-        data.employeeCode || null,
-        data.name || null,
-        data.email || null,
-        data.role || null,
-        lat,
-        lng,
-        data.accuracy !== undefined ? Number(data.accuracy) : null,
-        data.heading !== undefined ? Number(data.heading) : null,
-        speed,
-        data.batteryLevel !== undefined ? Number(data.batteryLevel) : null,
-        activity,
-        status
-      ]);
-      return true;
-    } catch (err) {
-      console.error('[DB Manager] Error saving workforce location to MySQL:', err);
-      return false;
-    }
+    await this.pool!.query(sql, [
+      userId,
+      data.employeeCode || null,
+      data.name || null,
+      data.email || null,
+      data.role || null,
+      lat,
+      lng,
+      data.accuracy !== undefined ? Number(data.accuracy) : null,
+      data.heading !== undefined ? Number(data.heading) : null,
+      speed,
+      data.batteryLevel !== undefined ? Number(data.batteryLevel) : null,
+      activity,
+      status
+    ]);
+    return true;
   }
 
   public async saveWorkforceHeartbeat(data: {
@@ -6917,39 +6486,9 @@ class MySqlDatabaseManager {
   }): Promise<boolean> {
     const userId = String(data.userId).trim();
     if (!userId) return false;
+    this.assertDbConnected();
 
     const isSharing = Boolean(data.isSharingLocation);
-
-    if (!this.isConnected) {
-      const list = this.getFallbackItems('workforce_locations');
-      const idx = list.findIndex((item: any) => item.userId === userId);
-      if (idx >= 0) {
-        list[idx].isOnline = true;
-        list[idx].isSharingLocation = isSharing;
-        list[idx].lastSeenAt = new Date().toISOString();
-        if (list[idx].status === 'offline') {
-          list[idx].status = list[idx].hasLocation ? 'idle' : 'online';
-        }
-      } else {
-        list.push({
-          userId,
-          employeeCode: data.employeeCode || userId,
-          name: data.name || `Field Worker (${userId})`,
-          email: data.email || '',
-          role: data.role || 'Field Engineer',
-          isOnline: true,
-          isSharingLocation: isSharing,
-          hasLocation: false,
-          status: 'online',
-          lastSeenAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-      }
-      this.setFallbackItems('workforce_locations', list);
-      return true;
-    }
-
-    this.assertDbConnected();
     const sql = `
       INSERT INTO \`solar_workforce_locations\` (
         \`user_id\`, \`employee_code\`, \`name\`, \`email\`, \`role\`,
@@ -6971,50 +6510,27 @@ class MySqlDatabaseManager {
         \`last_seen_at\` = NOW()
     `;
 
-    try {
-      await this.pool!.query(sql, [
-        userId,
-        data.employeeCode || null,
-        data.name || null,
-        data.email || null,
-        data.role || null,
-        isSharing ? 1 : 0
-      ]);
-      return true;
-    } catch (err) {
-      console.error('[DB Manager] Error saving workforce heartbeat to MySQL:', err);
-      return false;
-    }
+    await this.pool!.query(sql, [
+      userId,
+      data.employeeCode || null,
+      data.name || null,
+      data.email || null,
+      data.role || null,
+      isSharing ? 1 : 0
+    ]);
+    return true;
   }
 
   public async setWorkforceOffline(userId: string): Promise<boolean> {
     const cleanId = String(userId).trim();
     if (!cleanId) return false;
-
-    if (!this.isConnected) {
-      const list = this.getFallbackItems('workforce_locations');
-      const idx = list.findIndex((item: any) => item.userId === cleanId);
-      if (idx >= 0) {
-        list[idx].isOnline = false;
-        list[idx].isSharingLocation = false;
-        list[idx].status = 'offline';
-        list[idx].lastSeenAt = new Date().toISOString();
-      }
-      this.setFallbackItems('workforce_locations', list);
-      return true;
-    }
-
     this.assertDbConnected();
-    try {
-      await this.pool!.query(
-        'UPDATE `solar_workforce_locations` SET `is_online` = 0, `is_sharing_location` = 0, `status` = \'offline\' WHERE `user_id` = ?',
-        [cleanId]
-      );
-      return true;
-    } catch (err) {
-      console.error('[DB Manager] Error setting workforce offline in MySQL:', err);
-      return false;
-    }
+
+    await this.pool!.query(
+      'UPDATE `solar_workforce_locations` SET `is_online` = 0, `is_sharing_location` = 0, `status` = \'offline\' WHERE `user_id` = ?',
+      [cleanId]
+    );
+    return true;
   }
 
   // ==========================================================

@@ -131,6 +131,8 @@ export const UserManagementView: React.FC = () => {
     return `EMP${String(empCount + 1).padStart(3, '0')}`;
   };
 
+  const generateTempPassword = () => `Rejoy@${Math.random().toString(36).slice(-6).toUpperCase()}`;
+
   // Initial form values
   const defaultEmployeeForm: EmployeeFormData = {
     name: '',
@@ -143,7 +145,7 @@ export const UserManagementView: React.FC = () => {
     isFieldWorker: true,
     loginEnabled: true,
     status: 'ACTIVE',
-    tempPassword: 'User@12345'
+    tempPassword: ''
   };
 
   const [formData, setFormData] = useState<EmployeeFormData>(defaultEmployeeForm);
@@ -244,7 +246,7 @@ export const UserManagementView: React.FC = () => {
   }, [employees]);
 
   // Toggle user activation / deactivation
-  const handleToggleStatus = (emp: Employee) => {
+  const handleToggleStatus = async (emp: Employee) => {
     if (emp.systemRole === 'Admin' && emp.id === 'emp-1') {
       showToast('The primary Admin account cannot be disabled.', 'error');
       return;
@@ -253,36 +255,22 @@ export const UserManagementView: React.FC = () => {
     const isCurrentlyActive = emp.accountStatus !== 'DISABLED' && emp.status !== 'INACTIVE';
     const newStatus = isCurrentlyActive ? 'DISABLED' : 'ACTIVE';
 
-    let updatedEmp: Employee | null = null;
-    const updated = employees.map(e => {
-      if (e.id === emp.id) {
-        updatedEmp = {
-          ...e,
-          accountStatus: newStatus as any,
-          loginEnabled: !isCurrentlyActive,
-          status: isCurrentlyActive ? ('INACTIVE' as any) : ('ACTIVE' as any),
-          updatedAt: new Date().toISOString()
-        };
-        return updatedEmp;
-      }
-      return e;
-    });
-
-    if (updatedEmp) {
-      storageService.saveEmployee(updatedEmp);
-      apiClient
-        .updateUser(emp.id, {
-          status: newStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
-          login_enabled: !isCurrentlyActive ? 1 : 0
-        })
-        .catch(err => console.warn('[UserManagement] API status toggle notice:', err));
+    try {
+      await apiClient.updateUser(emp.id, {
+        status: newStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
+        login_enabled: !isCurrentlyActive ? 1 : 0
+      });
+      await storageService.hydrateFromBackend();
+      setEmployees(storageService.getEmployees());
+      triggerRefresh();
+      showToast(
+        `Employee ${emp.name} account ${isCurrentlyActive ? 'deactivated' : 'activated'} successfully in MySQL`,
+        isCurrentlyActive ? 'warning' : 'success'
+      );
+    } catch (err: any) {
+      console.error('[UserManagement] API status toggle error:', err);
+      showToast(err?.message || 'Failed to update account status in MySQL.', 'error');
     }
-    setEmployees(updated);
-    triggerRefresh();
-    showToast(
-      `Employee ${emp.name} account ${isCurrentlyActive ? 'deactivated' : 'activated'} successfully in MySQL`,
-      isCurrentlyActive ? 'warning' : 'success'
-    );
   };
 
   // Open Create Modal for Employee
@@ -291,7 +279,7 @@ export const UserManagementView: React.FC = () => {
     setFormData({
       ...defaultEmployeeForm,
       code: getNextEmployeeCode(employees),
-      tempPassword: 'User@12345'
+      tempPassword: generateTempPassword()
     });
     setIsModalOpen(true);
   };
@@ -454,64 +442,43 @@ export const UserManagementView: React.FC = () => {
           if (formData.tempPassword && formData.tempPassword.trim().length >= 6) {
             await apiClient.updateUserPassword(editingEmployee.id, formData.tempPassword.trim());
           }
-          await apiClient.saveEmployee(updatedEmp).catch(() => {});
-          storageService.saveEmployee(updatedEmp);
-          setEmployees(updated);
+          await storageService.hydrateFromBackend();
+          setEmployees(storageService.getEmployees());
           showToast(`Employee ${cleanName} updated successfully in MySQL`, 'success');
-          storageService.hydrateFromBackend().catch(() => {});
         } catch (err: any) {
           console.error('[UserManagement] API updateUser error:', err);
           showToast(err.message || 'Failed to update user in MySQL database.', 'error');
           return;
         }
       } else {
-        storageService.saveEmployees(updated);
         setEmployees(updated);
       }
     } else {
-      // Create new record
+      // Create new record - require explicit valid initial password (>= 6 chars)
+      const initialPassword = (formData.tempPassword || '').trim();
+      if (initialPassword.length < 6) {
+        showToast('Please enter an initial login password (minimum 6 characters).', 'error');
+        return;
+      }
       const newEmpId = `emp-${Date.now()}`;
-      const newEmp: Employee = {
-        id: newEmpId,
-        employeeCode: cleanCode,
-        name: cleanName,
-        email: cleanEmail,
-        phone: formData.phone.trim() || '+91 98000 00000',
-        department: finalDept,
-        designation: finalDesignation,
-        systemRole: finalRole,
-        assignedRole: finalRole,
-        authUid: newEmpId,
-        isFieldWorker: formData.isFieldWorker,
-        loginEnabled: formData.loginEnabled,
-        status: formData.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
-        accountStatus: formData.status === 'ACTIVE' ? 'ACTIVE' : 'DISABLED',
-        joiningDate: new Date().toISOString().split('T')[0],
-        salaryMonthly: 0,
-        accountCreatedAt: new Date().toISOString(),
-        accountCreatedBy: currentUser?.name || 'Admin',
-        createdAt: new Date().toISOString()
-      };
-
       try {
         await apiClient.saveUser({
           id: newEmpId,
           name: cleanName,
           email: cleanEmail,
-          password: formData.tempPassword || 'User@12345',
+          password: initialPassword,
           role: finalRole,
           department: finalDept,
           designation: finalDesignation,
-          phone: formData.phone.trim(),
+          phone: formData.phone.trim() || '+91 98000 00000',
           status: formData.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
           employee_id: cleanCode,
+          isFieldWorker: formData.isFieldWorker,
           login_enabled: formData.loginEnabled ? 1 : 0
         });
-        await apiClient.saveEmployee(newEmp).catch(() => {});
-        storageService.saveEmployee(newEmp);
-        setEmployees([newEmp, ...employees]);
-        showToast(`Employee ${newEmp.name} created and saved to MySQL successfully`, 'success');
-        storageService.hydrateFromBackend().catch(() => {});
+        await storageService.hydrateFromBackend();
+        setEmployees(storageService.getEmployees());
+        showToast(`Employee ${cleanName} created and saved to MySQL successfully`, 'success');
       } catch (err: any) {
         console.error('[UserManagement] API saveUser error:', err);
         showToast(err.message || 'Failed to create user in MySQL database.', 'error');
@@ -997,7 +964,7 @@ export const UserManagementView: React.FC = () => {
                   type="text"
                   value={formData.tempPassword || ''}
                   onChange={e => setFormData({ ...formData, tempPassword: e.target.value })}
-                  placeholder={editingEmployee ? 'Leave empty to keep current password, or min 6 chars' : 'User@12345'}
+                  placeholder={editingEmployee ? 'Leave empty to keep current password, or min 6 chars' : 'Min 6 characters'}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-mono"
                 />
                 <span className="text-[11px] text-slate-400 mt-0.5 block">

@@ -207,10 +207,10 @@ export const DatabaseSettingsPanel: React.FC = () => {
               <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold ${
                 status?.connected
                   ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-amber-100 text-amber-800'
+                  : 'bg-rose-100 text-rose-800'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${status?.connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                {status?.connected ? 'LIVE POOL ACTIVE' : 'LOCAL SYNC / READY'}
+                <span className={`w-1.5 h-1.5 rounded-full ${status?.connected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                {status?.connected ? 'LIVE POOL ACTIVE' : 'DISCONNECTED / OFFLINE'}
               </span>
             </div>
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 text-xs">
@@ -221,6 +221,11 @@ export const DatabaseSettingsPanel: React.FC = () => {
               <span className="text-slate-500 font-medium">Host : Port</span>
               <span className="font-mono font-bold text-slate-800">{status?.host || '127.0.0.1'}:{status?.port || 3306}</span>
             </div>
+            {!status?.connected && status?.message && (
+              <div className="mt-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-800 font-medium">
+                {status.message}
+              </div>
+            )}
           </div>
 
           <button

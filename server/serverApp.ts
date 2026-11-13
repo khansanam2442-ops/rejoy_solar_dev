@@ -165,7 +165,7 @@ async function createServerApp() {
       server_time: new Date().toISOString(),
       features: {
         spa_routing: true,
-        client_persistence: 'localStorage / JSON sync',
+        client_persistence: 'mysql_only',
         gemini_proxy: Boolean(process.env.GEMINI_API_KEY),
         database_helper: true
       }
@@ -210,29 +210,9 @@ async function createServerApp() {
 
   const workforceState = new Map<string, WorkforceRecord>();
   const sseClients = new Set<express.Response>();
-  const CACHE_FILE = path.join(process.cwd(), '.workforce_cache.json');
 
-  // Read persisted workforce records from disk with retry on transient file lock
+  // Workforce tracking uses live MySQL solar_workforce_locations + transient SSE state (no stale JSON disk cache)
   function readWorkforceCacheFromDisk(): WorkforceRecord[] {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        if (fs.existsSync(CACHE_FILE)) {
-          const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
-          if (raw.trim()) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) return parsed;
-          }
-        }
-      } catch (err) {
-        // If file was being atomically replaced, retry briefly once
-        if (attempt === 0) {
-          const start = Date.now();
-          while (Date.now() - start < 15) { /* spin 15ms */ }
-        } else {
-          console.warn('[Workforce Cache] Warning reading disk cache:', err);
-        }
-      }
-    }
     return [];
   }
 
@@ -264,108 +244,13 @@ async function createServerApp() {
     return cleanId || cleanEmail || cleanCode || 'unknown-user';
   }
 
-  // Save current workforce state to disk atomically without clobbering concurrent multi-process writes
   function persistWorkforceState(): boolean {
-    try {
-      const diskRecords = readWorkforceCacheFromDisk();
-      const mergedMap = new Map<string, WorkforceRecord>();
-
-      // 1. Index disk records by canonical identity
-      diskRecords.forEach((r) => {
-        if (r && r.userId) {
-          const canonicalKey = resolveCanonicalWorkforceKey(r.userId, r.email, r.employeeCode, r.name);
-          mergedMap.set(canonicalKey, { ...r, userId: canonicalKey });
-        }
-      });
-
-      // 2. Merge in-memory workforceState, preserving the newer lastSeenAt across processes
-      workforceState.forEach((memRec, memKey) => {
-        const canonicalKey = resolveCanonicalWorkforceKey(memKey, memRec.email, memRec.employeeCode, memRec.name);
-        const diskRec = mergedMap.get(canonicalKey);
-
-        if (!diskRec) {
-          mergedMap.set(canonicalKey, { ...memRec, userId: canonicalKey });
-        } else {
-          const memTime = memRec.lastSeenAt ? new Date(memRec.lastSeenAt).getTime() : 0;
-          const diskTime = diskRec.lastSeenAt ? new Date(diskRec.lastSeenAt).getTime() : 0;
-
-          if (memTime >= diskTime) {
-            // Memory is newer or equal: apply memory updates
-            mergedMap.set(canonicalKey, {
-              ...diskRec,
-              ...memRec,
-              userId: canonicalKey,
-              latitude: memRec.latitude !== undefined ? memRec.latitude : diskRec.latitude,
-              longitude: memRec.longitude !== undefined ? memRec.longitude : diskRec.longitude,
-              hasLocation: Boolean(memRec.latitude !== undefined || diskRec.latitude !== undefined)
-            });
-          } else {
-            // Disk is newer from another worker: update in-memory state
-            workforceState.set(canonicalKey, diskRec);
-          }
-        }
-
-        // Clean up memory alias key if different from canonicalKey
-        if (memKey !== canonicalKey && workforceState.has(memKey)) {
-          workforceState.delete(memKey);
-        }
-      });
-
-      // 3. Re-sync memory to canonical records
-      mergedMap.forEach((val, key) => {
-        workforceState.set(key, val);
-      });
-
-      const arr = Array.from(mergedMap.values());
-      const tempFile = `${CACHE_FILE}.tmp.${process.pid}.${Date.now()}`;
-      fs.writeFileSync(tempFile, JSON.stringify(arr, null, 2), 'utf-8');
-      fs.renameSync(tempFile, CACHE_FILE);
-      return true;
-    } catch (err) {
-      console.error('[Workforce State] Failed to persist workforce cache to disk:', err);
-      return false;
-    }
+    return true;
   }
 
-  // Authoritative sync across multi-process / multi-worker instances
   function syncWorkforceState(): void {
-    const diskRecords = readWorkforceCacheFromDisk();
-    const now = Date.now();
-
-    diskRecords.forEach((rec: WorkforceRecord) => {
-      if (!rec || !rec.userId) return;
-      const canonicalKey = resolveCanonicalWorkforceKey(rec.userId, rec.email, rec.employeeCode, rec.name);
-      const existing = workforceState.get(canonicalKey);
-      const diskLastSeen = rec.lastSeenAt ? new Date(rec.lastSeenAt).getTime() : 0;
-      // Clock skew tolerant check: online if lastSeen is within PRESENCE_TIMEOUT_MS
-      const isOnline = Boolean(rec.isOnline) && (Math.abs(now - diskLastSeen) < PRESENCE_TIMEOUT_MS);
-
-      rec.userId = canonicalKey;
-      rec.isOnline = isOnline;
-      if (!isOnline) rec.status = 'offline';
-
-      if (!existing) {
-        workforceState.set(canonicalKey, rec);
-      } else {
-        const existingLastSeen = existing.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
-        if (diskLastSeen >= existingLastSeen) {
-          workforceState.set(canonicalKey, {
-            ...existing,
-            ...rec,
-            userId: canonicalKey,
-            latitude: rec.latitude !== undefined ? rec.latitude : existing.latitude,
-            longitude: rec.longitude !== undefined ? rec.longitude : existing.longitude,
-            hasLocation: Boolean(rec.latitude !== undefined || existing.latitude !== undefined)
-          });
-        }
-      }
-    });
+    // Live MySQL is queried directly via dbManager.getWorkforceLocations()
   }
-
-  // Initial startup sync
-  syncWorkforceState();
-  persistWorkforceState();
-  console.log(`[Workforce] Authoritative startup: synchronized ${workforceState.size} workforce tracking records.`);
 
   // Helper to broadcast via Pusher AND SSE
   async function broadcastWorkforceEvent(eventType: string, data: any) {
@@ -510,45 +395,26 @@ async function createServerApp() {
       // 1. Fetch persistent MySQL records as single source of truth
       const dbRecords = await dbManager.getWorkforceLocations();
 
-      // 2. Synchronize with in-memory workforceState
+      workforceState.clear();
       dbRecords.forEach((rec) => {
         if (rec && rec.userId) {
-          const canonicalKey = resolveCanonicalWorkforceKey(rec.userId, rec.email, rec.employeeCode, rec.name);
-          const existing = workforceState.get(canonicalKey);
-          if (!existing) {
-            workforceState.set(canonicalKey, { ...rec, userId: canonicalKey });
-          } else {
-            const dbTime = rec.lastSeenAt ? new Date(rec.lastSeenAt).getTime() : 0;
-            const memTime = existing.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : 0;
-            if (dbTime >= memTime) {
-              workforceState.set(canonicalKey, {
-                ...existing,
-                ...rec,
-                userId: canonicalKey
-              });
-            }
-          }
+          workforceState.set(rec.userId, rec);
         }
       });
 
-      const records = dbRecords && dbRecords.length > 0 ? dbRecords : Array.from(workforceState.values());
-
       res.json({
         success: true,
-        count: records.length,
-        locations: records,
-        workforce: records,
-        users: records
+        count: dbRecords.length,
+        locations: dbRecords,
+        workforce: dbRecords,
+        users: dbRecords
       });
     } catch (err: any) {
       console.error('[Workforce Locations] Error:', err);
-      const fallbackList = Array.from(workforceState.values());
-      res.json({
-        success: true,
-        count: fallbackList.length,
-        locations: fallbackList,
-        workforce: fallbackList,
-        users: fallbackList
+      const statusCode = err?.statusCode === 503 || err?.code === 'DB_UNAVAILABLE' ? 503 : 500;
+      res.status(statusCode).json({
+        success: false,
+        error: err?.message || 'Failed to fetch workforce locations from MySQL.'
       });
     }
   });

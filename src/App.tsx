@@ -11,7 +11,7 @@ import { ImportExportModal } from './components/common/ImportExportModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { LoginView } from './components/auth/LoginView';
 import { useWorkforcePresence } from './hooks/useWorkforcePresence';
-import { Sun } from 'lucide-react';
+import { Sun, AlertTriangle, RefreshCw, X } from 'lucide-react';
 
 // Code-splitting via dynamic imports for optimized Hostinger bundle performance
 const DashboardView = React.lazy(() => import('./components/views/DashboardView').then(m => ({ default: m.DashboardView })));
@@ -36,9 +36,19 @@ const ViewLoader: React.FC = () => (
 );
 
 const MainLayout: React.FC = () => {
-  const { activeView } = useApp();
+  const { activeView, bootstrapStatus, bootstrapError, syncError, clearSyncError, retrySync } = useApp();
   const { isCustomer, isAdmin, canAccessModule } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isRetryingSync, setIsRetryingSync] = useState(false);
+
+  const handleRetrySync = async () => {
+    setIsRetryingSync(true);
+    try {
+      await retrySync();
+    } finally {
+      setIsRetryingSync(false);
+    }
+  };
 
   const renderActiveView = () => {
     // If the active role is Customer and they are on dashboard or customer portal, show customer view
@@ -110,6 +120,38 @@ const MainLayout: React.FC = () => {
 
         {/* Primary Operational Stage Canvas */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 md:pb-8 lg:ml-64">
+          {(bootstrapStatus === 'error' || syncError) && (
+            <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-900 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-rose-950">MySQL Database Synchronization Alert</p>
+                  <p className="text-rose-800 mt-0.5">{syncError || bootstrapError || 'Unable to synchronize with the production MySQL database.'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRetrySync}
+                  disabled={isRetryingSync}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRetryingSync ? 'animate-spin' : ''}`} />
+                  <span>{isRetryingSync ? 'Retrying...' : 'Retry MySQL Sync'}</span>
+                </button>
+                {syncError && bootstrapStatus !== 'error' && (
+                  <button
+                    type="button"
+                    onClick={clearSyncError}
+                    className="p-1.5 text-rose-500 hover:text-rose-800 rounded-lg cursor-pointer"
+                    title="Dismiss alert"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <div className="w-full">
             <Suspense fallback={<ViewLoader />}>
               {renderActiveView()}

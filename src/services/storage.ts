@@ -169,11 +169,14 @@ const KEY_TO_COLLECTION: Record<string, string> = {
 class StorageService {
   private memStore = new Map<string, any>();
   public isHydrated: boolean = false;
+  public bootstrapStatus: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
+  public bootstrapError: string | null = null;
+  public lastSyncError: string | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       try {
-        // Clean all legacy v1 and v2 keys, strictly enforcing clean v3 authoritative keys from MySQL
+        // Purge all legacy v1/v2/v3 browser storage keys so MySQL is the sole source of truth
         const legacyKeys = [
           'solar_erp_leads', 'solar_erp_customers', 'solar_erp_projects', 'solar_erp_payments',
           'solar_erp_expenses', 'solar_erp_employees', 'solar_erp_attendance', 'solar_erp_payslips',
@@ -186,130 +189,62 @@ class StorageService {
           'solar_erp_holidays_v2', 'solar_erp_service_tickets_v2', 'solar_erp_amc_contracts_v2', 'solar_erp_notifications_v2',
           'solar_erp_surveys_v2', 'solar_erp_quotations_v2', 'solar_erp_products_v2', 'solar_erp_vendors_v2',
           'solar_erp_purchase_orders_v2', 'solar_erp_boms_v2', 'solar_erp_sales_invoices_v2', 'solar_erp_stock_movements_v2',
-          'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2', 'solar_erp_settings_v2', 'solar_erp_users_v2'
+          'solar_erp_warehouses_v2', 'solar_erp_stock_audits_v2', 'solar_erp_acl_audit_logs_v2', 'solar_erp_settings_v2', 'solar_erp_users_v2',
+          ...Object.values(STORAGE_KEYS)
         ];
         legacyKeys.forEach(k => {
           safeStorage.removeItem(k);
           safeSessionStorage.removeItem(k);
         });
-        // Purge any v3 cached business data in browser localStorage to enforce MySQL as sole truth
-        Object.values(STORAGE_KEYS).forEach(k => {
-          safeStorage.removeItem(k);
-          safeSessionStorage.removeItem(k);
-        });
       } catch {}
 
-      // Asynchronously hydrate authoritative data from backend MySQL
+      // Asynchronously hydrate authoritative data directly from production MySQL backend
       this.hydrateFromBackend();
     }
   }
 
   public async hydrateFromBackend(): Promise<void> {
     if (typeof window === 'undefined') return;
+    this.bootstrapStatus = 'loading';
+    this.bootstrapError = null;
     try {
-      const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-        ? (window as any).__SOLAR_API_URL__
-        : apiClient.getBaseUrl();
-
-      const authToken = apiClient.getToken();
-      const headers: Record<string, string> = {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache'
-      };
-      if (authToken) {
-        headers['Authorization'] = authToken.startsWith('Bearer ') ? authToken : `Bearer ${authToken}`;
-        headers['x-auth-token'] = authToken;
-      }
-
-      const res = await fetch(`${apiUrl}/bootstrap`, {
-        headers,
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          Object.entries(KEY_TO_COLLECTION).forEach(([storageKey, collectionKey]) => {
-            const backendItems = json.data[collectionKey];
-            if (backendItems !== undefined && backendItems !== null) {
-              if (Array.isArray(backendItems)) {
-                let cleaned = backendItems.filter(Boolean);
-                if (collectionKey === 'attendance') {
-                   cleaned = cleaned.map((a: any) => ({
-                    ...a,
-                    date: a.date || a.attendanceDate || (a.createdAt ? String(a.createdAt).slice(0, 10) : ''),
-                    attendanceDate: a.attendanceDate || a.date,
-                    gpsCheckIn: a.gpsCheckIn || (typeof a.checkInGps === 'object' ? a.checkInGps : undefined),
-                    gpsCheckOut: a.gpsCheckOut || (typeof a.checkOutGps === 'object' ? a.checkOutGps : undefined)
-                  }));
-                } else if (collectionKey === 'quotations') {
-                  cleaned = cleaned.map((q: any) => ({
-                    ...q,
-                    quotationDate: q.quotationDate || (q.createdAt ? String(q.createdAt).slice(0, 10) : '')
-                  }));
-                } else if (collectionKey === 'expenses') {
-                  cleaned = cleaned.map((e: any) => ({
-                    ...e,
-                    date: e.date || e.expenseDate || (e.createdAt ? String(e.createdAt).slice(0, 10) : '')
-                  }));
-                } else if (collectionKey === 'purchase_orders') {
-                  cleaned = cleaned.map((po: any) => ({
-                    ...po,
-                    purchaseNumber: po.purchaseNumber || po.poNumber || po.id,
-                    purchaseDate: po.purchaseDate || po.poDate || po.orderDate || (po.createdAt ? String(po.createdAt).slice(0, 10) : ''),
-                    taxAmount: po.taxAmount ?? po.gstAmount ?? 0,
-                    deliveryReceipts: po.deliveryReceipts || po.receipts || []
-                  }));
-                } else if (collectionKey === 'warehouses') {
-                  cleaned = cleaned.map((w: any) => ({
-                    ...w,
-                    contactPerson: w.contactPerson || w.managerName || '',
-                    contactPhone: w.contactPhone || w.managerPhone || '',
-                    status: w.status || (w.isActive === false ? 'INACTIVE' : 'ACTIVE')
-                  }));
-                } else if (collectionKey === 'stock_audits') {
-                  cleaned = cleaned.map((sa: any) => ({
-                    ...sa,
-                    auditedBy: sa.auditedBy || sa.auditorName || '',
-                    discrepanciesFound: sa.discrepanciesFound ?? sa.discrepanciesCount ?? 0,
-                    itemsAudited: sa.itemsAudited ?? (Array.isArray(sa.items) ? sa.items.length : 0),
-                    netAdjustmentValue: sa.netAdjustmentValue ?? 0
-                  }));
-                } else if (collectionKey === 'boms') {
-                  cleaned = cleaned.map((b: any) => ({
-                    ...b,
-                    capacityKw: b.capacityKw ?? b.systemCapacityKw ?? 0,
-                    totalCost: b.totalCost ?? b.totalEstimatedCost ?? 0
-                  }));
-                } else if (collectionKey === 'products') {
-                  cleaned = cleaned.map((p: any) => ({
-                    ...p,
-                    minStockThreshold: p.minStockThreshold ?? p.reorderLevel ?? p.minStockLevel ?? 10,
-                    sellingPrice: p.sellingPrice ?? p.unitPrice ?? 0,
-                    location: p.location || p.warehouseName || ''
-                  }));
-                } else if (collectionKey === 'notifications') {
-                  cleaned = cleaned.map((n: any) => ({
-                    ...n,
-                    read: typeof n.read === 'boolean' ? n.read : Boolean(n.isRead),
-                    timestamp: n.timestamp || n.createdAt || ''
-                  }));
-                }
-                this.memStore.set(storageKey, cleaned);
-              } else if (collectionKey === 'settings') {
-                if (typeof backendItems === 'object' && !Array.isArray(backendItems) && Object.keys(backendItems).length > 0) {
-                  this.memStore.set(storageKey, { ...initialSettings, ...backendItems });
-                }
-              } else {
-                this.memStore.set(storageKey, backendItems);
-              }
+      const data = await apiClient.getBootstrapData();
+      Object.entries(KEY_TO_COLLECTION).forEach(([storageKey, collectionKey]) => {
+        const backendItems = data[collectionKey];
+        if (backendItems !== undefined && backendItems !== null) {
+          if (Array.isArray(backendItems)) {
+            let cleaned = backendItems.filter(Boolean);
+            if (collectionKey === 'attendance') {
+              cleaned = cleaned.map((a: any) => ({
+                ...a,
+                date: a.date || a.attendanceDate || (a.createdAt ? String(a.createdAt).slice(0, 10) : ''),
+                attendanceDate: a.attendanceDate || a.date
+              }));
+            } else if (collectionKey === 'quotations') {
+              cleaned = cleaned.map((q: any) => ({
+                ...q,
+                quotationDate: q.quotationDate || (q.createdAt ? String(q.createdAt).slice(0, 10) : '')
+              }));
             }
-          });
-          this.isHydrated = true;
-          window.dispatchEvent(new Event('solarpulse_storage_updated'));
+            this.memStore.set(storageKey, cleaned);
+          } else {
+            this.memStore.set(storageKey, backendItems);
+          }
         }
-      }
-    } catch (e) {
-      console.warn('[Storage] Backend bootstrap notice:', e);
+      });
+      this.isHydrated = true;
+      this.bootstrapStatus = 'ready';
+      this.bootstrapError = null;
+      this.lastSyncError = null;
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    } catch (e: any) {
+      const errMsg = e?.message || 'Failed to load data from MySQL backend';
+      console.error('[Storage] Backend MySQL bootstrap failed:', errMsg);
+      this.isHydrated = false;
+      this.bootstrapStatus = 'error';
+      this.bootstrapError = errMsg;
+      window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection: 'bootstrap', error: errMsg } }));
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
     }
   }
 
@@ -323,118 +258,49 @@ class StorageService {
         return val as T;
       }
     }
-    this.memStore.set(key, defaultValue);
     return defaultValue;
-  }
-
-  public async setSync<T>(key: string, data: T, singleItem?: any): Promise<any> {
-    const collection = KEY_TO_COLLECTION[key];
-    this.memStore.set(key, data);
-
-    if (typeof window !== 'undefined' && collection) {
-      try {
-        const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-          ? (window as any).__SOLAR_API_URL__
-          : apiClient.getBaseUrl();
-
-        const token = apiClient.getToken();
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        };
-        if (token) {
-          headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-          headers['x-auth-token'] = token;
-        }
-
-        const res = await fetch(`${apiUrl}/sync/push`, {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-          body: JSON.stringify({ collection, item: singleItem, items: singleItem ? undefined : data })
-        });
-
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || json.success === false) {
-          const errMsg = json.error || json.message || `Failed to persist ${collection} in MySQL (HTTP ${res.status})`;
-          console.error(`[MySQL Storage Error] ${errMsg}`);
-          await this.hydrateFromBackend();
-          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: errMsg } }));
-          throw new Error(errMsg);
-        }
-
-        if (singleItem && json.data) {
-          const currentList = this.memStore.get(key);
-          if (Array.isArray(currentList)) {
-            const idx = currentList.findIndex((it: any) => it.id === singleItem.id || it.id === json.data.id);
-            if (idx >= 0) {
-              currentList[idx] = json.data;
-              this.memStore.set(key, [...currentList]);
-            }
-          }
-        }
-
-        window.dispatchEvent(new Event('solarpulse_storage_updated'));
-        return json.data || data;
-      } catch (err: any) {
-        console.error(`[MySQL Network Error] Failed to sync ${collection}:`, err);
-        await this.hydrateFromBackend();
-        throw err;
-      }
-    }
-
-    window.dispatchEvent(new Event('solarpulse_storage_updated'));
-    return data;
   }
 
   private set<T>(key: string, data: T, singleItem?: any): void {
     this.memStore.set(key, data);
-    this.setSync(key, data, singleItem).catch(e => {
-      console.warn(`[Storage Sync Warning] Sync failed for ${key}:`, e?.message);
-    });
-  }
-
-  private async deleteSync(collection: string, id: string): Promise<boolean> {
     if (typeof window !== 'undefined') {
-      try {
-        const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-          ? (window as any).__SOLAR_API_URL__
-          : apiClient.getBaseUrl();
-
-        const token = apiClient.getToken();
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        };
-        if (token) {
-          headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-          headers['x-auth-token'] = token;
-        }
-
-        const res = await fetch(`${apiUrl}/sync/push`, {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-          body: JSON.stringify({ collection, item: { id }, action: 'delete' })
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          console.error(`[MySQL Storage Error] Failed to sync delete for ${collection}:`, err.error || res.statusText);
-          await this.hydrateFromBackend();
-          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: err.error || res.statusText } }));
-          return false;
-        }
+      const collection = KEY_TO_COLLECTION[key];
+      if (collection) {
+        apiClient
+          .syncPush(collection, singleItem ? { item: singleItem } : { items: data as any })
+          .then(() => {
+            this.lastSyncError = null;
+            window.dispatchEvent(new Event('solarpulse_storage_updated'));
+          })
+          .catch((e: any) => {
+            const errMsg = e?.message || `Failed to save ${collection} to MySQL`;
+            console.error(`[MySQL Storage Error] Failed to persist ${collection}:`, errMsg);
+            this.lastSyncError = errMsg;
+            window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: errMsg } }));
+            this.hydrateFromBackend();
+          });
         window.dispatchEvent(new Event('solarpulse_storage_updated'));
-        return true;
-      } catch (e: any) {
-        console.error(`[MySQL Network Error] Failed to sync delete for ${collection}:`, e);
-        await this.hydrateFromBackend();
-        return false;
       }
     }
-    return true;
+  }
+
+  private deleteSync(collection: string, id: string): void {
+    if (typeof window !== 'undefined') {
+      apiClient
+        .syncPush(collection, { item: { id }, action: 'delete' })
+        .then(() => {
+          this.lastSyncError = null;
+          window.dispatchEvent(new Event('solarpulse_storage_updated'));
+        })
+        .catch((e: any) => {
+          const errMsg = e?.message || `Failed to delete ${collection} record from MySQL`;
+          console.error(`[MySQL Storage Error] Failed to delete ${collection}/${id}:`, errMsg);
+          this.lastSyncError = errMsg;
+          window.dispatchEvent(new CustomEvent('solarpulse_storage_error', { detail: { collection, error: errMsg } }));
+          this.hydrateFromBackend();
+        });
+      window.dispatchEvent(new Event('solarpulse_storage_updated'));
+    }
   }
 
   // --- Leads ---
@@ -455,7 +321,7 @@ class StorageService {
 
   deleteLead(id: string): void {
     const leads = this.getLeads().filter(l => l.id !== id);
-    this.set(STORAGE_KEYS.LEADS, leads);
+    this.memStore.set(STORAGE_KEYS.LEADS, leads);
     this.deleteSync('leads', id);
   }
 
@@ -470,30 +336,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/leads/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ leads })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importLeads(leads);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Lead import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -662,7 +508,7 @@ class StorageService {
       customerType: customerData.customerType || 'Commercial',
       phone: customerData.phone,
       email: customerData.email || '',
-      password: customerData.password || '123456',
+      password: customerData.password || `Cust@${Date.now().toString().slice(-6)}`,
       siteAddress: customerData.siteAddress || '',
       city: customerData.city || 'Ahmedabad',
       state: 'Gujarat',
@@ -735,7 +581,7 @@ class StorageService {
 
   deleteCustomer(id: string): void {
     const customers = this.getCustomers().filter(c => c.id !== id);
-    this.set(STORAGE_KEYS.CUSTOMERS, customers);
+    this.memStore.set(STORAGE_KEYS.CUSTOMERS, customers);
     this.deleteSync('customers', id);
   }
 
@@ -750,16 +596,9 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/customers/import`, {
+    const res = await fetch(`${apiClient.getBaseUrl()}/customers/import`, {
       method: 'POST',
-      headers,
+      headers: apiClient.getAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'include',
       body: JSON.stringify({ customers })
     });
@@ -773,21 +612,24 @@ class StorageService {
       throw new Error(result.error || result.message || `Customer import failed with status ${res.status}`);
     }
 
-    await this.hydrateFromBackend();
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getCustomers();
+      const existingIds = new Set(current.map(c => c.id));
+      const newlyAdded: Customer[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.CUSTOMERS, updatedList);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
     return result;
   }
 
-  updateCustomerPassword(customerId: string, newPassword: string): void {
-    const customers = this.getCustomers();
-    const index = customers.findIndex(c => c.id === customerId);
-    if (index >= 0) {
-      customers[index] = {
-        ...customers[index],
-        password: newPassword,
-        updatedAt: new Date().toISOString()
-      };
-      this.set(STORAGE_KEYS.CUSTOMERS, customers, customers[index]);
-    }
+  async updateCustomerPassword(customerId: string, newPassword: string): Promise<boolean> {
+    await apiClient.updateCustomerPassword(customerId, newPassword);
+    await this.hydrateFromBackend();
+    return true;
   }
 
   // --- Projects & Workflow Automation ---
@@ -932,15 +774,12 @@ class StorageService {
   setProjectsFromBackend(projects: SolarProject[]): void {
     if (!Array.isArray(projects)) return;
     this.memStore.set(STORAGE_KEYS.PROJECTS, projects);
-    safeStorage.removeItem(STORAGE_KEYS.PROJECTS);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('solarpulse_storage_updated'));
-    }
+    window.dispatchEvent(new Event('solarpulse_storage_updated'));
   }
 
   deleteProject(id: string): void {
     const projects = this.getProjects().filter(p => p.id !== id);
-    this.set(STORAGE_KEYS.PROJECTS, projects);
+    this.memStore.set(STORAGE_KEYS.PROJECTS, projects);
     this.deleteSync('projects', id);
   }
 
@@ -955,16 +794,9 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/projects/import`, {
+    const res = await fetch(`${apiClient.getBaseUrl()}/projects/import`, {
       method: 'POST',
-      headers,
+      headers: apiClient.getAuthHeaders({ 'Content-Type': 'application/json' }),
       credentials: 'include',
       body: JSON.stringify({ projects })
     });
@@ -978,7 +810,17 @@ class StorageService {
       throw new Error(result.error || result.message || `Project import failed with status ${res.status}`);
     }
 
-    await this.hydrateFromBackend();
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      const current = this.getProjects();
+      const existingIds = new Set(current.map(p => p.id));
+      const newlyAdded: SolarProject[] = result.importedRecords.filter((r: any) => !existingIds.has(r.id));
+      const updatedList = [...newlyAdded, ...current];
+      this.memStore.set(STORAGE_KEYS.PROJECTS, updatedList);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('solarpulse_storage_updated'));
+      }
+    }
+
     return result;
   }
 
@@ -1320,14 +1162,10 @@ class StorageService {
 
     this.saveProject(project);
 
-    if (typeof fetch !== 'undefined') {
-      const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-        ? (window as any).__SOLAR_API_URL__
-        : apiClient.getBaseUrl();
-      fetch(`${apiUrl}/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(stageIdOrKey)}`, {
+    if (typeof window !== 'undefined') {
+      apiClient.request(`${apiClient.getBaseUrl()}/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(stageIdOrKey)}`, {
         method: 'PUT',
-        headers: apiClient.getAuthHeaders({ 'Content-Type': 'application/json' }),
-        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       }).catch(err => console.warn('[Backend Stage Sync]:', err));
     }
@@ -1396,7 +1234,7 @@ class StorageService {
 
   deletePayment(id: string): void {
     const payments = this.getPayments().filter(p => p.id !== id);
-    this.set(STORAGE_KEYS.PAYMENTS, payments);
+    this.memStore.set(STORAGE_KEYS.PAYMENTS, payments);
     this.deleteSync('payments', id);
   }
 
@@ -1411,30 +1249,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/payments/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ payments })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importPayments(payments);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Payment import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1456,7 +1274,7 @@ class StorageService {
 
   deleteExpense(id: string): void {
     const expenses = this.getExpenses().filter(e => e.id !== id);
-    this.set(STORAGE_KEYS.EXPENSES, expenses);
+    this.memStore.set(STORAGE_KEYS.EXPENSES, expenses);
     this.deleteSync('expenses', id);
   }
 
@@ -1471,30 +1289,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/expenses/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ expenses })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importExpenses(expenses);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Expense import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1522,6 +1320,40 @@ class StorageService {
       };
       employeeMap.set(safeEmp.id, safeEmp);
       if (safeEmp.email) employeeMap.set(safeEmp.email.toLowerCase(), safeEmp);
+    });
+
+    // Merge in users from STORAGE_KEYS.USERS who are staff members (not Customer)
+    const users = this.get<any[]>(STORAGE_KEYS.USERS, []);
+    (users || []).filter(Boolean).forEach(u => {
+      if (u.role === 'Customer') return;
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const existingByEmail = uEmail ? employeeMap.get(uEmail) : null;
+      const existingById = employeeMap.get(u.id);
+      if (!existingByEmail && !existingById) {
+        const isFw = Boolean(u.isFieldWorker || [
+          'Site Survey Engineer', 'Site Inspector', 'Civil Team',
+          'Structure Team', 'Installation Team', 'Electrical Team', 'Technician'
+        ].includes(u.role));
+        const syntheticEmp: Employee = {
+          id: u.id,
+          employeeCode: u.employeeId || u.employeeCode || `EMP-${u.id.slice(-4).toUpperCase()}`,
+          name: u.name || 'Staff Member',
+          email: u.email,
+          phone: u.phone || '+91 98250 11223',
+          department: u.department || 'Operations',
+          designation: u.designation || u.role || 'Solar Specialist',
+          systemRole: u.role || 'Project Manager',
+          salaryMonthly: 0,
+          status: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'INACTIVE' : 'ACTIVE',
+          accountStatus: (u.status === 'INACTIVE' || u.status === 'DISABLED') ? 'DISABLED' : 'ACTIVE',
+          loginEnabled: u.status !== 'DISABLED',
+          isFieldWorker: isFw,
+          currentSiteLocation: '',
+          joiningDate: u.createdAt ? String(u.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10)
+        };
+        employeeMap.set(u.id, syntheticEmp);
+        if (uEmail) employeeMap.set(uEmail, syntheticEmp);
+      }
     });
 
     const result: Employee[] = [];
@@ -1555,7 +1387,7 @@ class StorageService {
 
   deleteEmployee(id: string): void {
     const employees = this.getEmployees().filter(e => e.id !== id);
-    this.set(STORAGE_KEYS.EMPLOYEES, employees);
+    this.memStore.set(STORAGE_KEYS.EMPLOYEES, employees);
     this.deleteSync('employees', id);
   }
 
@@ -1570,30 +1402,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/employees/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ employees })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importEmployees(employees);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Employee import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1615,7 +1427,7 @@ class StorageService {
 
   deleteUser(id: string): void {
     const users = this.getUsers().filter(u => u.id !== id);
-    this.set(STORAGE_KEYS.USERS, users);
+    this.memStore.set(STORAGE_KEYS.USERS, users);
     this.deleteSync('users', id);
   }
 
@@ -1647,7 +1459,7 @@ class StorageService {
 
   deleteAttendanceRecord(id: string): void {
     const attendance = this.getAttendance().filter(a => a.id !== id);
-    this.set(STORAGE_KEYS.ATTENDANCE, attendance);
+    this.memStore.set(STORAGE_KEYS.ATTENDANCE, attendance);
     this.deleteSync('attendance', id);
   }
 
@@ -1662,30 +1474,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/attendance/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ attendance })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importAttendance(attendance);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Attendance import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1741,7 +1533,7 @@ class StorageService {
 
   deletePayslip(id: string): void {
     const payslips = this.getPayslips().filter(p => p.id !== id);
-    this.set(STORAGE_KEYS.PAYSLIPS, payslips);
+    this.memStore.set(STORAGE_KEYS.PAYSLIPS, payslips);
     this.deleteSync('payslips', id);
   }
 
@@ -1765,7 +1557,7 @@ class StorageService {
 
   deleteHoliday(id: string): void {
     const holidays = this.getHolidays().filter(h => h.id !== id);
-    this.set(STORAGE_KEYS.HOLIDAYS, holidays);
+    this.memStore.set(STORAGE_KEYS.HOLIDAYS, holidays);
     this.deleteSync('holidays', id);
   }
 
@@ -1791,7 +1583,7 @@ class StorageService {
 
   deleteServiceTicket(id: string): void {
     const tickets = this.getServiceTickets().filter(t => t.id !== id);
-    this.set(STORAGE_KEYS.SERVICE_TICKETS, tickets);
+    this.memStore.set(STORAGE_KEYS.SERVICE_TICKETS, tickets);
     this.deleteSync('service_tickets', id);
   }
 
@@ -1806,30 +1598,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/service-tickets/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ tickets })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importServiceTickets(tickets);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Service ticket import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -1889,7 +1661,7 @@ class StorageService {
 
   deleteAMCContract(id: string): void {
     const contracts = this.getAMCContracts().filter(c => c.id !== id);
-    this.set(STORAGE_KEYS.AMC_CONTRACTS, contracts);
+    this.memStore.set(STORAGE_KEYS.AMC_CONTRACTS, contracts);
     this.deleteSync('amc_contracts', id);
   }
 
@@ -1911,7 +1683,7 @@ class StorageService {
 
   deleteSurvey(id: string): void {
     const surveys = this.getSurveys().filter(s => s.id !== id);
-    this.set(STORAGE_KEYS.SURVEYS, surveys);
+    this.memStore.set(STORAGE_KEYS.SURVEYS, surveys);
     this.deleteSync('surveys', id);
   }
 
@@ -1942,7 +1714,7 @@ class StorageService {
 
   deleteQuotation(id: string): void {
     const quotes = this.getQuotations().filter(q => q.id !== id);
-    this.set(STORAGE_KEYS.QUOTATIONS, quotes);
+    this.memStore.set(STORAGE_KEYS.QUOTATIONS, quotes);
     this.deleteSync('quotations', id);
   }
 
@@ -1987,8 +1759,7 @@ class StorageService {
 
   markNotificationAsRead(id: string): void {
     const notifications = this.getNotifications().map(n => n.id === id ? { ...n, read: true } : n);
-    const updated = notifications.find(n => n.id === id);
-    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications, updated);
+    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications);
   }
 
   markAllNotificationsAsRead(): void {
@@ -2021,25 +1792,23 @@ class StorageService {
     const validation = validateProduct(product, products, product.id);
     assertValid(validation);
 
-    const now = new Date().toISOString();
-    const savedProduct: ProductItem = {
-      ...product,
-      id: product.id || `prod-${Date.now()}`,
-      createdAt: product.createdAt || now,
-      updatedAt: now
-    };
-    const idx = products.findIndex(p => p.id === savedProduct.id);
+    const idx = products.findIndex(p => p.id === product.id);
     if (idx >= 0) {
-      products[idx] = savedProduct;
+      products[idx] = { ...product, updatedAt: new Date().toISOString() };
     } else {
-      products.unshift(savedProduct);
+      products.unshift({
+        ...product,
+        id: product.id || `prod-${Date.now()}`,
+        createdAt: product.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
     }
-    this.set(STORAGE_KEYS.PRODUCTS, products, savedProduct);
+    this.set(STORAGE_KEYS.PRODUCTS, products, product);
   }
 
   deleteProduct(id: string): void {
     const products = this.getProducts().filter(p => p.id !== id);
-    this.set(STORAGE_KEYS.PRODUCTS, products);
+    this.memStore.set(STORAGE_KEYS.PRODUCTS, products);
     this.deleteSync('products', id);
   }
 
@@ -2054,30 +1823,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/products/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ products })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importProducts(products);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Product import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -2138,25 +1887,23 @@ class StorageService {
     const validation = validateVendor(vendor, vendors, vendor.id);
     assertValid(validation);
 
-    const now = new Date().toISOString();
-    const savedVendor: Vendor = {
-      ...vendor,
-      id: vendor.id || `vnd-${Date.now()}`,
-      createdAt: vendor.createdAt || now,
-      updatedAt: now
-    };
-    const idx = vendors.findIndex(v => v.id === savedVendor.id);
+    const idx = vendors.findIndex(v => v.id === vendor.id);
     if (idx >= 0) {
-      vendors[idx] = savedVendor;
+      vendors[idx] = { ...vendor, updatedAt: new Date().toISOString() };
     } else {
-      vendors.unshift(savedVendor);
+      vendors.unshift({
+        ...vendor,
+        id: vendor.id || `vnd-${Date.now()}`,
+        createdAt: vendor.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
     }
-    this.set(STORAGE_KEYS.VENDORS, vendors, savedVendor);
+    this.set(STORAGE_KEYS.VENDORS, vendors, vendor);
   }
 
   deleteVendor(id: string): void {
     const vendors = this.getVendors().filter(v => v.id !== id);
-    this.set(STORAGE_KEYS.VENDORS, vendors);
+    this.memStore.set(STORAGE_KEYS.VENDORS, vendors);
     this.deleteSync('vendors', id);
   }
 
@@ -2171,30 +1918,10 @@ class StorageService {
     failedRecords?: { row: number; reason: string }[];
     errors?: string[];
   }> {
-    const apiUrl = (typeof window !== 'undefined' && (window as any).__SOLAR_API_URL__)
-      ? (window as any).__SOLAR_API_URL__
-      : apiClient.getBaseUrl();
-    const token = apiClient.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const res = await fetch(`${apiUrl}/vendors/import`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({ vendors })
-    });
-    let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
-      throw new Error(`Server returned HTTP ${res.status} (${res.statusText}).`);
+    const result = await apiClient.importVendors(vendors);
+    if (result.importedRecords && result.importedRecords.length > 0) {
+      await this.hydrateFromBackend();
     }
-    if (!res.ok || result.success === false) {
-      throw new Error(result.error || result.message || `Vendor import failed with status ${res.status}`);
-    }
-
-    await this.hydrateFromBackend();
     return result;
   }
 
@@ -2439,7 +2166,7 @@ class StorageService {
     order.stockUpdated = anyReceived;
     order.updatedAt = new Date().toISOString();
 
-    this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders, order);
+    this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders);
     return order;
   }
 
@@ -2471,13 +2198,13 @@ class StorageService {
       order.status = 'RECEIVED';
       order.stockUpdated = true;
       order.updatedAt = new Date().toISOString();
-      this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders, order);
+      this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders);
     }
   }
 
   deletePurchaseOrder(id: string): void {
     const orders = this.getPurchaseOrders().filter(o => o.id !== id);
-    this.set(STORAGE_KEYS.PURCHASE_ORDERS, orders);
+    this.memStore.set(STORAGE_KEYS.PURCHASE_ORDERS, orders);
     this.deleteSync('purchase_orders', id);
   }
 
@@ -2493,20 +2220,18 @@ class StorageService {
     const validation = validateBOM(bom, boms, bom.id);
     assertValid(validation);
 
-    const now = new Date().toISOString();
-    const savedBom: BillOfMaterials = {
-      ...bom,
-      id: bom.id || `bom-${Date.now()}`,
-      createdAt: bom.createdAt || now,
-      updatedAt: now
-    };
-    const idx = boms.findIndex(b => b.id === savedBom.id);
+    const idx = boms.findIndex(b => b.id === bom.id);
     if (idx >= 0) {
-      boms[idx] = savedBom;
+      boms[idx] = { ...bom, updatedAt: new Date().toISOString() };
     } else {
-      boms.unshift(savedBom);
+      boms.unshift({
+        ...bom,
+        id: bom.id || `bom-${Date.now()}`,
+        createdAt: bom.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
     }
-    this.set(STORAGE_KEYS.BOMS, boms, savedBom);
+    this.set(STORAGE_KEYS.BOMS, boms, bom);
   }
 
   allocateBOMStock(bomId: string, performedBy: string = 'Project Engineer'): boolean {
@@ -2554,7 +2279,7 @@ class StorageService {
         bom.status = 'APPROVED';
       }
       bom.updatedAt = new Date().toISOString();
-      this.set(STORAGE_KEYS.BOMS, boms, bom);
+      this.set(STORAGE_KEYS.BOMS, boms);
       return true;
     }
 
@@ -2563,7 +2288,7 @@ class StorageService {
 
   deleteBOM(id: string): void {
     const boms = this.getBOMs().filter(b => b.id !== id);
-    this.set(STORAGE_KEYS.BOMS, boms);
+    this.memStore.set(STORAGE_KEYS.BOMS, boms);
     this.deleteSync('boms', id);
   }
 
@@ -2630,7 +2355,7 @@ class StorageService {
 
   deleteSalesInvoice(id: string): void {
     const invoices = this.getSalesInvoices().filter(i => i.id !== id);
-    this.set(STORAGE_KEYS.SALES_INVOICES, invoices);
+    this.memStore.set(STORAGE_KEYS.SALES_INVOICES, invoices);
     this.deleteSync('sales_invoices', id);
   }
 
@@ -2643,13 +2368,12 @@ class StorageService {
 
   addStockMovement(movement: Omit<StockMovement, 'id' | 'timestamp'>): void {
     const movements = this.getStockMovements();
-    const newMovement: StockMovement = {
+    movements.unshift({
       ...movement,
       id: `sm-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: new Date().toISOString()
-    };
-    movements.unshift(newMovement);
-    this.set(STORAGE_KEYS.STOCK_MOVEMENTS, movements, newMovement);
+    });
+    this.set(STORAGE_KEYS.STOCK_MOVEMENTS, movements);
   }
 
   // ==========================================
@@ -2756,14 +2480,13 @@ class StorageService {
 
   addAclAuditLog(log: Omit<AclAuditLogEntry, 'id' | 'timestamp'>): void {
     const logs = this.getAclAuditLogs();
-    const newLog: AclAuditLogEntry = {
+    logs.unshift({
       ...log,
       id: `acl-log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: new Date().toISOString()
-    };
-    logs.unshift(newLog);
+    });
     // Keep max 50 recent audit records
-    this.set(STORAGE_KEYS.ACL_AUDIT_LOGS, logs.slice(0, 50), newLog);
+    this.set(STORAGE_KEYS.ACL_AUDIT_LOGS, logs.slice(0, 50));
   }
 
   // ==========================================
@@ -2775,29 +2498,18 @@ class StorageService {
 
   saveWarehouse(warehouse: Warehouse): void {
     const list = this.getWarehouses();
-    const now = new Date().toISOString();
-    const savedWarehouse: Warehouse = {
-      ...warehouse,
-      id: warehouse.id || `wh-${Date.now()}`,
-      createdAt: warehouse.createdAt || now,
-      updatedAt: now
-    };
-    const idx = list.findIndex(w => w.id === savedWarehouse.id);
-    let defaultCleared = false;
-    if (savedWarehouse.isDefault) {
+    const idx = list.findIndex(w => w.id === warehouse.id);
+    if (warehouse.isDefault) {
       list.forEach(w => {
-        if (w.id !== savedWarehouse.id && w.isDefault) {
-          w.isDefault = false;
-          defaultCleared = true;
-        }
+        if (w.id !== warehouse.id) w.isDefault = false;
       });
     }
     if (idx >= 0) {
-      list[idx] = savedWarehouse;
+      list[idx] = { ...warehouse, updatedAt: new Date().toISOString() };
     } else {
-      list.push(savedWarehouse);
+      list.push({ ...warehouse, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     }
-    this.set(STORAGE_KEYS.WAREHOUSES, list, defaultCleared ? undefined : savedWarehouse);
+    this.set(STORAGE_KEYS.WAREHOUSES, list, warehouse);
   }
 
   deleteWarehouse(id: string): { success: boolean; message?: string } {
@@ -2808,7 +2520,7 @@ class StorageService {
       return { success: false, message: 'Cannot delete the default warehouse. Please mark another warehouse as default first.' };
     }
     const updated = list.filter(w => w.id !== id);
-    this.set(STORAGE_KEYS.WAREHOUSES, updated);
+    this.memStore.set(STORAGE_KEYS.WAREHOUSES, updated);
     this.deleteSync('warehouses', id);
     return { success: true };
   }
@@ -2824,18 +2536,13 @@ class StorageService {
 
   saveStockAudit(audit: StockAuditRecord): void {
     const list = this.getStockAudits();
-    const savedAudit: StockAuditRecord = {
-      ...audit,
-      id: audit.id || `sa-${Date.now()}`,
-      createdAt: audit.createdAt || new Date().toISOString()
-    };
-    const idx = list.findIndex(a => a.id === savedAudit.id);
+    const idx = list.findIndex(a => a.id === audit.id);
     if (idx >= 0) {
-      list[idx] = savedAudit;
+      list[idx] = audit;
     } else {
-      list.unshift(savedAudit);
+      list.unshift(audit);
     }
-    this.set(STORAGE_KEYS.STOCK_AUDITS, list, savedAudit);
+    this.set(STORAGE_KEYS.STOCK_AUDITS, list, audit);
   }
 
   transferStock(
@@ -2865,7 +2572,7 @@ class StorageService {
     prod.warehouseStocks[fromWarehouseId] = currentFromStock - quantity;
     prod.warehouseStocks[toWarehouseId] = (prod.warehouseStocks[toWarehouseId] ?? 0) + quantity;
     prod.updatedAt = new Date().toISOString();
-    this.set(STORAGE_KEYS.PRODUCTS, products, prod);
+    this.set(STORAGE_KEYS.PRODUCTS, products);
 
     this.addStockMovement({
       productId: prod.id,

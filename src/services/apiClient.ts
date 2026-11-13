@@ -97,8 +97,8 @@ class ApiClient {
         host: '127.0.0.1',
         database: 'u238683373_rejoy_solar',
         port: 3306,
-        mode: 'STANDBY_PERSISTENCE_MODE',
-        dumpAvailable: true,
+        mode: 'DISCONNECTED',
+        dumpAvailable: false,
         dumpPath: '/database.sql',
         message: 'Could not contact backend API: ' + e.message
       };
@@ -140,7 +140,7 @@ class ApiClient {
       const res = await this.request(`${this.baseUrl}/auth/registration-status`);
       return await res.json();
     } catch {
-      return { success: false, allowPublicRegistration: true, adminCount: 0 };
+      return { success: false, allowPublicRegistration: false, adminCount: 0 };
     }
   }
 
@@ -191,10 +191,13 @@ class ApiClient {
   }
 
   // --- Master Bootstrap Data ---
-  async getBootstrapData(): Promise<Record<string, any> | null> {
+  async getBootstrapData(): Promise<Record<string, any>> {
     const res = await this.request(`${this.baseUrl}/bootstrap`);
-    const json = await this.handleResponse<any>(res);
-    return json || null;
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.error || json.message || `MySQL bootstrap failed (HTTP ${res.status})`);
+    }
+    return json.data || {};
   }
 
   private async handleResponse<T = any>(res: Response): Promise<T> {
@@ -323,8 +326,7 @@ class ApiClient {
   // --- Customers ---
   async getCustomers(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/customers`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveCustomer(cust: any): Promise<any> {
@@ -370,8 +372,7 @@ class ApiClient {
   // --- Leads ---
   async getLeads(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/leads`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveLead(lead: any): Promise<any> {
@@ -407,8 +408,7 @@ class ApiClient {
   // --- Projects ---
   async getProjects(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/projects`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveProject(proj: any): Promise<any> {
@@ -454,8 +454,7 @@ class ApiClient {
   // --- Employees ---
   async getEmployees(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/employees`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveEmployee(emp: any): Promise<any> {
@@ -546,8 +545,7 @@ class ApiClient {
   // --- Attendance ---
   async getAttendance(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/attendance`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveAttendance(item: any): Promise<any> {
@@ -581,8 +579,7 @@ class ApiClient {
   // --- Payroll / Payslips ---
   async getPayslips(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/payslips`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async savePayslip(item: any): Promise<any> {
@@ -603,8 +600,7 @@ class ApiClient {
   // --- Holidays ---
   async getHolidays(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/holidays`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveHoliday(item: any): Promise<any> {
@@ -625,8 +621,7 @@ class ApiClient {
   // --- Products ---
   async getProducts(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/products`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveProduct(item: any): Promise<any> {
@@ -660,8 +655,7 @@ class ApiClient {
   // --- Vendors ---
   async getVendors(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/vendors`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveVendor(item: any): Promise<any> {
@@ -695,8 +689,7 @@ class ApiClient {
   // --- Purchase Orders ---
   async getPurchaseOrders(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/purchase-orders`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async savePurchaseOrder(item: any): Promise<any> {
@@ -717,8 +710,7 @@ class ApiClient {
   // --- Bill of Materials (BOM) ---
   async getBOMs(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/boms`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveBOM(item: any): Promise<any> {
@@ -739,8 +731,7 @@ class ApiClient {
   // --- Sales Invoices ---
   async getSalesInvoices(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/sales-invoices`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveSalesInvoice(item: any): Promise<any> {
@@ -761,8 +752,7 @@ class ApiClient {
   // --- Warehouses ---
   async getWarehouses(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/warehouses`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveWarehouse(item: any): Promise<any> {
@@ -783,8 +773,7 @@ class ApiClient {
   // --- Stock Movements ---
   async getStockMovements(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/stock-movements`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveStockMovement(item: any): Promise<any> {
@@ -799,8 +788,7 @@ class ApiClient {
   // --- Stock Audits ---
   async getStockAudits(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/stock-audits`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveStockAudit(item: any): Promise<any> {
@@ -821,8 +809,7 @@ class ApiClient {
   // --- Quotations ---
   async getQuotations(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/quotations`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveQuotation(item: any): Promise<any> {
@@ -843,8 +830,7 @@ class ApiClient {
   // --- Site Surveys ---
   async getSurveys(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/surveys`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveSurvey(item: any): Promise<any> {
@@ -865,8 +851,7 @@ class ApiClient {
   // --- Payments ---
   async getPayments(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/payments`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async savePayment(item: any): Promise<any> {
@@ -900,8 +885,7 @@ class ApiClient {
   // --- Expenses ---
   async getExpenses(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/expenses`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveExpense(item: any): Promise<any> {
@@ -935,8 +919,7 @@ class ApiClient {
   // --- Service Tickets ---
   async getServiceTickets(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/service-tickets`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveServiceTicket(item: any): Promise<any> {
@@ -970,8 +953,7 @@ class ApiClient {
   // --- AMC Contracts ---
   async getAMCContracts(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/amc-contracts`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveAMCContract(item: any): Promise<any> {
@@ -992,8 +974,7 @@ class ApiClient {
   // --- Notifications ---
   async getNotifications(): Promise<any[]> {
     const res = await this.request(`${this.baseUrl}/notifications`);
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveNotification(item: any): Promise<any> {
@@ -1012,7 +993,7 @@ class ApiClient {
   }
 
   async markAllNotificationsRead(): Promise<boolean> {
-    const res = await this.request(`${this.baseUrl}/notifications/read-all`, { method: 'PUT' });
+    const res = await this.request(`${this.baseUrl}/notifications/mark-all-read`, { method: 'PUT' });
     await this.handleResponse(res);
     return true;
   }
@@ -1037,8 +1018,7 @@ class ApiClient {
     const res = await this.request(`${this.baseUrl}/users`, {
       headers: this.getAuthHeaders()
     });
-    const data = await this.handleResponse<any[]>(res);
-    return Array.isArray(data) ? data : [];
+    return (await this.handleResponse(res)) || [];
   }
 
   async saveUser(user: any): Promise<any> {

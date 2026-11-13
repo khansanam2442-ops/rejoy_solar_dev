@@ -77,6 +77,11 @@ interface AppContextType {
   openSettingsTab: (tab: SettingsTab) => void;
   refreshTrigger: number;
   triggerRefresh: () => void;
+  bootstrapStatus: 'idle' | 'loading' | 'ready' | 'error';
+  bootstrapError: string | null;
+  syncError: string | null;
+  clearSyncError: () => void;
+  retrySync: () => Promise<void>;
 }
 
 const getNormalizedPath = (pathname: string): string => {
@@ -405,25 +410,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [settings, setSettings] = useState<SystemSettings>(() => storageService.getSettings());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [bootstrapStatus, setBootstrapStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(() => storageService.bootstrapStatus);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(() => storageService.bootstrapError);
+  const [syncError, setSyncError] = useState<string | null>(() => storageService.lastSyncError);
 
   const triggerRefresh = () => setRefreshTrigger(prev => prev + 1);
+  const clearSyncError = () => {
+    storageService.lastSyncError = null;
+    setSyncError(null);
+  };
+  const retrySync = async () => {
+    await storageService.hydrateFromBackend();
+  };
 
   useEffect(() => {
     setNotifications(storageService.getNotifications());
     setSettings(storageService.getSettings());
+    setBootstrapStatus(storageService.bootstrapStatus);
+    setBootstrapError(storageService.bootstrapError);
+    setSyncError(storageService.lastSyncError);
 
     const handleStorageUpdate = () => {
       setTimeout(() => {
         setNotifications(storageService.getNotifications());
         setSettings(storageService.getSettings());
+        setBootstrapStatus(storageService.bootstrapStatus);
+        setBootstrapError(storageService.bootstrapError);
+        setSyncError(storageService.lastSyncError);
         setRefreshTrigger(prev => prev + 1);
       }, 0);
     };
 
-    const handleStorageError = (e: Event) => {
-      const detail = (e as CustomEvent)?.detail;
-      const msg = detail?.error || 'Failed to save changes to MySQL database.';
-      showToast(msg, 'error');
+    const handleStorageError = (ev: Event) => {
+      const detail = (ev as CustomEvent)?.detail;
+      const errMsg = detail?.error || storageService.lastSyncError || storageService.bootstrapError || 'MySQL synchronization error';
+      setBootstrapStatus(storageService.bootstrapStatus);
+      setBootstrapError(storageService.bootstrapError);
+      setSyncError(errMsg);
     };
 
     window.addEventListener('solarpulse_storage_updated', handleStorageUpdate);
@@ -538,7 +561,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveSettingsTab,
         openSettingsTab,
         refreshTrigger,
-        triggerRefresh
+        triggerRefresh,
+        bootstrapStatus,
+        bootstrapError,
+        syncError,
+        clearSyncError,
+        retrySync
       }}
     >
       {children}

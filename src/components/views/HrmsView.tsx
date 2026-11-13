@@ -261,19 +261,13 @@ export const HrmsView: React.FC = () => {
   const handleSaveEmployee = async (emp: Employee) => {
     const isEdit = Boolean(employeeToEdit);
     try {
-      // 1. Persist directly to backend MySQL API
-      let effectiveEmp = emp;
-      try {
-        const saved = await apiClient.saveEmployee(emp);
-        if (saved && saved.id) {
-          effectiveEmp = { ...emp, ...saved };
-        }
-      } catch (apiErr: any) {
-        console.warn('[HRMS] Direct API save notice, relying on storage sync:', apiErr?.message);
-      }
+      // 1. Persist directly to backend MySQL API before reporting success
+      const saved = await apiClient.saveEmployee(emp);
+      const effectiveEmp = (saved && saved.id) ? { ...emp, ...saved } : emp;
 
-      // 2. Synchronize local store
+      // 2. Refresh local store from committed MySQL state
       storageService.saveEmployee(effectiveEmp);
+      await storageService.hydrateFromBackend();
 
       const loginMsg = effectiveEmp.loginEnabled
         ? ` (ERP Login: ${effectiveEmp.systemRole || 'Active'})`
@@ -287,7 +281,7 @@ export const HrmsView: React.FC = () => {
       triggerRefresh();
       setLocalUpdateCounter(c => c + 1);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to save employee';
+      const msg = err instanceof Error ? err.message : 'Failed to save employee to MySQL';
       showToast(msg, 'error');
       throw err;
     }

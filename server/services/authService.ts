@@ -145,9 +145,9 @@ export class AuthService {
         const [users]: any = await pool.query('SELECT * FROM `solar_users`');
         if (Array.isArray(users)) {
           for (const u of users) {
-            if (!u.email) continue;
+            if (!u.email || !u.password) continue;
             const email = String(u.email).trim().toLowerCase();
-            const rawPass = u.password || '123456';
+            const rawPass = String(u.password);
             const passwordHash = await this.hashPassword(rawPass);
             const accountType: AccountType = (u.role === 'Customer') ? 'CUSTOMER' : (u.role === 'Admin' || u.role === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE';
             const linkedEntityId = u.employee_id || u.customer_id || u.id;
@@ -181,7 +181,7 @@ export class AuthService {
         console.warn('[Auth Service] Notice migrating users to credentials:', err.message);
       }
 
-      // Migrate from solar_employees (and fallback to solar_employee)
+      // Migrate from solar_employees (and fallback to solar_employee) — skip accounts without explicit password
       try {
         let employees: any[] = [];
         try {
@@ -198,10 +198,12 @@ export class AuthService {
           for (const emp of employees) {
             if (!emp.email) continue;
             const email = String(emp.email).trim().toLowerCase();
+            // Do not overwrite or assign a weak static password; generate unguessable random secret if employee row lacks password
+            const rawEmpPass = emp.password ? String(emp.password) : `${emp.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             const role = emp.system_role || emp.assigned_role || emp.designation || 'Technician';
             const accountType: AccountType = (role === 'Admin' || role === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE';
             const status = (emp.status === 'INACTIVE' || emp.account_status === 'DISABLED' || emp.login_enabled === 0) ? 'DISABLED' : 'ACTIVE';
-            const passwordHash = await this.hashPassword('123456');
+            const passwordHash = await this.hashPassword(rawEmpPass);
 
             await pool.query(`
               INSERT INTO \`solar_auth_credentials\` (
@@ -235,9 +237,9 @@ export class AuthService {
         const [customers]: any = await pool.query('SELECT * FROM `solar_customers`');
         if (Array.isArray(customers)) {
           for (const c of customers) {
-            if (!c.email) continue;
+            if (!c.email || !c.password) continue;
             const email = String(c.email).trim().toLowerCase();
-            const rawPass = c.password || '123456';
+            const rawPass = String(c.password);
             const passwordHash = await this.hashPassword(rawPass);
             const status = c.status === 'INACTIVE' ? 'DISABLED' : 'ACTIVE';
 
