@@ -125,13 +125,26 @@ export function requireRole(allowedRoles: string[]) {
 }
 
 // Admin security check for sensitive database migration and dump endpoints
-function checkAdminAuth(req: Request, res: Response, next: () => void) {
-  const user = (req as any).user;
-  const authHeader = req.headers.authorization;
-  const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
+async function checkAdminAuth(req: Request, res: Response, next: () => void) {
+  let user = (req as any).user;
+  if (!user) {
+    const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
+    const pool = dbManager.getPool();
+    if (adminKey && typeof adminKey === 'string' && pool) {
+      const val = await authService.validateSession(pool, adminKey.trim()).catch(() => ({ valid: false, user: null }));
+      if (val.valid && val.user) {
+        user = val.user;
+        (req as any).user = user;
+      }
+    }
+  }
   const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || req.hostname === 'localhost';
-  if (isLocal || authHeader || adminKey || (user && (user.role === 'Admin' || user.role === 'Super Admin'))) {
+  if ((user && (user.role === 'Admin' || user.role === 'Super Admin')) || isLocal) {
     return next();
+  }
+  if (!user) {
+    res.status(401).json({ success: false, error: 'Authentication required. Valid Administrator session required.' });
+    return;
   }
   res.status(403).json({ success: false, error: 'Access Denied: Administrative authorization required for database operations.' });
 }
@@ -265,14 +278,39 @@ apiRouter.post('/sync/push', async (req: Request, res: Response) => {
       return;
     }
 
-    // Role-based permission enforcement: Customers have read-only access to projects & stages
+    // Enforce authenticated MySQL session + collection-level RBAC
     const user = (req as any).user;
-    if (user && isCustomerUser(user)) {
-      const restricted = ['projects', 'solar_projects', 'solar_project_stages', 'stages'];
-      if (restricted.includes(String(collection).toLowerCase())) {
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required. Please log in with an active session.'
+      });
+    }
+
+    const normalizedCollection = String(collection).toLowerCase();
+    const adminOnlyCollections = ['users', 'solar_users', 'acl_config', 'solar_acl_config', 'settings', 'solar_system_settings'];
+    const hrCollections = ['employees', 'employee', 'solar_employees', 'solar_employee'];
+
+    if (isCustomerUser(user)) {
+      const customerWritable = ['service_tickets', 'solar_service_tickets', 'notifications', 'solar_notifications'];
+      if (!customerWritable.includes(normalizedCollection)) {
         return res.status(403).json({
           success: false,
-          error: 'Forbidden: Customers have read-only access to project stages and progress.'
+          error: 'Forbidden: Customers have read-only access to project stages, progress, and system data.'
+        });
+      }
+    } else if (adminOnlyCollections.includes(normalizedCollection)) {
+      if (user.role !== 'Admin' && user.role !== 'Super Admin') {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Only Administrators can modify users, permissions, or system settings.'
+        });
+      }
+    } else if (hrCollections.includes(normalizedCollection)) {
+      if (!['Admin', 'Super Admin', 'HR Manager'].includes(user.role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Only Administrators or HR Managers can modify employee directory records.'
         });
       }
     }
@@ -367,14 +405,21 @@ apiRouter.post(['/auth/register', '/auth/register/'], async (req: Request, res: 
       return;
     }
 
-    // Check if caller has administrative authorization header
-    const authHeader = req.headers.authorization;
-    const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader;
-    const isAuthorizedByAdmin = Boolean(
-      (token && token !== 'null' && token !== 'undefined' && token.length > 5) ||
-      (adminKey && String(adminKey) !== 'null' && String(adminKey) !== 'undefined' && String(adminKey).length > 2)
+    // Check if caller has an active Admin session (never trust arbitrary non-empty tokens)
+    const callerUser = (req as any).user;
+    let isAuthorizedByAdmin = Boolean(
+      callerUser && (callerUser.role === 'Admin' || callerUser.role === 'Super Admin')
     );
+    if (!isAuthorizedByAdmin) {
+      const adminKey = req.headers['x-admin-token'] || req.headers['x-admin-key'];
+      const authPool = dbManager.getPool();
+      if (adminKey && typeof adminKey === 'string' && authPool) {
+        const keyCheck = await authService.validateSession(authPool, adminKey.trim()).catch(() => ({ valid: false, user: null }));
+        if (keyCheck.valid && keyCheck.user && (keyCheck.user.role === 'Admin' || keyCheck.user.role === 'Super Admin')) {
+          isAuthorizedByAdmin = true;
+        }
+      }
+    }
 
     const user = await dbManager.registerAdmin(
       {
@@ -613,7 +658,7 @@ apiRouter.post(['/auth/reset-password', '/auth/reset-password/'], async (req: Re
 // 3B. USERS MODULE API (MYSQL USER MANAGEMENT)
 // ==========================================================
 
-apiRouter.get('/users', async (_req: Request, res: Response) => {
+apiRouter.get('/users', requireRole(['Admin', 'Super Admin', 'HR Manager']), async (_req: Request, res: Response) => {
   try {
     const users = await dbManager.getUsers();
     res.json({ success: true, count: users.length, data: users });
@@ -622,7 +667,7 @@ apiRouter.get('/users', async (_req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/users', async (req: Request, res: Response) => {
+apiRouter.post('/users', requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
     if (!payload.name || !payload.email) {
@@ -637,18 +682,18 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.put('/users/:id', async (req: Request, res: Response) => {
+apiRouter.put('/users/:id', requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const payload = req.body || {};
-    const updated = await dbManager.saveUser({ ...payload, id });
+    const updated = await dbManager.saveUser({ ...payload, id }, { updateOnly: true });
     res.json({ success: true, data: updated });
   } catch (err: any) {
     sendApiError(res, err, 'Failed to update user');
   }
 });
 
-apiRouter.put('/users/:id/password', async (req: Request, res: Response) => {
+apiRouter.put('/users/:id/password', requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { password } = req.body || {};
@@ -663,7 +708,7 @@ apiRouter.put('/users/:id/password', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
+apiRouter.delete('/users/:id', requireRole(['Admin', 'Super Admin']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await dbManager.deleteUser(id);
@@ -1043,7 +1088,7 @@ apiRouter.get(['/employees', '/employee'], async (_req: Request, res: Response) 
   }
 });
 
-apiRouter.post(['/employees', '/employee'], async (req: Request, res: Response) => {
+apiRouter.post(['/employees', '/employee'], requireRole(['Admin', 'Super Admin', 'HR Manager']), async (req: Request, res: Response) => {
   try {
     const payload = req.body;
     const emp = {
@@ -1060,7 +1105,7 @@ apiRouter.post(['/employees', '/employee'], async (req: Request, res: Response) 
 });
 
 // Batch Employee Import (Excel / CSV Hub)
-apiRouter.post(['/employees/import', '/employees/import/', '/employee/import', '/employee/import/'], async (req: Request, res: Response) => {
+apiRouter.post(['/employees/import', '/employees/import/', '/employee/import', '/employee/import/'], requireRole(['Admin', 'Super Admin', 'HR Manager']), async (req: Request, res: Response) => {
   try {
     const { employees, rows } = req.body || {};
     const list = Array.isArray(employees) ? employees : (Array.isArray(rows) ? rows : (Array.isArray(req.body) ? req.body : []));
@@ -1081,7 +1126,7 @@ apiRouter.post(['/employees/import', '/employees/import/', '/employee/import', '
   }
 });
 
-apiRouter.put(['/employees/:id', '/employee/:id'], async (req: Request, res: Response) => {
+apiRouter.put(['/employees/:id', '/employee/:id'], requireRole(['Admin', 'Super Admin', 'HR Manager']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const payload = req.body;
@@ -1092,7 +1137,7 @@ apiRouter.put(['/employees/:id', '/employee/:id'], async (req: Request, res: Res
   }
 });
 
-apiRouter.delete(['/employees/:id', '/employee/:id'], async (req: Request, res: Response) => {
+apiRouter.delete(['/employees/:id', '/employee/:id'], requireRole(['Admin', 'Super Admin', 'HR Manager']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await dbManager.deleteEmployee(id);

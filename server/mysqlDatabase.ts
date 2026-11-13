@@ -3456,67 +3456,95 @@ class MySqlDatabaseManager {
       }
     }
 
-    // Authoritatively synchronize employee account to solar_users if loginEnabled
-    if (loginEnabled && this.pool) {
+    // Authoritatively synchronize employee account to solar_users ONLY if loginEnabled and not resurrecting a deleted user
+    if (this.pool) {
       try {
         const [existingUserRows]: any = await this.pool.query(
           'SELECT id, password FROM `solar_users` WHERE `id` = ? OR `employee_id` = ? OR LOWER(`email`) = ? LIMIT 1',
           [item.id, employeeCode, email.toLowerCase()]
         );
         const existingUser = Array.isArray(existingUserRows) && existingUserRows.length > 0 ? existingUserRows[0] : null;
-        let passwordHash = existingUser?.password;
         const rawPass = item.password || item.tempPassword;
-        if (rawPass && typeof rawPass === 'string' && rawPass.length >= 6) {
-          if (!rawPass.startsWith('$2a$') && !rawPass.startsWith('$2b$') && !rawPass.startsWith('$2y$') && !rawPass.startsWith('$argon2id$')) {
-            passwordHash = await bcrypt.hash(rawPass, 10);
-          } else {
-            passwordHash = rawPass;
+        const isActiveLogin = Boolean(loginEnabled) && status !== 'INACTIVE' && status !== 'TERMINATED' && accountStatus !== 'DISABLED';
+
+        // Allow creating a solar_users record only if:
+        // (a) existingUser already exists (update it), OR
+        // (b) this is a brand-new employee (!existing), OR
+        // (c) caller explicitly supplied a password/tempPassword to enable login
+        const shouldSyncUser = isActiveLogin && (Boolean(existingUser) || !existing || Boolean(rawPass && typeof rawPass === 'string' && rawPass.trim().length >= 6));
+
+        if (shouldSyncUser) {
+          let passwordHash = existingUser?.password;
+          if (rawPass && typeof rawPass === 'string' && rawPass.trim().length >= 6) {
+            const cleanPass = rawPass.trim();
+            if (!cleanPass.startsWith('$2a$') && !cleanPass.startsWith('$2b$') && !cleanPass.startsWith('$2y$') && !cleanPass.startsWith('$argon2id$')) {
+              passwordHash = await bcrypt.hash(cleanPass, 10);
+            } else {
+              passwordHash = cleanPass;
+            }
+          } else if (!passwordHash) {
+            passwordHash = await bcrypt.hash(`Emp@${Math.random().toString(36).slice(-8)}`, 10);
           }
-        } else if (!passwordHash) {
-          passwordHash = await bcrypt.hash(`Emp@${Math.random().toString(36).slice(-8)}`, 10);
+
+          const targetUserId = existingUser?.id || item.id;
+          if (existingUser) {
+            await this.pool.query(`
+              UPDATE \`solar_users\`
+              SET \`name\` = ?, \`email\` = ?, \`role\` = ?, \`phone\` = ?,
+                  \`department\` = ?, \`designation\` = ?, \`employee_id\` = ?,
+                  \`is_field_worker\` = ?, \`status\` = 'ACTIVE', \`updated_at\` = CURRENT_TIMESTAMP
+                  ${rawPass ? ', `password` = ?' : ''}
+              WHERE \`id\` = ?
+            `, [
+              name, email.toLowerCase(), systemRole, phone,
+              department, designation, employeeCode,
+              isFieldWorker,
+              ...(rawPass ? [passwordHash] : []),
+              targetUserId
+            ]);
+          } else {
+            await this.pool.query(`
+              INSERT INTO \`solar_users\` (
+                \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
+                \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+            `, [
+              targetUserId, name, email.toLowerCase(), passwordHash, systemRole, phone,
+              department, designation, employeeCode, isFieldWorker
+            ]);
+            console.log('[Audit][solar_users]', JSON.stringify({
+              timestamp: new Date().toISOString(),
+              operation: 'INSERT',
+              source: 'dbManager.saveEmployee',
+              targetUserId,
+              email: email.toLowerCase()
+            }));
+          }
+
+          await authService.setCredential(this.pool, {
+            userId: targetUserId,
+            email: email.toLowerCase(),
+            password: rawPass || undefined,
+            role: systemRole || 'Technician',
+            accountType: (systemRole === 'Admin' || systemRole === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE',
+            linkedEntityId: item.id,
+            status: 'ACTIVE'
+          });
+        } else if (!isActiveLogin && existingUser) {
+          // Disable existing login account and revoke active sessions instead of deleting or recreating
+          await this.pool.query(
+            "UPDATE `solar_users` SET `status` = 'DISABLED', `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?",
+            [existingUser.id]
+          ).catch(() => {});
+          await this.pool.query(
+            "UPDATE `solar_auth_credentials` SET `status` = 'DISABLED' WHERE `user_id` = ? OR `linked_entity_id` = ? OR LOWER(`email`) = ?",
+            [existingUser.id, item.id, email.toLowerCase()]
+          ).catch(() => {});
+          await this.pool.query(
+            'DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ? OR LOWER(`email`) = ?',
+            [existingUser.id, item.id, email.toLowerCase()]
+          ).catch(() => {});
         }
-
-        const userStatus = (status === 'INACTIVE' || accountStatus === 'DISABLED') ? 'DISABLED' : 'ACTIVE';
-        const targetUserId = existingUser?.id || item.id;
-        await this.pool.query(`
-          INSERT INTO \`solar_users\` (
-            \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
-            \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            \`name\` = VALUES(\`name\`),
-            \`role\` = VALUES(\`role\`),
-            \`phone\` = VALUES(\`phone\`),
-            \`department\` = VALUES(\`department\`),
-            \`designation\` = VALUES(\`designation\`),
-            \`employee_id\` = VALUES(\`employee_id\`),
-            \`is_field_worker\` = VALUES(\`is_field_worker\`),
-            \`status\` = VALUES(\`status\`)
-            ${rawPass ? ', `password` = VALUES(`password`)' : ''}
-        `, [
-          targetUserId,
-          name,
-          email.toLowerCase(),
-          passwordHash,
-          systemRole,
-          phone,
-          department,
-          designation,
-          employeeCode,
-          isFieldWorker,
-          userStatus
-        ]);
-
-        // Also synchronize to centralized solar_auth_credentials table
-        await authService.setCredential(this.pool, {
-          userId: item.id,
-          email: email.toLowerCase(),
-          password: rawPass || undefined,
-          role: systemRole || 'Technician',
-          accountType: (systemRole === 'Admin' || systemRole === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE',
-          linkedEntityId: item.id,
-          status: (status === 'INACTIVE' || accountStatus === 'DISABLED' || !loginEnabled) ? 'DISABLED' : 'ACTIVE'
-        });
       } catch (syncErr: any) {
         console.warn('[DB Manager] Notice syncing user from employee:', syncErr?.message || syncErr);
       }
@@ -3538,11 +3566,46 @@ class MySqlDatabaseManager {
   public async deleteEmployee(id: string): Promise<boolean> {
     this.assertDbConnected();
     if (this.pool) {
+      let empEmail = '';
+      let empCode = '';
+      try {
+        const [eRows]: any = await this.pool.query('SELECT employee_code, email FROM `solar_employee` WHERE `id` = ? LIMIT 1', [id]);
+        if (Array.isArray(eRows) && eRows.length > 0) {
+          empEmail = String(eRows[0].email || '').trim().toLowerCase();
+          empCode = String(eRows[0].employee_code || '').trim();
+        }
+      } catch {}
+
       await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `employee_id` = ?', [id]).catch(() => {});
       await this.pool.query('DELETE FROM `solar_employee` WHERE `id` = ?', [id]);
-      await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ? OR `employee_id` = ?', [id, id]).catch(() => {});
-      await this.pool.query('DELETE FROM `solar_auth_credentials` WHERE `user_id` = ? OR `linked_entity_id` = ?', [id, id]).catch(() => {});
-      await this.pool.query('DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ?', [id, id]).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_employees` WHERE `id` = ?' + (empCode ? ' OR `employee_code` = ?' : '') + (empEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, ...(empCode ? [empCode] : []), ...(empEmail ? [empEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_users` WHERE `id` = ? OR `employee_id` = ?' + (empCode ? ' OR `employee_id` = ?' : '') + (empEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, id, ...(empCode ? [empCode] : []), ...(empEmail ? [empEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_auth_credentials` WHERE `user_id` = ? OR `linked_entity_id` = ?' + (empEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, id, ...(empEmail ? [empEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ?' + (empEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, id, ...(empEmail ? [empEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_workforce_locations` WHERE `user_id` = ?' + (empEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, ...(empEmail ? [empEmail] : [])]
+      ).catch(() => {});
+
+      console.log('[Audit][solar_users]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        operation: 'DELETE',
+        source: 'dbManager.deleteEmployee',
+        targetUserId: id,
+        email: empEmail || undefined
+      }));
     }
     const items = this.getFallbackItems('employees').filter(e => e.id !== id);
     this.setFallbackItems('employees', items);
@@ -5470,22 +5533,38 @@ class MySqlDatabaseManager {
     return mapped;
   }
 
-  public async saveUser(item: any): Promise<any> {
+  public async saveUser(item: any, options?: { updateOnly?: boolean }): Promise<any> {
     this.assertDbConnected();
     const cleanEmail = (item.email || '').toLowerCase().trim();
+    const isUpdateOnly = Boolean(options?.updateOnly);
 
-    // Find existing user by ID OR email
+    // Find existing user by ID (or by email when creating)
     let existing: any = null;
     if (this.pool) {
-      const [rows]: any = await this.pool.query(
-        'SELECT * FROM `solar_users` WHERE `id` = ? OR (LOWER(`email`) = ? AND `email` != "") LIMIT 1',
-        [item.id, cleanEmail]
-      );
-      if (Array.isArray(rows) && rows.length > 0) existing = rows[0];
+      if (isUpdateOnly) {
+        const [rows]: any = await this.pool.query(
+          'SELECT * FROM `solar_users` WHERE `id` = ? LIMIT 1',
+          [item.id]
+        );
+        if (Array.isArray(rows) && rows.length > 0) existing = rows[0];
+      } else {
+        const [rows]: any = await this.pool.query(
+          'SELECT * FROM `solar_users` WHERE `id` = ? OR (LOWER(`email`) = ? AND `email` != "") LIMIT 1',
+          [item.id, cleanEmail]
+        );
+        if (Array.isArray(rows) && rows.length > 0) existing = rows[0];
+      }
     } else {
       existing = (this.getFallbackItems('users') || []).find(
-        (u: any) => u.id === item.id || (u.email && cleanEmail && u.email.toLowerCase() === cleanEmail)
+        (u: any) => u.id === item.id || (!isUpdateOnly && u.email && cleanEmail && u.email.toLowerCase() === cleanEmail)
       );
+    }
+
+    if (isUpdateOnly && !existing) {
+      const notFoundErr: any = new Error(`User record "${item.id}" not found in MySQL.`);
+      notFoundErr.statusCode = 404;
+      notFoundErr.code = 'USER_NOT_FOUND';
+      throw notFoundErr;
     }
 
     const canonicalId = existing?.id || item.id;
@@ -5515,79 +5594,109 @@ class MySqlDatabaseManager {
     const designation = item.designation ?? existing?.designation ?? '';
     const employeeId = item.employeeId ?? item.employee_id ?? existing?.employee_id ?? null;
     const isFieldWorker = (item.isFieldWorker !== undefined ? item.isFieldWorker : (existing?.is_field_worker !== undefined ? existing.is_field_worker : false)) ? 1 : 0;
-    const status = item.status ?? existing?.status ?? 'ACTIVE';
+    const loginDisabledExplicit = item.loginEnabled === false || item.login_enabled === 0 || item.login_enabled === false;
+    const status = loginDisabledExplicit ? 'DISABLED' : (item.status ?? existing?.status ?? 'ACTIVE');
 
     if (this.pool) {
-      const sql = `
-        INSERT INTO \`solar_users\` (
-          \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
-          \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-          \`name\` = VALUES(\`name\`),
-          \`role\` = VALUES(\`role\`),
-          \`phone\` = VALUES(\`phone\`),
-          \`department\` = VALUES(\`department\`),
-          \`designation\` = VALUES(\`designation\`),
-          \`employee_id\` = VALUES(\`employee_id\`),
-          \`is_field_worker\` = VALUES(\`is_field_worker\`),
-          \`status\` = VALUES(\`status\`)
-          ${hasNewPassword ? ', `password` = VALUES(`password`)' : ''}
-      `;
-      await this.pool.query(sql, [
-        canonicalId,
-        name,
-        email,
-        password,
-        role,
-        phone,
-        department,
-        designation,
-        employeeId,
-        isFieldWorker,
-        status
-      ]);
-
-      // Synchronize employee directory in MySQL
-      try {
-        const empCode = employeeId || `EMP-${canonicalId.replace(/[^0-9]/g, '').slice(-3) || '001'}`;
+      if (existing) {
         await this.pool.query(`
-          INSERT INTO \`solar_employee\` (
-            \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
-            \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
-            \`status\`, \`current_site_location\`, \`login_enabled\`, \`auth_uid\`, \`system_role\`,
-            \`assigned_role\`, \`is_field_worker\`, \`account_status\`
-          ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', 1, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            \`name\` = VALUES(\`name\`),
-            \`department\` = VALUES(\`department\`),
-            \`designation\` = VALUES(\`designation\`),
-            \`phone\` = VALUES(\`phone\`),
-            \`email\` = VALUES(\`email\`),
-            \`auth_uid\` = VALUES(\`auth_uid\`),
-            \`system_role\` = VALUES(\`system_role\`),
-            \`assigned_role\` = VALUES(\`assigned_role\`),
-            \`is_field_worker\` = VALUES(\`is_field_worker\`),
-            \`status\` = VALUES(\`status\`),
-            \`account_status\` = VALUES(\`account_status\`),
-            \`updated_at\` = CURRENT_TIMESTAMP
+          UPDATE \`solar_users\`
+          SET \`name\` = ?, \`email\` = ?, \`role\` = ?, \`phone\` = ?,
+              \`department\` = ?, \`designation\` = ?, \`employee_id\` = ?,
+              \`is_field_worker\` = ?, \`status\` = ?, \`updated_at\` = CURRENT_TIMESTAMP
+              ${hasNewPassword ? ', `password` = ?' : ''}
+          WHERE \`id\` = ?
         `, [
-          canonicalId,
-          empCode,
-          name,
-          department,
-          designation,
-          phone,
-          email,
-          status === 'DISABLED' ? 'INACTIVE' : 'ACTIVE',
-          canonicalId,
-          role,
-          role,
-          isFieldWorker,
-          status === 'DISABLED' ? 'DISABLED' : 'ACTIVE'
+          name, email, role, phone,
+          department, designation, employeeId,
+          isFieldWorker, status,
+          ...(hasNewPassword ? [password] : []),
+          canonicalId
         ]);
-      } catch (e: any) {
-        console.warn('[DB Manager] Notice syncing employee from user:', e.message);
+      } else {
+        await this.pool.query(`
+          INSERT INTO \`solar_users\` (
+            \`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`,
+            \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          canonicalId, name, email, password, role, phone,
+          department, designation, employeeId, isFieldWorker, status
+        ]);
+      }
+
+      console.log('[Audit][solar_users]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        operation: existing ? 'UPDATE' : 'INSERT',
+        source: isUpdateOnly ? 'dbManager.saveUser(updateOnly)' : 'dbManager.saveUser',
+        targetUserId: canonicalId,
+        email,
+        status
+      }));
+
+      // Synchronize centralized credentials table & revoke sessions if disabled
+      const credStatus = (status === 'DISABLED' || status === 'INACTIVE') ? 'DISABLED' : 'ACTIVE';
+      await authService.setCredential(this.pool, {
+        userId: canonicalId,
+        email,
+        password: hasNewPassword ? (rawPass ? String(rawPass).trim() : undefined) : undefined,
+        role,
+        accountType: role === 'Customer' ? 'CUSTOMER' : (role === 'Admin' || role === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE',
+        linkedEntityId: canonicalId,
+        status: credStatus
+      }).catch(() => {});
+
+      if (credStatus === 'DISABLED') {
+        await this.pool.query(
+          'DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ? OR LOWER(`email`) = ?',
+          [canonicalId, canonicalId, email]
+        ).catch(() => {});
+      }
+
+      // Synchronize employee directory in MySQL for non-Customer users
+      if (role !== 'Customer') {
+        try {
+          const empCode = employeeId || `EMP-${canonicalId.replace(/[^0-9]/g, '').slice(-3) || '001'}`;
+          await this.pool.query(`
+            INSERT INTO \`solar_employee\` (
+              \`id\`, \`employee_code\`, \`name\`, \`photo_url\`, \`department\`,
+              \`designation\`, \`phone\`, \`email\`, \`joining_date\`, \`salary_monthly\`,
+              \`status\`, \`current_site_location\`, \`login_enabled\`, \`auth_uid\`, \`system_role\`,
+              \`assigned_role\`, \`is_field_worker\`, \`account_status\`
+            ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              \`name\` = VALUES(\`name\`),
+              \`department\` = VALUES(\`department\`),
+              \`designation\` = VALUES(\`designation\`),
+              \`phone\` = VALUES(\`phone\`),
+              \`email\` = VALUES(\`email\`),
+              \`login_enabled\` = VALUES(\`login_enabled\`),
+              \`auth_uid\` = VALUES(\`auth_uid\`),
+              \`system_role\` = VALUES(\`system_role\`),
+              \`assigned_role\` = VALUES(\`assigned_role\`),
+              \`is_field_worker\` = VALUES(\`is_field_worker\`),
+              \`status\` = VALUES(\`status\`),
+              \`account_status\` = VALUES(\`account_status\`),
+              \`updated_at\` = CURRENT_TIMESTAMP
+          `, [
+            canonicalId,
+            empCode,
+            name,
+            department,
+            designation,
+            phone,
+            email,
+            (status === 'DISABLED' || status === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE',
+            credStatus === 'DISABLED' ? 0 : 1,
+            canonicalId,
+            role,
+            role,
+            isFieldWorker,
+            credStatus === 'DISABLED' ? 'DISABLED' : 'ACTIVE'
+          ]);
+        } catch (e: any) {
+          console.warn('[DB Manager] Notice syncing employee from user:', e.message);
+        }
       }
     }
 
@@ -5615,8 +5724,56 @@ class MySqlDatabaseManager {
   public async deleteUser(id: string): Promise<boolean> {
     this.assertDbConnected();
     if (this.pool) {
-      await this.pool.query('DELETE FROM `solar_users` WHERE `id` = ?', [id]);
-      await this.pool.query('DELETE FROM `solar_employee` WHERE `id` = ?', [id]).catch(() => {});
+      let userEmail = '';
+      let empId = '';
+      try {
+        const [uRows]: any = await this.pool.query('SELECT email, employee_id FROM `solar_users` WHERE `id` = ? LIMIT 1', [id]);
+        if (Array.isArray(uRows) && uRows.length > 0) {
+          userEmail = String(uRows[0].email || '').trim().toLowerCase();
+          empId = String(uRows[0].employee_id || '').trim();
+        }
+        if (!userEmail) {
+          const [eRows]: any = await this.pool.query('SELECT email, employee_code FROM `solar_employee` WHERE `id` = ? LIMIT 1', [id]);
+          if (Array.isArray(eRows) && eRows.length > 0) {
+            userEmail = String(eRows[0].email || '').trim().toLowerCase();
+            empId = empId || String(eRows[0].employee_code || '').trim();
+          }
+        }
+      } catch {}
+
+      await this.pool.query(
+        'DELETE FROM `solar_users` WHERE `id` = ?' + (userEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, ...(userEmail ? [userEmail] : [])]
+      );
+      await this.pool.query('DELETE FROM `solar_employee_documents` WHERE `employee_id` = ?', [id]).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_employee` WHERE `id` = ? OR `auth_uid` = ?' + (empId ? ' OR `employee_code` = ?' : '') + (userEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, id, ...(empId ? [empId] : []), ...(userEmail ? [userEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_employees` WHERE `id` = ?' + (empId ? ' OR `employee_code` = ?' : '') + (userEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, ...(empId ? [empId] : []), ...(userEmail ? [userEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_auth_credentials` WHERE `user_id` = ? OR `linked_entity_id` = ?' + (userEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, id, ...(userEmail ? [userEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ?' + (userEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, id, ...(userEmail ? [userEmail] : [])]
+      ).catch(() => {});
+      await this.pool.query(
+        'DELETE FROM `solar_workforce_locations` WHERE `user_id` = ?' + (userEmail ? ' OR LOWER(`email`) = ?' : ''),
+        [id, ...(userEmail ? [userEmail] : [])]
+      ).catch(() => {});
+
+      console.log('[Audit][solar_users]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        operation: 'DELETE',
+        source: 'dbManager.deleteUser',
+        targetUserId: id,
+        email: userEmail || undefined
+      }));
     }
     const items = this.getFallbackItems('users').filter(u => u.id !== id);
     this.setFallbackItems('users', items);

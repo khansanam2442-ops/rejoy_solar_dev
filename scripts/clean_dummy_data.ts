@@ -134,49 +134,7 @@ if (initDefStart !== -1) {
       this.collections.set('acl_config', [DEFAULT_SYSTEM_ACL_CONFIG]);
       this.settingsStore = storageService.getSettings();
 
-      const defaultUsers: any[] = [
-        {
-          id: 'emp-1',
-          name: 'Vikram Patel',
-          email: 'admin@rejoysolar.com',
-          password: '123456',
-          role: 'Admin',
-          phone: '+91 98250 11223',
-          department: 'Administration',
-          designation: 'Managing Director & Admin',
-          employeeId: 'EMP001',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'usr-kunal',
-          name: 'Kunal Das',
-          email: 'kunaldas2442@gmail.com',
-          password: '123456',
-          role: 'Admin',
-          phone: '+91 98250 11223',
-          department: 'Administration',
-          designation: 'Owner / Admin',
-          employeeId: 'EMP000',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        },
-        {
-          id: 'usr-admin-fallback',
-          name: 'Admin System Fallback',
-          email: 'dasest404@gmail.com',
-          password: '123456',
-          role: 'Admin',
-          phone: '+91 98250 11223',
-          department: 'Administration',
-          designation: 'Lead Administrator',
-          employeeId: 'EMP-ADM-404',
-          isFieldWorker: false,
-          status: 'ACTIVE'
-        }
-      ];
-
-      this.collections.set('users', defaultUsers);
+      this.collections.set('users', []);
     } catch (e) {
       console.warn('[DB Manager] Notice loading initial collections:', e);
     }
@@ -246,13 +204,7 @@ if (dataMigIdx !== -1) {
 -- SYSTEM CONFIGURATION & AUTHORIZED AUTHENTICATION BASELINE
 -- ==========================================================
 
--- Authorized Administrator Accounts
-INSERT INTO \`solar_users\` (\`id\`, \`name\`, \`email\`, \`password\`, \`role\`, \`phone\`, \`department\`, \`designation\`, \`employee_id\`, \`is_field_worker\`, \`status\`)
-VALUES
-  ('emp-1', 'Vikram Patel', 'admin@rejoysolar.com', '$2a$10$wT8y8w39Q3.3GZt8h9n7.eB9bC24kQ.VpZ8aVbL5h4D1f6H7i9k2', 'Admin', '+91 98250 11223', 'Administration', 'Managing Director & Admin', 'EMP001', 0, 'ACTIVE'),
-  ('usr-kunal', 'Kunal Das', 'kunaldas2442@gmail.com', '$2a$10$wT8y8w39Q3.3GZt8h9n7.eB9bC24kQ.VpZ8aVbL5h4D1f6H7i9k2', 'Admin', '+91 98250 11223', 'Administration', 'Owner / Admin', 'EMP000', 0, 'ACTIVE'),
-  ('usr-admin-fallback', 'Admin System Fallback', 'dasest404@gmail.com', '$2a$10$wT8y8w39Q3.3GZt8h9n7.eB9bC24kQ.VpZ8aVbL5h4D1f6H7i9k2', 'Admin', '+91 98250 11223', 'Administration', 'Lead Administrator', 'EMP-ADM-404', 0, 'ACTIVE')
-ON DUPLICATE KEY UPDATE \`name\` = VALUES(\`name\`), \`role\` = VALUES(\`role\`), \`password\` = VALUES(\`password\`);
+-- Administrator accounts are provisioned exclusively at setup/runtime (never seeded via static SQL dumps).
 
 -- System ACL Config
 INSERT INTO \`solar_acl_config\` (\`id\`, \`config_json\`)

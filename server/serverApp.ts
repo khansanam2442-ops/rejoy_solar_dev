@@ -8,8 +8,10 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import Pusher from 'pusher';
 import { GoogleGenAI } from '@google/genai';
-import { apiRouter } from './routes/apiRouter';
+import { apiRouter, extractSessionToken } from './routes/apiRouter';
 import { dbManager } from './mysqlDatabase';
+import { authService } from './services/authService';
+import { verifyToken } from './services/tokenService';
 
 function cleanEnv(val?: string | null): string {
   if (!val) return '';
@@ -785,9 +787,42 @@ async function createServerApp() {
     });
   });
 
-  // Create Employee Login Account endpoint (Persisted to MySQL solar_users and solar_employees)
+  // Helper to verify authenticated Admin/HR session for direct /api/admin/* endpoints
+  const verifyAdminOrHrSession = async (req: express.Request, res: express.Response): Promise<any | null> => {
+    const token = extractSessionToken(req);
+    if (!token) {
+      res.status(401).json({ success: false, message: 'Authentication required. Please log in.' });
+      return null;
+    }
+    let user: any = null;
+    const pool = dbManager.getPool();
+    if (pool) {
+      const val = await authService.validateSession(pool, token).catch(() => ({ valid: false, user: null }));
+      if (val.valid && val.user) user = val.user;
+    }
+    if (!user) {
+      const jwtVal = verifyToken(token);
+      if (jwtVal.valid && jwtVal.payload) {
+        user = await dbManager.findUserByIdOrEmail(jwtVal.payload.sub || jwtVal.payload.email).catch(() => null);
+      }
+    }
+    if (!user) {
+      res.status(401).json({ success: false, message: 'Invalid or expired session.' });
+      return null;
+    }
+    if (!['Admin', 'Super Admin', 'HR Manager'].includes(user.role)) {
+      res.status(403).json({ success: false, message: 'Access denied: Administrative or HR Manager role required.' });
+      return null;
+    }
+    return user;
+  };
+
+  // Create Employee Login Account endpoint (Persisted to MySQL solar_users and solar_employee)
   app.post(['/api/admin/create-employee-account', '/api/admin/create-user'], async (req, res) => {
     try {
+      const actor = await verifyAdminOrHrSession(req, res);
+      if (!actor) return;
+
       const { email, password, displayName, systemRole, employeeCode, phone, department, designation } = req.body || {};
 
       if (!email || typeof email !== 'string' || !email.includes('@')) {
@@ -855,6 +890,9 @@ async function createServerApp() {
   // Update Employee Login Account endpoint (Persisted to MySQL)
   app.post(['/api/admin/update-employee-account', '/api/admin/update-user'], async (req, res) => {
     try {
+      const actor = await verifyAdminOrHrSession(req, res);
+      if (!actor) return;
+
       const { uid, password, disabled, name, displayName, systemRole, role, phone, department, designation, employeeCode } = req.body || {};
 
       if (!uid || typeof uid !== 'string') {
@@ -878,7 +916,7 @@ async function createServerApp() {
       if (employeeCode) userUpdates.employee_id = employeeCode.trim();
       if (statusValue) userUpdates.status = statusValue;
 
-      await dbManager.saveUser(userUpdates);
+      await dbManager.saveUser(userUpdates, { updateOnly: true });
 
       res.json({
         success: true,
@@ -887,7 +925,8 @@ async function createServerApp() {
       });
     } catch (err: any) {
       console.error('[Update Employee Account Error]:', err?.message || err);
-      res.status(400).json({
+      const status = typeof err?.statusCode === 'number' ? err.statusCode : 400;
+      res.status(status).json({
         success: false,
         message: err?.message || 'Failed to update employee account.'
       });

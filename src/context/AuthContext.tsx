@@ -358,6 +358,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch(`${apiClient.getBaseUrl()}/auth/register`, {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify({
           name: cleanName,
           email: cleanEmail,

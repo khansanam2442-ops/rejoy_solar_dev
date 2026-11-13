@@ -528,6 +528,96 @@ function destroyDbSession($pdo, $sessionToken) {
     }
 }
 
+// Helper: Safe Audit Logger for solar_users mutations (NEVER logs passwords, hashes, tokens, or cookies)
+function logSolarUsersAuditPhp($operation, $source, $targetId, $targetEmail = '', $actor = null) {
+    $entry = [
+        'timestamp' => gmdate('c'),
+        'operation' => $operation,
+        'source' => $source,
+        'targetUserId' => $targetId,
+        'email' => strtolower(trim((string)$targetEmail)) ?: null,
+        'actorUserId' => is_array($actor) ? ($actor['id'] ?? $actor['userId'] ?? null) : null,
+        'actorRole' => is_array($actor) ? ($actor['role'] ?? null) : null
+    ];
+    error_log('[Audit][solar_users] ' . json_encode($entry));
+}
+
+// Helper: Synchronize solar_auth_credentials safely
+function syncAuthCredentialPhp($pdo, $userId, $email, $passwordHashOrNull, $role, $accountType, $linkedEntityId, $status = 'ACTIVE') {
+    $cleanEmail = strtolower(trim((string)$email));
+    if (empty($cleanEmail) || empty($userId)) return;
+    try {
+        $stmt = $pdo->prepare('SELECT id, password_hash FROM `solar_auth_credentials` WHERE user_id = ? OR LOWER(email) = ? LIMIT 1');
+        $stmt->execute([$userId, $cleanEmail]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        $finalHash = !empty($passwordHashOrNull) ? $passwordHashOrNull : ($existing['password_hash'] ?? '');
+        if ($existing) {
+            $upSql = 'UPDATE `solar_auth_credentials` SET `email` = ?, `role` = ?, `account_type` = ?, `linked_entity_id` = ?, `status` = ?'
+                . (!empty($passwordHashOrNull) ? ', `password_hash` = ?, `password_changed_at` = NOW()' : '')
+                . ' WHERE `id` = ?';
+            $params = [$cleanEmail, $role, $accountType, $linkedEntityId ?: $userId, $status];
+            if (!empty($passwordHashOrNull)) $params[] = $passwordHashOrNull;
+            $params[] = $existing['id'];
+            $pdo->prepare($upSql)->execute($params);
+        } elseif (!empty($finalHash)) {
+            $ins = $pdo->prepare('
+                INSERT INTO `solar_auth_credentials` (`id`, `user_id`, `email`, `password_hash`, `role`, `account_type`, `linked_entity_id`, `status`)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ');
+            $ins->execute(['cred-' . $userId, $userId, $cleanEmail, $finalHash, $role, $accountType, $linkedEntityId ?: $userId, $status]);
+        }
+        if (in_array(strtoupper($status), ['DISABLED', 'INACTIVE'], true)) {
+            $pdo->prepare('DELETE FROM `solar_auth_sessions` WHERE `user_id` = ? OR `linked_entity_id` = ? OR LOWER(`email`) = ?')
+                ->execute([$userId, $linkedEntityId ?: $userId, $cleanEmail]);
+        }
+    } catch (Exception $e) {
+        error_log('Notice syncing solar_auth_credentials: ' . $e->getMessage());
+    }
+}
+
+// Helper: Resolve authenticated active user from session token
+function getAuthenticatedUserPhp($pdo) {
+    $token = extractIncomingSessionToken();
+    if (empty($token)) return null;
+    $user = validateDbSession($pdo, $token);
+    if (!$user) return null;
+    $status = strtoupper((string)($user['status'] ?? 'ACTIVE'));
+    if (in_array($status, ['DISABLED', 'INACTIVE'], true)) {
+        return null;
+    }
+    return $user;
+}
+
+function requireAuthUserPhp($pdo) {
+    $user = getAuthenticatedUserPhp($pdo);
+    if (!$user) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Authentication required. Please log in with an active session.']);
+        exit;
+    }
+    return $user;
+}
+
+function requireAdminUserPhp($pdo) {
+    $user = requireAuthUserPhp($pdo);
+    if (!in_array($user['role'] ?? '', ['Admin', 'Super Admin'], true)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Access denied: Administrator privileges required.']);
+        exit;
+    }
+    return $user;
+}
+
+function requireAdminOrHrUserPhp($pdo) {
+    $user = requireAuthUserPhp($pdo);
+    if (!in_array($user['role'] ?? '', ['Admin', 'Super Admin', 'HR Manager'], true)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Access denied: Administrator or HR Manager privileges required.']);
+        exit;
+    }
+    return $user;
+}
+
 // 7. Normalize Path & Method
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
@@ -787,23 +877,40 @@ function saveProjectToDb($pdo, $item) {
 }
 
 // Helper: Employees
-function saveEmployeeToDb($pdo, $item) {
+function saveEmployeeToDb($pdo, $item, $actor = null) {
     if (empty($item['id'])) $item['id'] = 'emp-' . round(microtime(true) * 1000);
-    $code = $item['employeeCode'] ?? $item['employee_code'] ?? $item['id'];
-    $name = trim($item['name'] ?? '');
-    $photoUrl = $item['photoUrl'] ?? $item['photo_url'] ?? '';
-    $dept = $item['department'] ?? 'Operations';
-    $desig = $item['designation'] ?? 'Solar Engineer';
-    $phone = trim($item['phone'] ?? '+91 99999 00000');
-    $email = trim($item['email'] ?? ($item['id'] . '@example.com'));
-    $joiningDate = !empty($item['joiningDate'] ?? $item['joining_date']) ? substr($item['joiningDate'] ?? $item['joining_date'], 0, 10) : date('Y-m-d');
-    $salary = floatval($item['salaryMonthly'] ?? $item['salary_monthly'] ?? $item['salary'] ?? 0);
-    $status = $item['status'] ?? 'ACTIVE';
-    $siteLoc = $item['currentSiteLocation'] ?? $item['current_site_location'] ?? '';
-    $loginEnabled = (!isset($item['loginEnabled']) || $item['loginEnabled']) ? 1 : 0;
-    $systemRole = $item['systemRole'] ?? $item['system_role'] ?? 'Super Admin';
-    $isFieldWorker = (!empty($item['isFieldWorker']) || !empty($item['is_field_worker'])) ? 1 : 0;
-    $accountStatus = $item['accountStatus'] ?? $item['account_status'] ?? 'ACTIVE';
+    $existingEmp = null;
+    try {
+        $stmtEx = $pdo->prepare('SELECT * FROM `solar_employees` WHERE `id` = ? LIMIT 1');
+        $stmtEx->execute([$item['id']]);
+        $existingEmp = $stmtEx->fetch(PDO::FETCH_ASSOC) ?: null;
+    } catch (Exception $e) {}
+
+    $code = $item['employeeCode'] ?? $item['employee_code'] ?? ($existingEmp['employee_code'] ?? $item['id']);
+    $name = trim((string)($item['name'] ?? ($existingEmp['name'] ?? '')));
+    $photoUrl = $item['photoUrl'] ?? $item['photo_url'] ?? ($existingEmp['photo_url'] ?? '');
+    $dept = $item['department'] ?? ($existingEmp['department'] ?? 'Operations');
+    $desig = $item['designation'] ?? ($existingEmp['designation'] ?? 'Solar Engineer');
+    $phone = trim((string)($item['phone'] ?? ($existingEmp['phone'] ?? '+91 99999 00000')));
+    $email = strtolower(trim((string)($item['email'] ?? ($existingEmp['email'] ?? ''))));
+    $joiningDate = !empty($item['joiningDate'] ?? $item['joining_date'])
+        ? substr((string)($item['joiningDate'] ?? $item['joining_date']), 0, 10)
+        : (!empty($existingEmp['joining_date']) ? substr((string)$existingEmp['joining_date'], 0, 10) : date('Y-m-d'));
+    $salary = floatval($item['salaryMonthly'] ?? $item['salary_monthly'] ?? $item['salary'] ?? ($existingEmp['salary_monthly'] ?? 0));
+    $status = $item['status'] ?? ($existingEmp['status'] ?? 'ACTIVE');
+    $siteLoc = $item['currentSiteLocation'] ?? $item['current_site_location'] ?? ($existingEmp['current_site_location'] ?? '');
+    if (isset($item['loginEnabled'])) {
+        $loginEnabled = $item['loginEnabled'] ? 1 : 0;
+    } elseif (isset($item['login_enabled'])) {
+        $loginEnabled = intval($item['login_enabled']) ? 1 : 0;
+    } elseif ($existingEmp && isset($existingEmp['login_enabled'])) {
+        $loginEnabled = intval($existingEmp['login_enabled']) ? 1 : 0;
+    } else {
+        $loginEnabled = 1;
+    }
+    $systemRole = $item['systemRole'] ?? $item['system_role'] ?? ($existingEmp['system_role'] ?? 'Site Survey Engineer');
+    $isFieldWorker = (isset($item['isFieldWorker']) ? !empty($item['isFieldWorker']) : (isset($item['is_field_worker']) ? !empty($item['is_field_worker']) : !empty($existingEmp['is_field_worker']))) ? 1 : 0;
+    $accountStatus = $item['accountStatus'] ?? $item['account_status'] ?? ($existingEmp['account_status'] ?? ($loginEnabled ? 'ACTIVE' : 'DISABLED'));
 
     $stmt = $pdo->prepare("
         INSERT INTO `solar_employees` (
@@ -835,16 +942,28 @@ function saveEmployeeToDb($pdo, $item) {
         $isFieldWorker, $accountStatus
     ]);
 
-    // Synchronize to solar_users if loginEnabled
-    if ($loginEnabled) {
-        try {
-            $stmtUserCheck = $pdo->prepare('SELECT id, password FROM `solar_users` WHERE id = ? OR LOWER(email) = ? LIMIT 1');
-            $stmtUserCheck->execute([$item['id'], strtolower($email)]);
-            $existingU = $stmtUserCheck->fetch();
+    // Synchronize to solar_users ONLY if active login AND (existing user exists OR brand-new employee OR explicit password supplied)
+    try {
+        $stmtUserCheck = $pdo->prepare('SELECT id, password FROM `solar_users` WHERE `id` = ? OR `employee_id` = ? OR (LOWER(`email`) = ? AND `email` != "") LIMIT 1');
+        $stmtUserCheck->execute([$item['id'], $code, $email]);
+        $existingU = $stmtUserCheck->fetch(PDO::FETCH_ASSOC) ?: null;
 
-            $rawPass = $item['password'] ?? ($item['tempPassword'] ?? null);
+        $rawPass = $item['password'] ?? ($item['tempPassword'] ?? null);
+        $hasExplicitPass = !empty($rawPass) && is_string($rawPass) && strlen(trim($rawPass)) >= 6;
+        $isActiveLogin = ($loginEnabled === 1)
+            && !in_array(strtoupper((string)$status), ['INACTIVE', 'TERMINATED', 'DISABLED'], true)
+            && strtoupper((string)$accountStatus) !== 'DISABLED';
+
+        if (!$isActiveLogin) {
+            if ($existingU) {
+                $pdo->prepare("UPDATE `solar_users` SET `status` = 'DISABLED', `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ?")
+                    ->execute([$existingU['id']]);
+                syncAuthCredentialPhp($pdo, $existingU['id'], $email, null, $systemRole, in_array($systemRole, ['Admin', 'Super Admin'], true) ? 'ADMIN' : 'EMPLOYEE', $item['id'], 'DISABLED');
+                logSolarUsersAuditPhp('DISABLE', 'saveEmployeeToDb', $existingU['id'], $email, $actor);
+            }
+        } elseif (!empty($email) && ($existingU || !$existingEmp || $hasExplicitPass)) {
             $userPassHash = $existingU['password'] ?? null;
-            if (!empty($rawPass) && is_string($rawPass) && strlen(trim($rawPass)) >= 6) {
+            if ($hasExplicitPass) {
                 $trimmedPass = trim($rawPass);
                 if (substr($trimmedPass, 0, 4) !== '$2y$' && substr($trimmedPass, 0, 4) !== '$2b$' && substr($trimmedPass, 0, 4) !== '$2a$' && substr($trimmedPass, 0, 9) !== '$argon2id$') {
                     $userPassHash = password_hash($trimmedPass, PASSWORD_BCRYPT, ['cost' => 10]);
@@ -855,30 +974,34 @@ function saveEmployeeToDb($pdo, $item) {
                 $userPassHash = password_hash('Emp@' . substr(bin2hex(random_bytes(3)), 0, 6), PASSWORD_BCRYPT, ['cost' => 10]);
             }
 
-            $uStatus = ($status === 'INACTIVE' || $accountStatus === 'DISABLED') ? 'DISABLED' : 'ACTIVE';
-            $stmtSyncUser = $pdo->prepare("
-                INSERT INTO `solar_users` (
-                    `id`, `name`, `email`, `password`, `role`, `phone`,
-                    `department`, `designation`, `employee_id`, `is_field_worker`, `status`
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    `name` = VALUES(`name`),
-                    `role` = VALUES(`role`),
-                    `phone` = VALUES(`phone`),
-                    `department` = VALUES(`department`),
-                    `designation` = VALUES(`designation`),
-                    `employee_id` = VALUES(`employee_id`),
-                    `is_field_worker` = VALUES(`is_field_worker`),
-                    `status` = VALUES(`status`)
-                    " . (!empty($rawPass) ? ", `password` = VALUES(`password`)" : "") . "
-            ");
-            $stmtSyncUser->execute([
-                $item['id'], $name, strtolower($email), $userPassHash, $systemRole, $phone,
-                $dept, $desig, $code, $isFieldWorker, $uStatus
-            ]);
-        } catch (Exception $e) {
-            error_log('Notice syncing user from employee: ' . $e->getMessage());
+            $targetUserId = $existingU['id'] ?? $item['id'];
+            if ($existingU) {
+                $upSql = 'UPDATE `solar_users` SET `name` = ?, `email` = ?, `role` = ?, `phone` = ?, `department` = ?, `designation` = ?, `employee_id` = ?, `is_field_worker` = ?, `status` = \'ACTIVE\', `updated_at` = CURRENT_TIMESTAMP'
+                    . ($hasExplicitPass ? ', `password` = ?' : '')
+                    . ' WHERE `id` = ?';
+                $upParams = [$name, $email, $systemRole, $phone, $dept, $desig, $code, $isFieldWorker];
+                if ($hasExplicitPass) $upParams[] = $userPassHash;
+                $upParams[] = $targetUserId;
+                $pdo->prepare($upSql)->execute($upParams);
+                logSolarUsersAuditPhp('UPDATE', 'saveEmployeeToDb', $targetUserId, $email, $actor);
+            } else {
+                $pdo->prepare("
+                    INSERT INTO `solar_users` (
+                        `id`, `name`, `email`, `password`, `role`, `phone`,
+                        `department`, `designation`, `employee_id`, `is_field_worker`, `status`
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+                ")->execute([
+                    $targetUserId, $name, $email, $userPassHash, $systemRole, $phone,
+                    $dept, $desig, $code, $isFieldWorker
+                ]);
+                logSolarUsersAuditPhp('INSERT', 'saveEmployeeToDb', $targetUserId, $email, $actor);
+            }
+
+            $acctType = in_array($systemRole, ['Admin', 'Super Admin'], true) ? 'ADMIN' : 'EMPLOYEE';
+            syncAuthCredentialPhp($pdo, $targetUserId, $email, ($hasExplicitPass || !$existingU) ? $userPassHash : null, $systemRole, $acctType, $item['id'], 'ACTIVE');
         }
+    } catch (Exception $e) {
+        error_log('Notice syncing user from employee: ' . $e->getMessage());
     }
 
     return $item;
@@ -1696,21 +1819,34 @@ function saveNotificationToDb($pdo, $item) {
     return $item;
 }
 
-// Helper: Users
-function saveUserToDb($pdo, $item) {
+// Helper: Users (Never resurrects deleted users during updateOnly calls, preserves partial fields)
+function saveUserToDb($pdo, $item, $isUpdateOnly = false, $actor = null) {
     if (empty($item['id'])) $item['id'] = 'usr-' . round(microtime(true) * 1000);
-    $name = trim($item['name'] ?? 'User');
-    $email = strtolower(trim($item['email'] ?? ''));
-    // Check existing record
+    $cleanEmail = strtolower(trim((string)($item['email'] ?? '')));
+
     $existing = null;
-    try {
-        $stmtCheck = $pdo->prepare('SELECT id, password FROM `solar_users` WHERE id = ? OR LOWER(email) = ? LIMIT 1');
-        $stmtCheck->execute([$item['id'], $email]);
-        $existing = $stmtCheck->fetch();
-    } catch (Exception $e) {}
+    if ($isUpdateOnly) {
+        $stmtCheck = $pdo->prepare('SELECT * FROM `solar_users` WHERE `id` = ? LIMIT 1');
+        $stmtCheck->execute([$item['id']]);
+        $existing = $stmtCheck->fetch(PDO::FETCH_ASSOC) ?: null;
+        if (!$existing) {
+            throw new Exception('User record "' . $item['id'] . '" not found in MySQL.', 404);
+        }
+    } else {
+        try {
+            $stmtCheck = $pdo->prepare('SELECT * FROM `solar_users` WHERE `id` = ? OR (LOWER(`email`) = ? AND `email` != "") LIMIT 1');
+            $stmtCheck->execute([$item['id'], $cleanEmail]);
+            $existing = $stmtCheck->fetch(PDO::FETCH_ASSOC) ?: null;
+        } catch (Exception $e) {}
+    }
+
+    $canonicalId = $existing['id'] ?? $item['id'];
+    $name = isset($item['name']) ? trim((string)$item['name']) : ($existing['name'] ?? 'Solar User');
+    $email = !empty($cleanEmail) ? $cleanEmail : ($existing['email'] ?? ($canonicalId . '@rejoysolar.com'));
 
     $rawPass = $item['password'] ?? ($item['tempPassword'] ?? null);
     $password = $existing['password'] ?? null;
+    $hasNewPassword = false;
     if (!empty($rawPass) && is_string($rawPass) && strlen(trim($rawPass)) >= 6) {
         $cleanPass = trim($rawPass);
         if (substr($cleanPass, 0, 4) !== '$2y$' && substr($cleanPass, 0, 4) !== '$2b$' && substr($cleanPass, 0, 4) !== '$2a$' && substr($cleanPass, 0, 9) !== '$argon2id$') {
@@ -1718,69 +1854,86 @@ function saveUserToDb($pdo, $item) {
         } else {
             $password = $cleanPass;
         }
+        $hasNewPassword = true;
     } elseif (empty($password)) {
         $password = password_hash('Usr@' . substr(bin2hex(random_bytes(3)), 0, 6), PASSWORD_BCRYPT, ['cost' => 10]);
+        $hasNewPassword = true;
     }
 
-    $role = $item['role'] ?? ($item['systemRole'] ?? 'Super Admin');
-    $phone = trim($item['phone'] ?? '');
-    $dept = trim($item['department'] ?? 'Operations');
-    $desig = trim($item['designation'] ?? '');
-    $empId = $item['employeeId'] ?? $item['employee_id'] ?? null;
-    $isField = (!empty($item['isFieldWorker']) || !empty($item['is_field_worker'])) ? 1 : 0;
-    $status = $item['status'] ?? 'ACTIVE';
+    $role = $item['role'] ?? ($item['systemRole'] ?? ($existing['role'] ?? 'Super Admin'));
+    $phone = isset($item['phone']) ? trim((string)$item['phone']) : ($existing['phone'] ?? '');
+    $dept = isset($item['department']) ? trim((string)$item['department']) : ($existing['department'] ?? 'Operations');
+    $desig = isset($item['designation']) ? trim((string)$item['designation']) : ($existing['designation'] ?? '');
+    $empId = $item['employeeId'] ?? $item['employee_id'] ?? ($existing['employee_id'] ?? null);
+    $isField = (isset($item['isFieldWorker']) ? !empty($item['isFieldWorker']) : (isset($item['is_field_worker']) ? !empty($item['is_field_worker']) : !empty($existing['is_field_worker']))) ? 1 : 0;
 
-    $stmt = $pdo->prepare("
-        INSERT INTO `solar_users` (
-            `id`, `name`, `email`, `password`, `role`, `phone`,
-            `department`, `designation`, `employee_id`, `is_field_worker`, `status`
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            `name` = VALUES(`name`),
-            `password` = VALUES(`password`),
-            `role` = VALUES(`role`),
-            `phone` = VALUES(`phone`),
-            `department` = VALUES(`department`),
-            `designation` = VALUES(`designation`),
-            `is_field_worker` = VALUES(`is_field_worker`),
-            `status` = VALUES(`status`)
-    ");
-    $stmt->execute([
-        $item['id'], $name, $email, $password, $role, $phone,
-        $dept, $desig, $empId, $isField, $status
-    ]);
+    $loginDisabledExplicit = (isset($item['loginEnabled']) && $item['loginEnabled'] === false)
+        || (isset($item['login_enabled']) && intval($item['login_enabled']) === 0);
+    $status = $loginDisabledExplicit ? 'DISABLED' : ($item['status'] ?? ($existing['status'] ?? 'ACTIVE'));
 
-    // Also synchronize to solar_employees
-    try {
-        $empCode = $empId ?: ('EMP-' . rand(100, 999));
-        $stmtEmp = $pdo->prepare("
-            INSERT INTO `solar_employees` (
-                `id`, `employee_code`, `name`, `photo_url`, `department`,
-                `designation`, `phone`, `email`, `joining_date`, `salary_monthly`,
-                `status`, `current_site_location`, `login_enabled`, `system_role`,
-                `is_field_worker`, `account_status`
-            ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', 1, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                `name` = VALUES(`name`),
-                `department` = VALUES(`department`),
-                `designation` = VALUES(`designation`),
-                `phone` = VALUES(`phone`),
-                `email` = VALUES(`email`),
-                `system_role` = VALUES(`system_role`),
-                `is_field_worker` = VALUES(`is_field_worker`),
-                `status` = VALUES(`status`),
-                `account_status` = VALUES(`account_status`)
+    if ($existing) {
+        $upSql = 'UPDATE `solar_users` SET `name` = ?, `email` = ?, `role` = ?, `phone` = ?, `department` = ?, `designation` = ?, `employee_id` = ?, `is_field_worker` = ?, `status` = ?, `updated_at` = CURRENT_TIMESTAMP'
+            . ($hasNewPassword ? ', `password` = ?' : '')
+            . ' WHERE `id` = ?';
+        $upParams = [$name, $email, $role, $phone, $dept, $desig, $empId, $isField, $status];
+        if ($hasNewPassword) $upParams[] = $password;
+        $upParams[] = $canonicalId;
+        $pdo->prepare($upSql)->execute($upParams);
+    } else {
+        $stmt = $pdo->prepare("
+            INSERT INTO `solar_users` (
+                `id`, `name`, `email`, `password`, `role`, `phone`,
+                `department`, `designation`, `employee_id`, `is_field_worker`, `status`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        $stmtEmp->execute([
-            $item['id'], $empCode, $name, $dept, $desig, $phone, $email,
-            $status, $role, $isField, ($status === 'DISABLED' ? 'DISABLED' : 'ACTIVE')
+        $stmt->execute([
+            $canonicalId, $name, $email, $password, $role, $phone,
+            $dept, $desig, $empId, $isField, $status
         ]);
-    } catch (Exception $e) {
-        error_log('Notice syncing employee from user: ' . $e->getMessage());
+    }
+
+    logSolarUsersAuditPhp($existing ? 'UPDATE' : 'INSERT', $isUpdateOnly ? 'saveUserToDb(updateOnly)' : 'saveUserToDb', $canonicalId, $email, $actor);
+
+    $credStatus = in_array(strtoupper((string)$status), ['DISABLED', 'INACTIVE'], true) ? 'DISABLED' : 'ACTIVE';
+    $acctType = ($role === 'Customer') ? 'CUSTOMER' : (in_array($role, ['Admin', 'Super Admin'], true) ? 'ADMIN' : 'EMPLOYEE');
+    syncAuthCredentialPhp($pdo, $canonicalId, $email, $hasNewPassword ? $password : null, $role, $acctType, $canonicalId, $credStatus);
+
+    // Also synchronize to solar_employees for internal staff
+    if ($role !== 'Customer') {
+        try {
+            $empCode = $empId ?: ('EMP-' . substr(preg_replace('/\D/', '', $canonicalId) ?: '001', -3));
+            $empStatus = ($credStatus === 'DISABLED') ? 'INACTIVE' : 'ACTIVE';
+            $loginFlag = ($credStatus === 'DISABLED') ? 0 : 1;
+            $stmtEmp = $pdo->prepare("
+                INSERT INTO `solar_employees` (
+                    `id`, `employee_code`, `name`, `photo_url`, `department`,
+                    `designation`, `phone`, `email`, `joining_date`, `salary_monthly`,
+                    `status`, `current_site_location`, `login_enabled`, `system_role`,
+                    `is_field_worker`, `account_status`
+                ) VALUES (?, ?, ?, '', ?, ?, ?, ?, CURDATE(), 0.00, ?, '', ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    `name` = VALUES(`name`),
+                    `department` = VALUES(`department`),
+                    `designation` = VALUES(`designation`),
+                    `phone` = VALUES(`phone`),
+                    `email` = VALUES(`email`),
+                    `login_enabled` = VALUES(`login_enabled`),
+                    `system_role` = VALUES(`system_role`),
+                    `is_field_worker` = VALUES(`is_field_worker`),
+                    `status` = VALUES(`status`),
+                    `account_status` = VALUES(`account_status`)
+            ");
+            $stmtEmp->execute([
+                $canonicalId, $empCode, $name, $dept, $desig, $phone, $email,
+                $empStatus, $loginFlag, $role, $isField, $credStatus
+            ]);
+        } catch (Exception $e) {
+            error_log('Notice syncing employee from user: ' . $e->getMessage());
+        }
     }
 
     return [
-        'id' => $item['id'],
+        'id' => $canonicalId,
         'name' => $name,
         'email' => $email,
         'role' => $role,
@@ -1845,12 +1998,12 @@ function saveAclAuditLogToDb($pdo, $item) {
 }
 
 // Master Save Dispatcher
-function saveItemToDb($pdo, $collection, $item) {
+function saveItemToDb($pdo, $collection, $item, $actor = null) {
     switch ($collection) {
         case 'customers': return saveCustomerToDb($pdo, $item);
         case 'leads': return saveLeadToDb($pdo, $item);
         case 'projects': return saveProjectToDb($pdo, $item);
-        case 'employees': return saveEmployeeToDb($pdo, $item);
+        case 'employees': return saveEmployeeToDb($pdo, $item, $actor);
         case 'payments': return savePaymentToDb($pdo, $item);
         case 'expenses': return saveExpenseToDb($pdo, $item);
         case 'products': return saveProductToDb($pdo, $item);
@@ -1869,7 +2022,7 @@ function saveItemToDb($pdo, $collection, $item) {
         case 'service_tickets': return saveServiceTicketToDb($pdo, $item);
         case 'amc_contracts': return saveAMCContractToDb($pdo, $item);
         case 'notifications': return saveNotificationToDb($pdo, $item);
-        case 'users': return saveUserToDb($pdo, $item);
+        case 'users': return saveUserToDb($pdo, $item, false, $actor);
         case 'settings': return saveSettingsToDb($pdo, $item);
         case 'acl_config': return saveAclConfigToDb($pdo, $item);
         case 'acl_audit_logs': return saveAclAuditLogToDb($pdo, $item);
@@ -1878,8 +2031,8 @@ function saveItemToDb($pdo, $collection, $item) {
     }
 }
 
-// Master Delete Dispatcher
-function deleteItemFromDb($pdo, $collection, $id) {
+// Master Delete Dispatcher (Cascades cleanly across coupled auth & personnel tables)
+function deleteItemFromDb($pdo, $collection, $id, $actor = null) {
     if (empty($id)) return false;
     $tableMap = [
         'customers' => 'solar_customers',
@@ -1915,8 +2068,74 @@ function deleteItemFromDb($pdo, $collection, $id) {
         $stmtS->execute([$id]);
     }
     if ($collection === 'employees' || $collection === 'users') {
-        try { $pdo->prepare('DELETE FROM `solar_users` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
-        try { $pdo->prepare('DELETE FROM `solar_employees` WHERE `id` = ?')->execute([$id]); } catch (Exception $e) {}
+        $targetEmail = '';
+        $empCode = '';
+        try {
+            $uStmt = $pdo->prepare('SELECT email, employee_id FROM `solar_users` WHERE `id` = ? LIMIT 1');
+            $uStmt->execute([$id]);
+            if ($row = $uStmt->fetch(PDO::FETCH_ASSOC)) {
+                $targetEmail = strtolower(trim((string)($row['email'] ?? '')));
+                $empCode = trim((string)($row['employee_id'] ?? ''));
+            }
+        } catch (Exception $e) {}
+        try {
+            $eStmt = $pdo->prepare('SELECT email, employee_code FROM `solar_employees` WHERE `id` = ? LIMIT 1');
+            $eStmt->execute([$id]);
+            if ($row = $eStmt->fetch(PDO::FETCH_ASSOC)) {
+                if (empty($targetEmail)) $targetEmail = strtolower(trim((string)($row['email'] ?? '')));
+                if (empty($empCode)) $empCode = trim((string)($row['employee_code'] ?? ''));
+            }
+        } catch (Exception $e) {}
+        try {
+            $e2Stmt = $pdo->prepare('SELECT email, employee_code FROM `solar_employee` WHERE `id` = ? LIMIT 1');
+            $e2Stmt->execute([$id]);
+            if ($row = $e2Stmt->fetch(PDO::FETCH_ASSOC)) {
+                if (empty($targetEmail)) $targetEmail = strtolower(trim((string)($row['email'] ?? '')));
+                if (empty($empCode)) $empCode = trim((string)($row['employee_code'] ?? ''));
+            }
+        } catch (Exception $e) {}
+
+        $uWhere = '`id` = ? OR `employee_id` = ?' . (!empty($empCode) ? ' OR `employee_id` = ?' : '') . (!empty($targetEmail) ? ' OR LOWER(`email`) = ?' : '');
+        $uParams = [$id, $id];
+        if (!empty($empCode)) $uParams[] = $empCode;
+        if (!empty($targetEmail)) $uParams[] = $targetEmail;
+        try { $pdo->prepare("DELETE FROM `solar_users` WHERE $uWhere")->execute($uParams); } catch (Exception $e) {}
+
+        $eWhere = '`id` = ?' . (!empty($empCode) ? ' OR `employee_code` = ?' : '') . (!empty($targetEmail) ? ' OR LOWER(`email`) = ?' : '');
+        $eParams = [$id];
+        if (!empty($empCode)) $eParams[] = $empCode;
+        if (!empty($targetEmail)) $eParams[] = $targetEmail;
+        try { $pdo->prepare("DELETE FROM `solar_employees` WHERE $eWhere")->execute($eParams); } catch (Exception $e) {}
+        try { $pdo->prepare("DELETE FROM `solar_employee` WHERE $eWhere OR `auth_uid` = ?")->execute(array_merge($eParams, [$id])); } catch (Exception $e) {}
+        try { $pdo->prepare('DELETE FROM `solar_employee_documents` WHERE `employee_id` = ?')->execute([$id]); } catch (Exception $e) {}
+
+        $cWhere = '`user_id` = ? OR `linked_entity_id` = ?' . (!empty($targetEmail) ? ' OR LOWER(`email`) = ?' : '');
+        $cParams = [$id, $id];
+        if (!empty($targetEmail)) $cParams[] = $targetEmail;
+        try { $pdo->prepare("DELETE FROM `solar_auth_credentials` WHERE $cWhere")->execute($cParams); } catch (Exception $e) {}
+        try { $pdo->prepare("DELETE FROM `solar_auth_sessions` WHERE $cWhere")->execute($cParams); } catch (Exception $e) {}
+
+        $wWhere = '`user_id` = ?' . (!empty($targetEmail) ? ' OR LOWER(`email`) = ?' : '');
+        $wParams = [$id];
+        if (!empty($targetEmail)) $wParams[] = $targetEmail;
+        try { $pdo->prepare("DELETE FROM `solar_workforce_locations` WHERE $wWhere")->execute($wParams); } catch (Exception $e) {}
+
+        logSolarUsersAuditPhp('DELETE', "deleteItemFromDb($collection)", $id, $targetEmail, $actor);
+    } elseif ($collection === 'customers') {
+        $custEmail = '';
+        try {
+            $cStmt = $pdo->prepare('SELECT email FROM `solar_customers` WHERE `id` = ? LIMIT 1');
+            $cStmt->execute([$id]);
+            if ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
+                $custEmail = strtolower(trim((string)($row['email'] ?? '')));
+            }
+        } catch (Exception $e) {}
+        $pdo->prepare('DELETE FROM `solar_customers` WHERE `id` = ?')->execute([$id]);
+        $cWhere = '`user_id` = ? OR `linked_entity_id` = ?' . (!empty($custEmail) ? ' OR LOWER(`email`) = ?' : '');
+        $cParams = [$id, $id];
+        if (!empty($custEmail)) $cParams[] = $custEmail;
+        try { $pdo->prepare("DELETE FROM `solar_auth_credentials` WHERE $cWhere")->execute($cParams); } catch (Exception $e) {}
+        try { $pdo->prepare("DELETE FROM `solar_auth_sessions` WHERE $cWhere")->execute($cParams); } catch (Exception $e) {}
     } else {
         $stmt = $pdo->prepare("DELETE FROM `$table` WHERE `id` = ?");
         $stmt->execute([$id]);
@@ -2026,9 +2245,13 @@ if ($method === 'GET' && in_array($cleanPath, ['/db/status', '/db'])) {
     exit;
 }
 
-// POST /api/db/migrate - Initialize Database Schema
+// POST /api/db/migrate - Initialize Database Schema (Protected)
 if ($method === 'POST' && in_array($cleanPath, ['/db/migrate', '/db/migrate/'])) {
     $pdo = getDbConnection($dbConfig);
+    $remoteIp = $_SERVER['REMOTE_ADDR'] ?? '';
+    if (!in_array($remoteIp, ['127.0.0.1', '::1'], true)) {
+        requireAdminUserPhp($pdo);
+    }
     ensureRequiredTables($pdo);
 
     $tables = [];
@@ -2140,9 +2363,19 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/register', '/auth/registe
         }
     }
 
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    $adminToken = $_SERVER['HTTP_X_ADMIN_TOKEN'] ?? $_SERVER['HTTP_X_ADMIN_KEY'] ?? '';
-    $isAuthorized = (!empty($authHeader) && strlen($authHeader) > 10) || (!empty($adminToken) && strlen($adminToken) > 5);
+    $actorUser = getAuthenticatedUserPhp($pdo);
+    $isAuthorized = $actorUser && in_array($actorUser['role'] ?? '', ['Admin', 'Super Admin'], true);
+    if (!$isAuthorized) {
+        $adminToken = trim((string)($_SERVER['HTTP_X_ADMIN_TOKEN'] ?? $_SERVER['HTTP_X_ADMIN_KEY'] ?? ''));
+        if (!empty($adminToken)) {
+            $keyUser = validateDbSession($pdo, $adminToken);
+            if ($keyUser && in_array($keyUser['role'] ?? '', ['Admin', 'Super Admin'], true)
+                && !in_array(strtoupper((string)($keyUser['status'] ?? 'ACTIVE')), ['DISABLED', 'INACTIVE'], true)) {
+                $isAuthorized = true;
+                $actorUser = $keyUser;
+            }
+        }
+    }
 
     if ($nonDemoCount > 0 && !$isAuthorized) {
         http_response_code(403);
@@ -2204,6 +2437,8 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/register', '/auth/registe
         } catch (Exception $e) {}
 
         $pdo->commit();
+        syncAuthCredentialPhp($pdo, $userId, $email, $hashedPassword, 'Admin', 'ADMIN', $userId, 'ACTIVE');
+        logSolarUsersAuditPhp('INSERT', 'POST /auth/register', $userId, $email, $actorUser);
     } catch (Exception $e) {
         $pdo->rollBack();
         http_response_code(500);
@@ -2662,9 +2897,10 @@ if ($method === 'POST' && in_array($cleanPath, ['/auth/reset-password', '/auth/r
     exit;
 }
 
-// GET /api/users
+// GET /api/users (Protected: Admin / Super Admin / HR Manager)
 if ($method === 'GET' && in_array($cleanPath, ['/users', '/users/'])) {
     $pdo = getDbConnection($dbConfig);
+    requireAdminOrHrUserPhp($pdo);
     $stmt = $pdo->query('SELECT id, name, email, role, phone, department, designation, employee_id, is_field_worker, status, created_at, updated_at FROM `solar_users` ORDER BY created_at ASC');
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $sanitized = array_map(function($u) {
@@ -2688,18 +2924,26 @@ if ($method === 'GET' && in_array($cleanPath, ['/users', '/users/'])) {
     exit;
 }
 
-// POST /api/users
+// POST /api/users (Protected: Admin / Super Admin)
 if ($method === 'POST' && in_array($cleanPath, ['/users', '/users/'])) {
     $pdo = getDbConnection($dbConfig);
-    $saved = saveUserToDb($pdo, $body);
+    $actor = requireAdminUserPhp($pdo);
+    if (empty($body['name']) || empty($body['email'])) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'User name and email are required.']);
+        exit;
+    }
+    $saved = saveUserToDb($pdo, $body, false, $actor);
     http_response_code(201);
     echo json_encode(['success' => true, 'data' => $saved, 'message' => 'User saved to MySQL successfully.']);
     exit;
 }
 
-// PUT /api/users/{id}/password
+// PUT /api/users/{id}/password (Protected: Admin / Super Admin)
 if ($method === 'PUT' && preg_match('#^/users/([^/]+)/password/?$#', $cleanPath, $matches)) {
-    $userId = $matches[1];
+    $userId = urldecode($matches[1]);
+    $pdo = getDbConnection($dbConfig);
+    $actor = requireAdminUserPhp($pdo);
     $newPass = trim($body['password'] ?? '');
     if (empty($newPass) || strlen($newPass) < 6) {
         http_response_code(400);
@@ -2707,32 +2951,172 @@ if ($method === 'PUT' && preg_match('#^/users/([^/]+)/password/?$#', $cleanPath,
         exit;
     }
     $hashed = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 10]);
-    $pdo = getDbConnection($dbConfig);
     $stmt = $pdo->prepare('UPDATE `solar_users` SET `password` = ?, `updated_at` = CURRENT_TIMESTAMP WHERE id = ?');
     $stmt->execute([$hashed, $userId]);
+    try {
+        $pdo->prepare('UPDATE `solar_auth_credentials` SET `password_hash` = ?, `password_changed_at` = NOW() WHERE `user_id` = ? OR `linked_entity_id` = ?')
+            ->execute([$hashed, $userId, $userId]);
+    } catch (Exception $e) {}
+    logSolarUsersAuditPhp('PASSWORD_UPDATE', 'PUT /users/{id}/password', $userId, '', $actor);
     http_response_code(200);
     echo json_encode(['success' => true, 'message' => 'User password updated and securely hashed with bcrypt in MySQL.']);
     exit;
 }
 
-// PUT /api/users/{id}
+// PUT /api/users/{id} (Protected: Admin / Super Admin, strictly update-only)
 if ($method === 'PUT' && preg_match('#^/users/([^/]+)/?$#', $cleanPath, $matches)) {
-    $userId = $matches[1];
+    $userId = urldecode($matches[1]);
     $pdo = getDbConnection($dbConfig);
+    $actor = requireAdminUserPhp($pdo);
     $body['id'] = $userId;
-    $saved = saveUserToDb($pdo, $body);
-    http_response_code(200);
-    echo json_encode(['success' => true, 'data' => $saved, 'message' => 'User updated in MySQL successfully.']);
+    try {
+        $saved = saveUserToDb($pdo, $body, true, $actor);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'data' => $saved, 'message' => 'User updated in MySQL successfully.']);
+    } catch (Exception $e) {
+        $code = ($e->getCode() === 404) ? 404 : 500;
+        http_response_code($code);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
     exit;
 }
 
-// DELETE /api/users/{id}
+// DELETE /api/users/{id} (Protected: Admin / Super Admin, cascades cleanly)
 if ($method === 'DELETE' && preg_match('#^/users/([^/]+)/?$#', $cleanPath, $matches)) {
-    $userId = $matches[1];
+    $userId = urldecode($matches[1]);
     $pdo = getDbConnection($dbConfig);
-    deleteItemFromDb($pdo, 'users', $userId);
+    $actor = requireAdminUserPhp($pdo);
+    deleteItemFromDb($pdo, 'users', $userId, $actor);
     http_response_code(200);
     echo json_encode(['success' => true, 'message' => 'User deleted from MySQL successfully.']);
+    exit;
+}
+
+// Direct /api/employees and /api/admin/create|update-employee-account endpoints (mirrors Node serverApp/apiRouter)
+if (in_array($cleanPath, ['/employees', '/employee'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+    if ($method === 'GET') {
+        $actor = requireAuthUserPhp($pdo);
+        $stmt = $pdo->query('SELECT * FROM `solar_employees` ORDER BY `created_at` ASC');
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $mapped = array_map(function($r) {
+            return [
+                'id' => $r['id'],
+                'employeeCode' => $r['employee_code'],
+                'name' => $r['name'],
+                'photoUrl' => $r['photo_url'] ?? '',
+                'department' => $r['department'] ?? 'Operations',
+                'designation' => $r['designation'] ?? '',
+                'phone' => $r['phone'] ?? '',
+                'email' => $r['email'] ?? '',
+                'joiningDate' => $r['joining_date'] ?? '',
+                'salaryMonthly' => floatval($r['salary_monthly'] ?? 0),
+                'status' => $r['status'] ?? 'ACTIVE',
+                'currentSiteLocation' => $r['current_site_location'] ?? '',
+                'loginEnabled' => (bool)($r['login_enabled'] ?? 1),
+                'systemRole' => $r['system_role'] ?? 'Site Survey Engineer',
+                'assignedRole' => $r['assigned_role'] ?? ($r['system_role'] ?? 'Site Survey Engineer'),
+                'isFieldWorker' => (bool)($r['is_field_worker'] ?? 0),
+                'accountStatus' => $r['account_status'] ?? 'ACTIVE',
+                'createdAt' => $r['created_at'] ?? null
+            ];
+        }, $rows);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'count' => count($mapped), 'data' => $mapped]);
+        exit;
+    }
+    if ($method === 'POST') {
+        $actor = requireAdminOrHrUserPhp($pdo);
+        $saved = saveEmployeeToDb($pdo, $body, $actor);
+        http_response_code(201);
+        echo json_encode(['success' => true, 'data' => $saved]);
+        exit;
+    }
+}
+
+if (preg_match('#^/(?:employees|employee)/([^/]+)/?$#', $cleanPath, $matches)) {
+    $empId = urldecode($matches[1]);
+    if (!in_array($empId, ['import', 'documents'], true)) {
+        $pdo = getDbConnection($dbConfig);
+        ensureRequiredTables($pdo);
+        if ($method === 'PUT') {
+            $actor = requireAdminOrHrUserPhp($pdo);
+            $body['id'] = $empId;
+            $saved = saveEmployeeToDb($pdo, $body, $actor);
+            http_response_code(200);
+            echo json_encode(['success' => true, 'data' => $saved]);
+            exit;
+        }
+        if ($method === 'DELETE') {
+            $actor = requireAdminOrHrUserPhp($pdo);
+            deleteItemFromDb($pdo, 'employees', $empId, $actor);
+            http_response_code(200);
+            echo json_encode(['success' => true, 'message' => 'Employee deleted from MySQL.']);
+            exit;
+        }
+    }
+}
+
+if ($method === 'POST' && in_array($cleanPath, ['/admin/create-employee-account', '/admin/create-user'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+    $actor = requireAdminOrHrUserPhp($pdo);
+    $email = strtolower(trim((string)($body['email'] ?? '')));
+    $password = trim((string)($body['password'] ?? ''));
+    if (empty($email) || strpos($email, '@') === false || strlen($password) < 6) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Valid email and password (min 6 chars) are required.']);
+        exit;
+    }
+    $cleanName = trim((string)($body['displayName'] ?? explode('@', $email)[0] ?: 'Solar Employee'));
+    $cleanRole = $body['systemRole'] ?? 'Site Survey Engineer';
+    $cleanCode = !empty($body['employeeCode']) ? trim((string)$body['employeeCode']) : ('EMP-' . rand(100, 999));
+    $uid = 'usr-' . (!empty($body['employeeCode']) ? preg_replace('/[^a-z0-9_-]/', '', strtolower((string)$body['employeeCode'])) : round(microtime(true) * 1000));
+    $savedUser = saveUserToDb($pdo, [
+        'id' => $uid,
+        'name' => $cleanName,
+        'email' => $email,
+        'password' => $password,
+        'role' => $cleanRole,
+        'employee_id' => $cleanCode,
+        'phone' => $body['phone'] ?? '',
+        'department' => $body['department'] ?? 'Operations',
+        'designation' => $body['designation'] ?? $cleanRole,
+        'status' => 'ACTIVE'
+    ], false, $actor);
+    http_response_code(201);
+    echo json_encode(['success' => true, 'uid' => $savedUser['id'] ?? $uid, 'message' => 'Account provisioned and securely saved to MySQL.']);
+    exit;
+}
+
+if ($method === 'POST' && in_array($cleanPath, ['/admin/update-employee-account', '/admin/update-user'])) {
+    $pdo = getDbConnection($dbConfig);
+    ensureRequiredTables($pdo);
+    $actor = requireAdminOrHrUserPhp($pdo);
+    $uid = trim((string)($body['uid'] ?? ''));
+    if (empty($uid)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Employee Auth UID is required.']);
+        exit;
+    }
+    $updates = ['id' => $uid];
+    if (!empty($body['password']) && strlen(trim((string)$body['password'])) >= 6) {
+        $updates['password'] = trim((string)$body['password']);
+    }
+    if (isset($body['disabled']) && is_bool($body['disabled'])) {
+        $updates['status'] = $body['disabled'] ? 'DISABLED' : 'ACTIVE';
+    }
+    if (!empty($body['displayName'] ?? $body['name'])) $updates['name'] = trim((string)($body['displayName'] ?? $body['name']));
+    if (!empty($body['systemRole'] ?? $body['role'])) $updates['role'] = $body['systemRole'] ?? $body['role'];
+    try {
+        saveUserToDb($pdo, $updates, true, $actor);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'uid' => $uid, 'message' => 'Account updated successfully in MySQL.']);
+    } catch (Exception $e) {
+        http_response_code($e->getCode() === 404 ? 404 : 400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
     exit;
 }
 
@@ -3253,10 +3637,11 @@ if ($method === 'POST' && in_array($cleanPath, ['/leads/import', '/leads/import/
     exit;
 }
 
-// POST /api/employees/import - Batch Employee Import to MySQL
+// POST /api/employees/import - Batch Employee Import to MySQL (Protected)
 if ($method === 'POST' && in_array($cleanPath, ['/employees/import', '/employees/import/'])) {
     $pdo = getDbConnection($dbConfig);
     ensureRequiredTables($pdo);
+    $actor = requireAdminOrHrUserPhp($pdo);
 
     $employees = $body['employees'] ?? ($body['rows'] ?? (is_array($body) && isset($body[0]) ? $body : []));
     if (!is_array($employees) || empty($employees)) {
@@ -3354,11 +3739,14 @@ if ($method === 'POST' && in_array($cleanPath, ['/employees/import', '/employees
                 $loginEnabled, $role
             ]);
 
-            if ($loginEnabled && !empty($email)) {
+            if ($loginEnabled && !empty($email) && !in_array($status, ['INACTIVE', 'DISABLED', 'TERMINATED'], true)) {
                 $userId = 'usr-' . $empId;
                 $rawImpPass = trim($raw['password'] ?? '') ?: ('Emp@' . substr(bin2hex(random_bytes(3)), 0, 6));
                 $pwdHash = password_hash($rawImpPass, PASSWORD_BCRYPT);
                 $userStmt->execute([$userId, $name, $email, $pwdHash, $role, $phoneRaw, $dept, $desig, $empCode]);
+                $acctType = in_array($role, ['Admin', 'Super Admin'], true) ? 'ADMIN' : 'EMPLOYEE';
+                syncAuthCredentialPhp($pdo, $userId, $email, $pwdHash, $role, $acctType, $empId, 'ACTIVE');
+                logSolarUsersAuditPhp('INSERT', 'POST /employees/import', $userId, $email, $actor);
             }
 
             $codeMap[$empCode] = $name;
@@ -4191,10 +4579,11 @@ if ($method === 'POST' && in_array($cleanPath, ['/service-tickets/import', '/ser
     exit;
 }
 
-// POST /api/sync/push - Real-Time MySQL Synchronization Across All Collections
+// POST /api/sync/push - Real-Time MySQL Synchronization Across All Collections (Protected + RBAC)
 if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
     $pdo = getDbConnection($dbConfig);
     ensureRequiredTables($pdo);
+    $actor = requireAuthUserPhp($pdo);
 
     $collection = $body['collection'] ?? '';
     $item = $body['item'] ?? $body['payload'] ?? null;
@@ -4207,6 +4596,30 @@ if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
         exit;
     }
 
+    $normCol = strtolower(trim((string)$collection));
+    $actorRole = $actor['role'] ?? '';
+    $isCustomer = (strtoupper((string)($actor['accountType'] ?? '')) === 'CUSTOMER') || in_array(strtolower($actorRole), ['customer', 'client'], true);
+
+    if ($isCustomer) {
+        if (!in_array($normCol, ['service_tickets', 'solar_service_tickets', 'notifications', 'solar_notifications'], true)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Forbidden: Customers have read-only access to project stages, progress, and system data.']);
+            exit;
+        }
+    } elseif (in_array($normCol, ['users', 'solar_users', 'acl_config', 'solar_acl_config', 'settings', 'solar_system_settings'], true)) {
+        if (!in_array($actorRole, ['Admin', 'Super Admin'], true)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Forbidden: Only Administrators can modify users, permissions, or system settings.']);
+            exit;
+        }
+    } elseif (in_array($normCol, ['employees', 'employee', 'solar_employees', 'solar_employee'], true)) {
+        if (!in_array($actorRole, ['Admin', 'Super Admin', 'HR Manager'], true)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Forbidden: Only Administrators or HR Managers can modify employee directory records.']);
+            exit;
+        }
+    }
+
     // For singleton stores like settings and acl_config
     if (!$item && ($collection === 'settings' || $collection === 'acl_config')) {
         $item = $items ?? ($body['settings'] ?? ($body['config'] ?? $body));
@@ -4216,7 +4629,7 @@ if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
         // Handle delete
         $deleteId = $item['id'] ?? ($body['id'] ?? (is_string($item) ? $item : null));
         if ($deleteId && $action === 'delete') {
-            deleteItemFromDb($pdo, $collection, $deleteId);
+            deleteItemFromDb($pdo, $collection, $deleteId, $actor);
             http_response_code(200);
             echo json_encode(['success' => true, 'message' => "Deleted record $deleteId from $collection in MySQL"]);
             exit;
@@ -4224,7 +4637,7 @@ if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
 
         // Handle single item save
         if ($item) {
-            $saved = saveItemToDb($pdo, $collection, $item);
+            $saved = saveItemToDb($pdo, $collection, $item, $actor);
             http_response_code(200);
             echo json_encode(['success' => true, 'data' => $saved, 'message' => "Saved to $collection in MySQL"]);
             exit;
@@ -4235,7 +4648,7 @@ if ($method === 'POST' && in_array($cleanPath, ['/sync/push', '/sync/push/'])) {
             $pdo->beginTransaction();
             foreach ($items as $it) {
                 if ($it && (!empty($it['id']) || $collection === 'settings' || $collection === 'acl_config')) {
-                    saveItemToDb($pdo, $collection, $it);
+                    saveItemToDb($pdo, $collection, $it, $actor);
                 }
             }
             $pdo->commit();

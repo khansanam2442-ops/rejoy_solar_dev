@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { storageService } from '../../services/storage';
+import { apiClient } from '../../services/apiClient';
 import { UserRole, Employee } from '../../types/solar';
 import {
   SystemAclConfig,
@@ -287,29 +288,33 @@ export const RoleBasedAccessControlPanel: React.FC = () => {
     showToast(`Switched active session to test as "${roleToTest}"`, 'info');
   };
 
-  // Reassign an employee's role in the Users tab
-  const handleEmployeeRoleChange = (empId: string, newRole: UserRole) => {
-    const updated = employees.map(emp => {
-      if (emp.id === empId) {
-        return {
-          ...emp,
-          assignedRole: newRole,
-          designation: newRole
-        };
-      }
-      return emp;
-    });
+  // Reassign an employee's role in the Users tab (single-record MySQL update, never bulk array push)
+  const handleEmployeeRoleChange = async (empId: string, newRole: UserRole) => {
+    const target = employees.find(emp => emp.id === empId);
+    if (!target) return;
 
-    setEmployees(updated);
-    storageService.saveEmployees(updated);
-    storageService.addAclAuditLog({
-      changedBy: currentUser?.name || 'Administrator',
-      targetRole: newRole,
-      action: 'REASSIGN_USER',
-      summary: `Assigned role ${newRole} to employee ${empId}`
-    });
-    setAuditLogs(storageService.getAclAuditLogs());
-    showToast(`Updated employee operational role to ${newRole}`, 'success');
+    const updatedTarget: Employee = {
+      ...target,
+      assignedRole: newRole,
+      systemRole: newRole,
+      designation: newRole
+    };
+
+    try {
+      await apiClient.saveEmployee(updatedTarget);
+      await storageService.hydrateFromBackend();
+      setEmployees(storageService.getEmployees());
+      storageService.addAclAuditLog({
+        changedBy: currentUser?.name || 'Administrator',
+        targetRole: newRole,
+        action: 'REASSIGN_USER',
+        summary: `Assigned role ${newRole} to employee ${empId}`
+      });
+      setAuditLogs(storageService.getAclAuditLogs());
+      showToast(`Updated employee operational role to ${newRole}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to update employee role in MySQL', 'error');
+    }
   };
 
   // Export ACL config as JSON

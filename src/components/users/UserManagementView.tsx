@@ -18,7 +18,9 @@ import {
   RefreshCw,
   X,
   KeyRound,
-  Lock
+  Lock,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface EmployeeFormData {
@@ -119,6 +121,10 @@ export const UserManagementView: React.FC = () => {
   const [resetModalUser, setResetModalUser] = useState<Employee | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  // Delete User Confirmation states
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<Employee | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   // Available employee roles (excludes Customer role)
   const employeeRoleDefinitions = useMemo(() => {
@@ -261,7 +267,7 @@ export const UserManagementView: React.FC = () => {
         login_enabled: !isCurrentlyActive ? 1 : 0
       });
       await storageService.hydrateFromBackend();
-      setEmployees(storageService.getEmployees());
+      setEmployees(loadMergedPersonnel());
       triggerRefresh();
       showToast(
         `Employee ${emp.name} account ${isCurrentlyActive ? 'deactivated' : 'activated'} successfully in MySQL`,
@@ -337,6 +343,24 @@ export const UserManagementView: React.FC = () => {
       showToast(err.message || 'Failed to update password in database', 'error');
     } finally {
       setIsResettingPassword(false);
+    }
+  };
+
+  // Delete User permanently from MySQL across coupled tables
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteConfirmUser) return;
+    setIsDeletingUser(true);
+    try {
+      await apiClient.deleteUser(deleteConfirmUser.id);
+      await storageService.hydrateFromBackend();
+      setEmployees(loadMergedPersonnel());
+      triggerRefresh();
+      showToast(`User ${deleteConfirmUser.name} permanently deleted from MySQL.`, 'success');
+      setDeleteConfirmUser(null);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete user from MySQL.', 'error');
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
@@ -443,7 +467,7 @@ export const UserManagementView: React.FC = () => {
             await apiClient.updateUserPassword(editingEmployee.id, formData.tempPassword.trim());
           }
           await storageService.hydrateFromBackend();
-          setEmployees(storageService.getEmployees());
+          setEmployees(loadMergedPersonnel());
           showToast(`Employee ${cleanName} updated successfully in MySQL`, 'success');
         } catch (err: any) {
           console.error('[UserManagement] API updateUser error:', err);
@@ -477,7 +501,7 @@ export const UserManagementView: React.FC = () => {
           login_enabled: formData.loginEnabled ? 1 : 0
         });
         await storageService.hydrateFromBackend();
-        setEmployees(storageService.getEmployees());
+        setEmployees(loadMergedPersonnel());
         showToast(`Employee ${cleanName} created and saved to MySQL successfully`, 'success');
       } catch (err: any) {
         console.error('[UserManagement] API saveUser error:', err);
@@ -788,6 +812,25 @@ export const UserManagementView: React.FC = () => {
                               <CheckCircle2 className="w-4 h-4" />
                             )}
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmUser(emp)}
+                            disabled={isRootAdmin || emp.id === currentUser?.id}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              isRootAdmin || emp.id === currentUser?.id
+                                ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                            }`}
+                            title={
+                              emp.id === currentUser?.id
+                                ? 'Cannot delete currently signed-in account'
+                                : isRootAdmin
+                                ? 'Primary Root Admin cannot be deleted'
+                                : 'Permanently Delete User from MySQL'
+                            }
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1096,6 +1139,44 @@ export const UserManagementView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {deleteConfirmUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900">Permanently Delete User?</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  This removes <span className="font-bold text-slate-800">{deleteConfirmUser.name}</span> ({deleteConfirmUser.email}) from MySQL user, credential, session, and employee tables. They will no longer be able to log in or reappear.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmUser(null)}
+                disabled={isDeletingUser}
+                className="px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteUser}
+                disabled={isDeletingUser}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingUser ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
           </div>
         </div>
       )}

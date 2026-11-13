@@ -266,7 +266,6 @@ export const HrmsView: React.FC = () => {
       const effectiveEmp = (saved && saved.id) ? { ...emp, ...saved } : emp;
 
       // 2. Refresh local store from committed MySQL state
-      storageService.saveEmployee(effectiveEmp);
       await storageService.hydrateFromBackend();
 
       const loginMsg = effectiveEmp.loginEnabled

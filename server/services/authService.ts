@@ -197,12 +197,28 @@ export class AuthService {
         if (Array.isArray(employees)) {
           for (const emp of employees) {
             if (!emp.email) continue;
+            // Respect login_enabled and disabled statuses — never auto-provision credentials for disabled or login-disabled employees
+            const isLoginDisabled = emp.login_enabled === 0 || emp.login_enabled === false || emp.status === 'INACTIVE' || emp.status === 'TERMINATED' || emp.account_status === 'DISABLED';
+            if (isLoginDisabled && !emp.password) continue;
+
+            // Only migrate employee rows that explicitly have a password OR already have a corresponding solar_users record
+            let hasUserRow = false;
+            try {
+              const [uCheck]: any = await pool.query(
+                'SELECT id FROM `solar_users` WHERE `id` = ? OR `employee_id` = ? OR LOWER(`email`) = ? LIMIT 1',
+                [emp.id, emp.employee_code || emp.id, String(emp.email).trim().toLowerCase()]
+              );
+              hasUserRow = Array.isArray(uCheck) && uCheck.length > 0;
+            } catch {}
+
+            if (!emp.password && !hasUserRow) continue;
+
             const email = String(emp.email).trim().toLowerCase();
             // Do not overwrite or assign a weak static password; generate unguessable random secret if employee row lacks password
             const rawEmpPass = emp.password ? String(emp.password) : `${emp.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             const role = emp.system_role || emp.assigned_role || emp.designation || 'Technician';
             const accountType: AccountType = (role === 'Admin' || role === 'Super Admin') ? 'ADMIN' : 'EMPLOYEE';
-            const status = (emp.status === 'INACTIVE' || emp.account_status === 'DISABLED' || emp.login_enabled === 0) ? 'DISABLED' : 'ACTIVE';
+            const status = isLoginDisabled ? 'DISABLED' : 'ACTIVE';
             const passwordHash = await this.hashPassword(rawEmpPass);
 
             await pool.query(`

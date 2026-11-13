@@ -1,4 +1,5 @@
 import { UserRole } from '../types/solar';
+import { apiClient } from './apiClient';
 
 export interface ProvisionAccountParams {
   email: string;
@@ -27,9 +28,9 @@ export async function provisionEmployeeAccount(
     throw new Error('Password must be at least 6 characters long.');
   }
 
-  // 1. Try server-side endpoint if available
+  // 1. Try authenticated server-side endpoint
   try {
-    const res = await fetch('/api/admin/create-employee-account', {
+    const res = await apiClient.request(`${apiClient.getBaseUrl()}/admin/create-employee-account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -77,7 +78,7 @@ export async function updateEmployeeAccount(params: {
   }
 
   try {
-    const res = await fetch('/api/admin/update-employee-account', {
+    const res = await apiClient.request(`${apiClient.getBaseUrl()}/admin/update-employee-account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
